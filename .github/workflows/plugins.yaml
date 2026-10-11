@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       providers: ${{ steps.select.outputs.providers }}
+      contract: ${{ steps.select.outputs.contract }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -120,3 +121,43 @@ jobs:
               "${binary[0]}" source test "$(dirname "$manifest")" --no-build
             fi
           done
+
+  generated-contract:
+    name: 🧩 Generated plugin against current Core
+    needs: changed
+    if: needs.changed.outputs.contract == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the current Core contract
+        run: cargo build --locked --bin memcastle
+      - uses: actions/checkout@v4
+        with:
+          repository: memcastle/memcastle-plugin.tpl
+          path: templates/memcastle-plugin.tpl
+      - uses: actions/checkout@v4
+        with:
+          repository: memcastle/memcastle-source.tpl
+          ref: 5f2a8350bd82c49ec2370d70c83019ff6fc5a822
+          path: templates/memcastle-source.tpl
+      - uses: actions/checkout@v4
+        with:
+          repository: memcastle/memcastle-integration.tpl
+          ref: 04cc8455f056485cb08298a4a0af82909d314fe9
+          path: templates/memcastle-integration.tpl
+      - name: Install GitTPL 0.14 for native composition
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download 0.14.0 --repo noirbizarre/git-tpl --pattern 'git-tpl_0.14.0_linux-amd64.tar.gz' --dir "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/git-tpl_0.14.0_linux-amd64.tar.gz" -C "$RUNNER_TEMP" ./git-tpl
+      - name: Build and install a generated multi-module plugin against this Core
+        working-directory: templates/memcastle-plugin.tpl
+        env:
+          GIT_TPL_BIN: ${{ runner.temp }}/git-tpl
+          MEMCASTLE_BIN: ${{ github.workspace }}/target/debug/memcastle
+        run: python3 scripts/check_composition.py --build
