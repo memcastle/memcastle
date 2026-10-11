@@ -92,9 +92,8 @@ test("a subagent's request is left alone, and a request with no session id still
 })
 
 test("the reminder does not depend on the wake-up: a failing one still leaves the reminder in place", async () => {
-  const { core, logs, request } = await coreWith({ wakeUp: { enabled: true, mode: "sync" }, timeoutMs: 50 })
-  // No daemon is reachable, so the wake-up fails and is reported, and the request must still get its reminder.
-  process.env.MEMCASTLE_PORT = "1"
+  // An explicit endpoint skips registry discovery, which could otherwise find the user's running daemon.
+  const { core, logs, request } = await coreWith({ wakeUp: { enabled: true, mode: "sync" }, timeoutMs: 50, endpoint: "http://127.0.0.1:1" })
   await core.sessionCreated("ses_1", "/work/castle")
   expect(await request("ses_1")).toEqual([SEARCH])
   expect(logs.some((entry) => entry.level === "warn")).toBe(true)
