@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
-use crate::domain::{Drawer, DrawerId, RoomId};
+use crate::domain::{Drawer, DrawerId, JobId, RoomId};
 use crate::error::Result;
 
 use super::SurrealStore;
@@ -37,6 +37,20 @@ pub(super) const DRAWER_COLUMNS: &str = "record::id(id) AS id, room, name, conte
 pub(super) const DRAWER_SEARCH_COLUMNS: &str = "record::id(id) AS id, room, name, content, content_hash, source, tags, \
      provenance, <string>valid_from AS valid_from, valid_to, supersedes, superseded_by, \
      <string>created_at AS created_at, <string>updated_at AS updated_at";
+
+/// Just the fields an audit needs; reading full content and vectors for every
+/// drawer makes a large palace's audit retain hundreds of MiB per run.
+#[derive(Debug, Deserialize)]
+pub struct AuditDrawer {
+    /// Stable key for the next page and for orphan findings.
+    pub id: DrawerId,
+    /// Parent room, used to detect orphan drawers and wing membership.
+    pub room: RoomId,
+    /// The producing job, if any, used to detect dangling provenance.
+    pub job_id: Option<JobId>,
+    /// Whether an embedding is absent, without transferring its 768 floats.
+    pub missing_embedding: bool,
+}
 
 /// The statement that writes one drawer, binding the names [`bind_drawer`] sets.
 const CREATE_DRAWER: &str = "CREATE type::record('drawer', $id) SET \
@@ -86,6 +100,31 @@ fn bind_drawer<'r>(
 }
 
 impl SurrealStore {
+    /// A bounded page of audit metadata in record-id order. The primary key
+    /// cursor avoids an offset scan and cannot repeat rows when a page is full.
+    pub async fn list_audit_drawers_page(
+        &self,
+        after: Option<DrawerId>,
+        limit: u32,
+    ) -> Result<Vec<AuditDrawer>> {
+        const COLUMNS: &str = "record::id(id) AS id, room, provenance.job_id AS job_id, \
+            embedding = NONE AS missing_embedding";
+        let query = match after {
+            Some(after) => self
+                .db
+                .query(format!(
+                    "SELECT {COLUMNS} FROM drawer WHERE id > type::record('drawer', $after) \
+                     ORDER BY id ASC LIMIT $limit"
+                ))
+                .bind(("after", after.to_string())),
+            None => self.db.query(format!(
+                "SELECT {COLUMNS} FROM drawer ORDER BY id ASC LIMIT $limit"
+            )),
+        };
+        let mut response = query.bind(("limit", limit)).await?;
+        super::take_rows(&mut response, 0)
+    }
+
     /// Persist a new drawer. Drawers are never updated in place (`content`
     /// is immutable — see [`Drawer`]'s doc comment), so this is always a
     /// fresh `CREATE`, never an upsert.
@@ -540,7 +579,7 @@ impl SurrealStore {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use crate::domain::{DrawerId, Provenance, Source, SourceKind};
+    use crate::domain::{DrawerId, EMBEDDING_DIMENSION, JobId, Provenance, Source, SourceKind};
 
     use super::*;
 
@@ -561,6 +600,50 @@ mod tests {
                 job_id: None,
             },
         )
+    }
+
+    #[tokio::test]
+    async fn audit_pages_advance_by_id_and_project_only_the_fields_a_scan_needs() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let wing = store.get_or_create_wing("w", None).await.unwrap();
+        let room = store.get_or_create_room(wing.id, "r", None).await.unwrap();
+        let job_id = JobId::new();
+        let mut drawers = Vec::new();
+        for index in 0..3 {
+            let mut entry = drawer(
+                room.id,
+                format!("large content {index} {}", "x".repeat(8000)),
+            );
+            if index == 1 {
+                entry.provenance.job_id = Some(job_id);
+                let mut embedding = vec![0.0; EMBEDDING_DIMENSION];
+                embedding[0] = 1.0;
+                entry.embedding = Some(embedding);
+            }
+            store.create_drawer(&entry).await.unwrap();
+            drawers.push(entry);
+        }
+        let first = store.list_audit_drawers_page(None, 2).await.unwrap();
+        let second = store
+            .list_audit_drawers_page(Some(first[1].id), 2)
+            .await
+            .unwrap();
+        assert_eq!((first.len(), second.len()), (2, 1));
+        let mut ids = Vec::new();
+        for entry in first.into_iter().chain(second) {
+            assert_eq!(entry.room, room.id);
+            let original = drawers.iter().find(|drawer| drawer.id == entry.id).unwrap();
+            assert_eq!(entry.job_id, original.provenance.job_id);
+            assert_eq!(entry.missing_embedding, original.embedding.is_none());
+            ids.push(entry.id);
+        }
+        ids.sort_by_key(ToString::to_string);
+        let mut expected: Vec<_> = drawers.iter().map(|drawer| drawer.id).collect();
+        expected.sort_by_key(ToString::to_string);
+        assert_eq!(
+            ids, expected,
+            "a full page must neither repeat nor skip a row"
+        );
     }
 
     /// The full-text and vector indexes on `drawer` are maintained by a

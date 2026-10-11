@@ -446,7 +446,8 @@ A handler (`jobs::demo`, `mining::run`) is a loop over discrete units of work (s
 that checks `JobContext::should_pause` and `is_cancelled` between units,
 persists a `checkpoint` before stopping, and returns; the scheduler transitions the status afterwards.
 Resuming re-reads the checkpoint and continues from there, not from zero.
-`Audit` and `Repair` honour both too (audit checks between wings, after the job scan and every 500 drawers;
+`Audit` and `Repair` honour both too (audit reads only IDs, room, provenance and embedding presence in
+256-drawer pages, checking between wings, after the job scan and between pages;
 an applied repair checks before each delete).
 Neither keeps a checkpoint, so a paused or shutdown-interrupted one restarts from scratch when resumed.
 That is safe: an audit only reads, and a repair recomputes the live orphan set.

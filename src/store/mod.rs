@@ -77,6 +77,7 @@ use surrealdb::opt::auth::Root;
 use crate::domain::Secret;
 use crate::error::{Error, Result};
 
+pub use drawers::AuditDrawer;
 pub use duplicates::{DrawerCandidate, SimilarDrawer, SimilarSide};
 pub use resolution::{PossibleEntity, PossibleSide};
 pub use retrieval::MatchMode;

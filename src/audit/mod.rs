@@ -24,12 +24,12 @@
 //!   palace with no embedding provider is a supported configuration, and with
 //!   one the backlog is exactly what the `Embed` job clears.
 //!
-//! Unlike `mining::run`/`checkpoint::run`, this handler does **not** chunk
-//! its work with a per-unit checkpoint: a full palace scan here is cheap
-//! (a handful of `SELECT`s, no external I/O) and idempotent, so there is no
-//! meaningful partial state to resume from. It does check for cancel and
-//! pause between wings, after the job scan and every [`CHECK_EVERY`]
-//! drawers, and returns `Paused` (with no result and an untouched
+//! Unlike `mining::run`/`checkpoint::run`, this handler does **not** keep a
+//! durable per-unit checkpoint: a scan is idempotent, so there is no
+//! meaningful partial state to resume from. It pages over narrow drawer
+//! metadata instead of loading the entire palace's content and embeddings.
+//! It checks for cancel and pause between wings, after the job scan and every page,
+//! and returns `Paused` (with no result and an untouched
 //! checkpoint) — so a user's pause is honoured, and a daemon shutdown, which
 //! interrupts jobs the same way, does not wait out its drain timeout for an
 //! audit. A resumed audit simply starts over, which is safe because it only
@@ -99,10 +99,8 @@ pub struct AuditReport {
     pub generated_at: DateTime<Utc>,
 }
 
-/// How many drawers the scan looks at between checks for cancel or pause: a
-/// palace can hold many thousands, and the check is a pair of atomic loads,
-/// so this only bounds how long a stop request waits.
-const CHECK_EVERY: usize = 500;
+/// Bounds both one database response and how long a stop waits between pages.
+const PAGE_SIZE: u32 = 256;
 
 /// What an `Audit` job needs, gathered from its [`crate::domain::JobKind`].
 pub struct AuditParams {
@@ -172,15 +170,27 @@ pub(crate) async fn find_orphan_drawers(store: &SurrealStore) -> Result<Vec<Orph
         }
     }
 
-    let drawers = store.list_drawers(None).await?;
-    Ok(drawers
-        .into_iter()
-        .filter(|drawer| !known_rooms.contains(&drawer.room))
-        .map(|drawer| OrphanDrawer {
-            drawer_id: drawer.id,
-            room: drawer.room,
-        })
-        .collect())
+    let mut orphans = Vec::new();
+    let mut after = None;
+    loop {
+        let page = store.list_audit_drawers_page(after, PAGE_SIZE).await?;
+        if page.is_empty() {
+            break;
+        }
+        after = page.last().map(|drawer| drawer.id);
+        for drawer in &page {
+            if !known_rooms.contains(&drawer.room) {
+                orphans.push(OrphanDrawer {
+                    drawer_id: drawer.id,
+                    room: drawer.room,
+                });
+            }
+        }
+        if page.len() < PAGE_SIZE as usize {
+            break;
+        }
+    }
+    Ok(orphans)
 }
 
 /// Build the report: one pass over wings/rooms (to know which rooms
@@ -233,54 +243,61 @@ async fn build_report(
     if let Some(stop) = ctx.stop_requested() {
         return Ok(Scan::Stopped(stop));
     }
-    let drawers = store.list_drawers(None).await?;
-
     let mut orphan_drawers = Vec::new();
     let mut dangling_provenance_drawers = Vec::new();
     let mut total_drawers_in_scope = 0u64;
     let mut drawers_without_embedding = 0u64;
 
-    for (index, drawer) in drawers.iter().enumerate() {
-        if index % CHECK_EVERY == 0
-            && let Some(stop) = ctx.stop_requested()
-        {
+    let mut after = None;
+    loop {
+        if let Some(stop) = ctx.stop_requested() {
             return Ok(Scan::Stopped(stop));
         }
-        let wing_of_drawer = room_wing.get(&drawer.room).copied();
-
-        if wing_of_drawer.is_none() {
-            orphan_drawers.push(OrphanDrawer {
-                drawer_id: drawer.id,
-                room: drawer.room,
-            });
+        let page = store.list_audit_drawers_page(after, PAGE_SIZE).await?;
+        if page.is_empty() {
+            break;
         }
+        after = page.last().map(|drawer| drawer.id);
+        for drawer in &page {
+            let wing_of_drawer = room_wing.get(&drawer.room).copied();
 
-        if let Some(job_id) = drawer.provenance.job_id
-            && !existing_job_ids.contains(&job_id)
-        {
-            dangling_provenance_drawers.push(DanglingProvenanceDrawer {
-                drawer_id: drawer.id,
-                job_id,
-            });
-        }
-
-        let in_scope = match wing_id {
-            // No wing requested: every drawer whose room resolves at all
-            // (an orphan belongs to no wing, so it can't be "in scope").
-            None => wing_of_drawer.is_some(),
-            // A wing was requested and it resolved to a real wing: only
-            // that wing's drawers count.
-            Some(Some(resolved)) => wing_of_drawer == Some(resolved),
-            // A wing was requested but no such wing exists: nothing is
-            // in scope, same as `list_drawers_matching`'s handling of a typo'd
-            // wing name — not an error, just an empty result.
-            Some(None) => false,
-        };
-        if in_scope {
-            total_drawers_in_scope += 1;
-            if drawer.embedding.is_none() {
-                drawers_without_embedding += 1;
+            if wing_of_drawer.is_none() {
+                orphan_drawers.push(OrphanDrawer {
+                    drawer_id: drawer.id,
+                    room: drawer.room,
+                });
             }
+
+            if let Some(job_id) = drawer.job_id
+                && !existing_job_ids.contains(&job_id)
+            {
+                dangling_provenance_drawers.push(DanglingProvenanceDrawer {
+                    drawer_id: drawer.id,
+                    job_id,
+                });
+            }
+
+            let in_scope = match wing_id {
+                // No wing requested: every drawer whose room resolves at all
+                // (an orphan belongs to no wing, so it can't be "in scope").
+                None => wing_of_drawer.is_some(),
+                // A wing was requested and it resolved to a real wing: only
+                // that wing's drawers count.
+                Some(Some(resolved)) => wing_of_drawer == Some(resolved),
+                // A wing was requested but no such wing exists: nothing is
+                // in scope, same as `list_drawers_matching`'s handling of a typo'd
+                // wing name — not an error, just an empty result.
+                Some(None) => false,
+            };
+            if in_scope {
+                total_drawers_in_scope += 1;
+                if drawer.missing_embedding {
+                    drawers_without_embedding += 1;
+                }
+            }
+        }
+        if page.len() < PAGE_SIZE as usize {
+            break;
         }
     }
 
@@ -340,6 +357,43 @@ mod tests {
         assert_eq!(report.running_jobs, 0);
         assert_eq!(report.drawers_without_embedding, 0);
         assert_eq!(report.total_drawers_in_scope, 0);
+    }
+
+    #[tokio::test]
+    async fn an_audit_counts_drawers_on_both_sides_of_a_full_page() {
+        let store = memory_store().await;
+        let wing = store.get_or_create_wing("project-x", None).await.unwrap();
+        let room = store
+            .get_or_create_room(wing.id, "entries", None)
+            .await
+            .unwrap();
+        for index in 0..=PAGE_SIZE {
+            let drawer = Drawer::new(
+                DrawerId::new(),
+                room.id,
+                format!("audit page entry {index}"),
+                Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: None,
+                    origin: None,
+                },
+                vec![],
+                Provenance {
+                    requested_by: "test".into(),
+                    job_id: None,
+                },
+            );
+            store.create_drawer(&drawer).await.unwrap();
+        }
+        let mut job = audit_job(None);
+        let ctx = ctx_for(&store, &job, JobControl::default());
+        run(&ctx, &mut job, AuditParams { wing: None })
+            .await
+            .unwrap();
+        let report = report_of(&job);
+        assert_eq!(report.total_drawers_in_scope, u64::from(PAGE_SIZE) + 1);
+        assert_eq!(report.drawers_without_embedding, u64::from(PAGE_SIZE) + 1);
     }
 
     /// The issue's required test: a drawer created directly through the
