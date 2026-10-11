@@ -19,6 +19,12 @@ class ChangeSelectionTests(unittest.TestCase):
         self.assertEqual(changed.select(["src/plugin/manifest.rs"], ["claude", "openai"]), ["claude", "openai"])
         self.assertEqual(changed.select(["src/app/plugins.rs"], ["claude", "openai"]), ["claude", "openai"])
 
+    def test_current_core_archive_check_runs_only_for_contract_changes(self):
+        self.assertTrue(changed.changes_contract("wit/memcastle-source.wit"))
+        self.assertTrue(changed.changes_contract("src/app/plugins.rs"))
+        self.assertFalse(changed.changes_contract("plugins/openai/plugin.toml"))
+        self.assertFalse(changed.changes_contract("docs/plugins.md"))
+
 
 if __name__ == "__main__":
     unittest.main()

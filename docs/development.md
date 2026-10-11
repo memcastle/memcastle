@@ -1,10 +1,23 @@
 # Development
 
 Provider-plugin authoring uses the [three GitTPL repositories](plugins.md) directly.
-The parent template composes branch-tracked source and integration module templates, including an initially empty plugin.
+The parent template composes commit-pinned source and integration module templates, including an initially empty plugin.
 Each generated provider has its own manifest, tests, packaging script and CI/release workflow;
 the in-tree `plugins/<provider>/` layout uses the same script and separate provider-scoped workflows.
 Move that project to a standalone repository without changing the stable plugin and module IDs.
+
+## Working on a standalone provider
+
+Use the generated provider project's own `scripts/package.py` and `scripts/check_modules.py` to build and check only its
+declared modules; run its `python3 -m unittest discover -s tests` for parent and module manifest agreement.
+Package first, then review and commit the updated `plugin.toml` hashes and each source module's `Cargo.lock`.
+To test a Core change across repositories, build a Core binary in that checkout and run
+`MEMCASTLE_BIN=/absolute/path/to/memcastle python3 scripts/smoke_install.py` in the generated project.
+The smoke test uses a disposable palace and agent directory and validates preview, consent, install and separate module
+activation; it never uses a user's installed plugin or agent configuration.
+Provider CI checks sources against the latest stable Core; current-Core plugin-contract CI also composes and installs a
+generated project. This split matters while stable Core 0.4.1 predates the plugin installation command.
+See [Plugin packages](plugins.md#standalone-development-and-compatibility) for the compatibility and release policy.
 
 ## Prerequisites
 

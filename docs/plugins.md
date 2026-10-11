@@ -110,14 +110,16 @@ to allow the child-template clones.
 To scaffold only a module, invoke `memcastle-source.tpl` or `memcastle-integration.tpl` directly.
 For an existing provider project, edit its recorded `sources` or `integrations` array in
 `.config/git.tpl.toml`, then run `git tpl update --defaults --trust`, review `git tpl diff`, and run `git tpl merge`.
-The parent follows each child's `main` branch; `.config/git.tpl.toml` and the rendered ref record the exact commits for
-each rendering, so the current project stays reproducible even as the branch advances.
-Updating records a branch move even when the child files have not changed; the generated worktree changes only after
-`git tpl merge`.
-Changing the parent to a fixed child commit instead of `main` stops automatic child updates.
+The parent pins each child to a reviewed full commit in its `template.toml`; the corresponding template CI checks out
+those same commits, and `.config/git.tpl.toml` records the revisions used by each provider rendering.
+Update the child template and its tests first, advance both pins together with the parent composition test, then have
+provider authors review `git tpl diff --json` before `git tpl merge --json` to adopt the new scaffold.
+Changing a template does not change an existing plugin until its owner explicitly updates and merges its rendered ref.
 
 An in-tree provider project may live under `plugins/<provider>/` and publish its own `<id>-<version>.tar.gz` release
 without changing Core's version.
+The checked-in `plugins/example` project is an in-tree contract fixture run by Core's provider workflow;
+standalone providers use the workflows produced by the pinned parent template rather than copied example workflows.
 While several providers share the Core repository, each uses its own `plugin/<provider>/v<version>` tag;
 its reviewed catalogue entry lists the artifact URL and digest explicitly.
 A direct GitHub repository URL is for a standalone repository whose releases publish exactly one plugin ID;
@@ -130,3 +132,25 @@ Provider release workflows validate the selected manifest, locked source depende
 before publishing a versioned tag; standalone tags must point to reviewed commits on `main`.
 Moving the same project into a standalone repository keeps `plugin.id` and module IDs stable;
 update `plugin.repository` and the discovery catalogue through review before releasing from the new repository.
+
+## Standalone development and compatibility
+
+A provider repository has one `plugin.toml`, independent `modules/<id>/` implementations and fixtures, local packaging
+and tests under `scripts/` and `tests/`, and its own validation and release workflows in `.github/workflows/`.
+The parent manifest's `memcastle` semver range must match the source and integration manifests' Core requirements;
+source `contract` must also match its module manifest's versioned WIT contract.
+Module IDs stay stable across repository moves; module versions and the parent release version are separate.
+Keep the lower bound at the oldest Core actually supported and narrow the upper bound when a breaking Core contract
+requires it. Review contract and WIT changes against both generated modules before advertising a new range.
+
+From a generated provider checkout, run `python3 scripts/package.py`, `python3 scripts/check_modules.py`, and
+`python3 -m unittest discover -s tests`; commit the source `Cargo.lock` files and reviewed artifact hashes.
+Set `MEMCASTLE_BIN` to a Core binary with plugin support and run `python3 scripts/smoke_install.py` to preview and install
+the archive into a disposable palace, check installed-but-disabled sources, enable them and register integrations with an
+isolated test agent. The script does not use the user's palace or agent files.
+The provider's CI runs source fixture conformance against the latest stable released Core and also tests plugin install
+when that release supports it; Core's plugin-contract CI builds a generated project against the current Core binary.
+The latest stable Core 0.4.1 predates plugin installation, so source conformance and the current-Core install check are
+separate until a plugin-capable Core is released.
+For cross-repository development, set `MEMCASTLE_BIN` to a binary built in the Core worktree and run the same smoke check;
+neither normal provider CI nor its release workflow builds unrelated providers or Core from source.
