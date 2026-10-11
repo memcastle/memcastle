@@ -4,10 +4,10 @@
 // finds it through its real registry file, and sees its real errors.
 
 import { existsSync } from "node:fs"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { discoverDaemon } from "../../src/daemon.ts"
+import { discoverDaemon, registryPath } from "../../src/daemon.ts"
 import { SessionRegistry } from "../../src/registry.ts"
 import type { ModeLabel } from "../../src/modes.ts"
 import { type Settings, resolveSettings } from "../../src/settings.ts"
@@ -71,7 +71,7 @@ export class TestDaemon {
     const deadline = Date.now() + 60_000
     for (;;) {
       try {
-        await discoverDaemon(daemon.settings({ timeoutMs: 500 }), clientEnv)
+        await daemon.waitUntilRegistered(child)
         return daemon
       } catch (error) {
         if (child.exitCode !== null || Date.now() > deadline) {
@@ -108,13 +108,23 @@ export class TestDaemon {
     const deadline = Date.now() + 60_000
     for (;;) {
       try {
-        await discoverDaemon(this.settings({ timeoutMs: 500 }), this.clientEnv)
+        await this.waitUntilRegistered(this.process)
         return
       } catch (error) {
         if (this.process.exitCode !== null || Date.now() > deadline) throw new Error(`The daemon did not restart: ${String(error)}`)
         await Bun.sleep(100)
       }
     }
+  }
+
+  private async waitUntilRegistered(child: DaemonProcess): Promise<void> {
+    // A different daemon may be healthy at the configured fallback port before this one has started.
+    // Wait for this child's registry entry so tests cannot silently connect to another palace.
+    const file = await registryPath(this.palacePath, this.clientEnv)
+    const info: unknown = JSON.parse(await readFile(file, "utf8"))
+    if ((info as { pid?: unknown }).pid !== child.pid) throw new Error("waiting for this daemon's registry entry")
+    const endpoint = await discoverDaemon(this.settings({ timeoutMs: 500 }), this.clientEnv)
+    if (endpoint.source !== "registry") throw new Error("waiting for the registered daemon to answer")
   }
 
   /** Ask the daemon to forget `session`'s MCP session while the client still believes it is open. */

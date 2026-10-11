@@ -1,0 +1,42 @@
+format = 1
+memcastle = ">=0.4, <0.6"
+
+[plugin]
+id = "example"
+version = "0.1.0"
+provider = "example"
+description = "A MemCastle provider plugin"
+repository = "https://github.com/memcastle/memcastle"
+license = "MIT"
+
+
+
+[[modules]]
+id = "files-one"
+type = "source"
+version = "0.1.0"
+manifest = "modules/files-one/memcastle-source.toml"
+manifest_sha256 = "b00ef9b5f618a10301846fad6471696cfd1a5d3d2e1adccb16d9f0f119273686"
+entry = "modules/files-one/source.wasm"
+sha256 = "54c0c25cf696af40f153ed033efbd2ae410230232d9623ba49b2c115294c6156"
+contract = "0.4.0"
+
+[[modules]]
+id = "files-two"
+type = "source"
+version = "0.1.0"
+manifest = "modules/files-two/memcastle-source.toml"
+manifest_sha256 = "53b899b4f53fd31486de5925df422e4b92ce6f13f3b1dff5ad57128473136056"
+entry = "modules/files-two/source.wasm"
+sha256 = "d23ba012717d1bdd52dd4caa69568dd451bda34f2175ee27475618a2fb0db720"
+contract = "0.4.0"
+
+
+[[modules]]
+id = "assistant"
+type = "integration"
+version = "0.1.0"
+manifest = "modules/assistant/memcastle-integration.toml"
+manifest_sha256 = "1a3cd6e7ad68bbccfd5dc493fd38e31350391ca48e2d8fbe6e017e3311ff4b66"
+entry = "modules/assistant/dist/index.js"
+sha256 = "9ff489499ecce085c78f5146f21f81fd8b8a2ab157a49529a4ac6bee2913548d"

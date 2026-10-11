@@ -4,6 +4,8 @@
 //! only difference is how the root is chosen, and that is [`crate::assets::Assets`]'s job: `--assets-dir` (or
 //! `MEMCASTLE_ASSETS_DIR`, or `assets.dir`), else the installed package, else nothing.
 
+use std::collections::HashSet;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -55,6 +57,144 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// Read integration modules from each *active* installed plugin, without contacting the daemon or a registry.
+    ///
+    /// The current pointer is reconstructed from the plugin ledger after a crash. Checking the archived bytes against
+    /// its generation digest and projected assets against those bytes prevents a changed integration from being run.
+    ///
+    /// # Errors
+    ///
+    /// A broken plugin installation is reported rather than silently offering its executable assets.
+    pub fn plugin_catalogs(plugins_dir: &Path) -> Result<Vec<Self>> {
+        let mut catalogs = Vec::new();
+        if plugins_dir.is_symlink() || plugins_dir.parent().is_some_and(Path::is_symlink) {
+            return Err(Error::PluginPackageInvalid {
+                message: format!(
+                    "plugin installation directory {} is a symlink",
+                    plugins_dir.display()
+                ),
+            });
+        }
+        if !plugins_dir.is_dir() {
+            return Ok(catalogs);
+        }
+        let entries = std::fs::read_dir(plugins_dir)
+            .map_err(|e| Error::io(plugins_dir.display().to_string(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| Error::io(plugins_dir.display().to_string(), e))?;
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if !crate::domain::is_valid_source_name(&id)
+                || !entry.path().is_dir()
+                || entry.path().is_symlink()
+            {
+                continue;
+            }
+            let pointer = entry.path().join("current");
+            if !pointer.is_file() || pointer.is_symlink() {
+                continue;
+            }
+            let mut current = std::fs::File::open(&pointer)
+                .map_err(|e| Error::io(pointer.display().to_string(), e))?;
+            let mut generation = String::new();
+            std::io::Read::take(&mut current, 65)
+                .read_to_string(&mut generation)
+                .map_err(|e| Error::io(pointer.display().to_string(), e))?;
+            if generation.len() != 64
+                || !generation
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!(
+                        "{} does not name a valid plugin generation",
+                        pointer.display()
+                    ),
+                });
+            }
+            let root = entry.path().join(&generation);
+            if root.is_symlink() {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!("plugin `{id}` generation is a symlink"),
+                });
+            }
+            let archive_path = root.join("package.tar.gz");
+            let metadata = std::fs::symlink_metadata(&archive_path)
+                .map_err(|e| Error::io(archive_path.display().to_string(), e))?;
+            if !metadata.is_file()
+                || metadata.len() > crate::plugin::package::MAX_ARCHIVE_BYTES as u64
+            {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!(
+                        "{} is not a bounded regular archive",
+                        archive_path.display()
+                    ),
+                });
+            }
+            let archive = std::fs::read(&archive_path)
+                .map_err(|e| Error::io(archive_path.display().to_string(), e))?;
+            if crate::domain::sha256_hex(&archive) != generation {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!("plugin `{id}` archive digest no longer matches its install"),
+                });
+            }
+            let package = crate::plugin::package::unpack(&archive)?;
+            if package.manifest.plugin.id != id {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!("plugin directory `{id}` holds a different package"),
+                });
+            }
+            // Shared skills live at the generation root rather than under a module projection. Check their
+            // bytes and every ancestor before giving a local installer a path it might otherwise follow.
+            for (name, bytes) in package
+                .files
+                .iter()
+                .filter(|(name, _)| name.starts_with("skills/"))
+            {
+                verify_plugin_file(&root, name, bytes)?;
+            }
+            let mut projected_files = HashSet::new();
+            for module in package
+                .manifest
+                .modules
+                .iter()
+                .filter(|module| module.kind == crate::domain::PluginModuleKind::Integration)
+            {
+                let prefix = format!("modules/{}/", module.id);
+                for (name, bytes) in package
+                    .files
+                    .iter()
+                    .filter(|(name, _)| name.starts_with(&prefix))
+                {
+                    let relative = name.strip_prefix(&prefix).expect("prefix matched");
+                    let projected = format!("integrations/{}/{relative}", module.id);
+                    verify_plugin_file(&root, &projected, bytes)?;
+                    projected_files.insert(root.join(projected));
+                }
+            }
+            if !projected_files.is_empty() {
+                reject_extra_plugin_files(&root.join("integrations"), &projected_files)?;
+            }
+            let catalog = Self::read(root.clone(), AssetSource::Installed(root))?;
+            for shipped in &catalog.integrations {
+                if !package.manifest.modules.iter().any(|module| {
+                    module.kind == crate::domain::PluginModuleKind::Integration
+                        && module.id == shipped.id()
+                }) {
+                    return Err(Error::PluginPackageInvalid {
+                        message: format!(
+                            "plugin `{id}` carries an undeclared integration `{}`",
+                            shipped.id()
+                        ),
+                    });
+                }
+            }
+            if !catalog.integrations.is_empty() || !catalog.broken.is_empty() {
+                catalogs.push(catalog);
+            }
+        }
+        catalogs.sort_by(|left, right| left.root.cmp(&right.root));
+        Ok(catalogs)
+    }
     /// Open the catalog: `override_dir`, else the installed package found by `search`.
     ///
     /// The search is passed in so tests cover every layout without depending on where the test binary lives; the
@@ -187,9 +327,77 @@ impl Catalog {
     }
 }
 
+fn verify_plugin_file(root: &Path, relative: &str, expected: &[u8]) -> Result<()> {
+    let mut path = root.to_path_buf();
+    for part in relative.split('/') {
+        path.push(part);
+        if path.is_symlink() {
+            return Err(Error::PluginPackageInvalid {
+                message: format!(
+                    "verified plugin asset {} was replaced by a symlink",
+                    path.display()
+                ),
+            });
+        }
+    }
+    if !std::fs::read(&path).is_ok_and(|actual| actual == expected) {
+        return Err(Error::PluginPackageInvalid {
+            message: format!(
+                "verified plugin asset {} no longer matches its archive",
+                path.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn reject_extra_plugin_files(dir: &Path, expected: &HashSet<PathBuf>) -> Result<()> {
+    let mut pending = vec![dir.to_path_buf()];
+    let mut visited = 0;
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .map_err(|e| Error::io(directory.display().to_string(), e))?
+        {
+            let entry = entry.map_err(|e| Error::io(directory.display().to_string(), e))?;
+            let path = entry.path();
+            let kind = entry
+                .file_type()
+                .map_err(|e| Error::io(path.display().to_string(), e))?;
+            visited += 1;
+            // A malicious collection of empty directories must not make a local integration listing unbounded.
+            if visited > crate::plugin::package::MAX_ARCHIVE_FILES * 16
+                || kind.is_symlink()
+                || (!kind.is_dir() && (!kind.is_file() || !expected.contains(&path)))
+            {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!("unverified plugin integration asset {}", path.display()),
+                });
+            }
+            if kind.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_local_plugin_catalogue_does_not_follow_a_redirected_installation_root() {
+        let root = tempfile::tempdir().unwrap();
+        let actual = root.path().join("real-plugins");
+        let alias = root.path().join("plugins");
+        std::fs::create_dir(&actual).unwrap();
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        assert!(matches!(
+            Catalog::plugin_catalogs(&alias),
+            Err(Error::PluginPackageInvalid { .. })
+        ));
+    }
 
     /// A manifest for `id`, valid unless an edit breaks it.
     pub(crate) fn manifest_text(id: &str) -> String {
