@@ -134,8 +134,7 @@ fn plugin_discovery_does_not_reinterpret_the_legacy_source_index() {
         module.id == "opencode" && module.kind == memcastle::domain::PluginModuleKind::Source
     }));
     assert!(opencode.modules.iter().any(|module| {
-        module.id == "opencode-integration"
-            && module.kind == memcastle::domain::PluginModuleKind::Integration
+        module.id == "opencode" && module.kind == memcastle::domain::PluginModuleKind::Integration
     }));
     assert!(memcastle::domain::SourceIndex::parse(&plugins).is_err());
     assert!(memcastle::domain::PluginIndex::parse(&legacy).is_err());

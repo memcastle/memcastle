@@ -122,7 +122,7 @@ pub(super) async fn install(
         Some(raw) => serde_json::from_slice(raw.as_bytes()).map_err(|error| {
             crate::Error::invalid_input(
                 "X-MemCastle-Consents",
-                format!("expected a JSON map of source IDs to digests: {error}"),
+                format!("expected a JSON map of module IDs to digests: {error}"),
             )
         })?,
         None => BTreeMap::new(),

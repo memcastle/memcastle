@@ -267,7 +267,6 @@ mod tests {
             shared_config_schema: None,
             authentication: None,
             modules: vec![PluginModule {
-                identity: None,
                 id: "assistant".into(),
                 kind: PluginModuleKind::Integration,
                 version: "0.1.0".into(),

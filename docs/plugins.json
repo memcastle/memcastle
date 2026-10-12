@@ -17,7 +17,7 @@
       "repository": "memcastle/memcastle-opencode",
       "modules": [
         { "id": "opencode", "type": "source" },
-        { "id": "opencode-integration", "type": "integration" }
+        { "id": "opencode", "type": "integration" }
       ]
     }
   ]

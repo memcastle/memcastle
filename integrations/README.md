@@ -82,7 +82,7 @@ memory mode is off.
 
 ## Per-ecosystem findings
 
-- [`memcastle-opencode` research](https://github.com/memcastle/memcastle-opencode/blob/main/modules/opencode-integration/docs/research.md)
+- [`memcastle-opencode` research](https://github.com/memcastle/memcastle-opencode/blob/main/modules/opencode/docs/research.md)
   maps OpenCode's plugin hooks, MCP client and skills onto
   MemCastle operations, and records where OpenCode has no clean equivalent.
 - [`claude-code/docs/research.md`](claude-code/docs/research.md) records Claude Code's supported declarative plugin API

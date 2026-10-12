@@ -14,7 +14,7 @@ There is no shared runtime, no abstract base class and no code that hides how Pi
 flowchart LR
     subgraph client["One per agent: lifecycle"]
         pi["memcastle-pi/modules/pi"]
-        oc["memcastle-opencode/modules/opencode-integration"]
+        oc["memcastle-opencode/modules/opencode"]
         cc["integrations/claude-code"]
     end
     skills["skills/: reusable agent instructions"]

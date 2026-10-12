@@ -119,7 +119,7 @@ fn stage_generation(
                         .any(|(name, bytes)| {
                             let projected = format!(
                                 "integrations/{}/{}",
-                                module.public_id(),
+                                module.id,
                                 name.strip_prefix(&prefix).expect("checked prefix")
                             );
                             !checked_file(&projected, bytes)
@@ -157,10 +157,7 @@ fn stage_generation(
             let prefix = format!("modules/{}/", module.id);
             for (name, bytes) in files.iter().filter(|(name, _)| name.starts_with(&prefix)) {
                 let relative = name.strip_prefix(&prefix).expect("checked prefix");
-                let target = staging
-                    .join("integrations")
-                    .join(module.public_id())
-                    .join(relative);
+                let target = staging.join("integrations").join(&module.id).join(relative);
                 if let Some(directory) = target.parent() {
                     std::fs::create_dir_all(directory)
                         .map_err(|e| Error::io(directory.display().to_string(), e))?;
@@ -540,13 +537,13 @@ impl AppServices {
             .modules
             .iter()
             .filter(|module| module.kind == PluginModuleKind::Source)
-            .map(|module| module.public_id().to_string())
+            .map(|module| module.id.clone())
             .collect();
         let module_names: Vec<String> = record
             .manifest
             .modules
             .iter()
-            .flat_map(crate::domain::PluginModule::owner_keys)
+            .map(|module| module.id.clone())
             .collect();
         for name in &source_names {
             if let Some(source) = self.store.get_source_package(name).await?
@@ -587,12 +584,12 @@ impl AppServices {
             .iter()
             .filter(|module| module.kind == PluginModuleKind::Integration)
         {
-            if agents.join(module.public_id()).exists() {
+            if agents.join(&module.id).exists() {
                 return Err(Error::PluginBlocked {
                     name: id.to_string(),
                     reason: format!(
                         "integration `{}` is installed for an agent; uninstall it first",
-                        module.public_id()
+                        module.id
                     ),
                 });
             }
@@ -692,23 +689,25 @@ impl AppServices {
             .flat_map(|old| &old.manifest.modules)
             .filter(|old| {
                 old.kind == PluginModuleKind::Source
-                    && !package.manifest.modules.iter().any(|current| {
-                        current.public_id() == old.public_id() && current.kind == old.kind
-                    })
+                    && !package
+                        .manifest
+                        .modules
+                        .iter()
+                        .any(|current| current.id == old.id && current.kind == old.kind)
             })
-            .map(|module| module.public_id().to_string())
-            .collect();
-        let active_keys: std::collections::HashSet<_> = package
-            .manifest
-            .modules
-            .iter()
-            .flat_map(crate::domain::PluginModule::owner_keys)
+            .map(|module| module.id.clone())
             .collect();
         let retired_modules: Vec<String> = previous
             .iter()
             .flat_map(|old| &old.manifest.modules)
-            .flat_map(crate::domain::PluginModule::owner_keys)
-            .filter(|key| !active_keys.contains(key))
+            .filter(|old| {
+                !package
+                    .manifest
+                    .modules
+                    .iter()
+                    .any(|current| current.id == old.id)
+            })
+            .map(|module| module.id.clone())
             .collect();
         let record = PluginRecord {
             id: id.clone(),
@@ -731,9 +730,9 @@ impl AppServices {
                 .expect("validated module manifest");
             let manifest =
                 crate::source::manifest::parse(text, &crate::mining::registry::BUILTIN_NAMES)?;
-            let old = self.store.get_source_package(module.public_id()).await?;
+            let old = self.store.get_source_package(&module.id).await?;
             sources.push(SourcePackageRecord {
-                name: module.public_id().to_string(),
+                name: module.id.clone(),
                 state: old
                     .as_ref()
                     .map_or(SourcePackageState::Installed, |record| record.state),
@@ -879,16 +878,17 @@ impl AppServices {
                 });
             }
             for module in &previous.manifest.modules {
-                if !package.manifest.modules.iter().any(|candidate| {
-                    candidate.id == module.id
-                        && candidate.kind == module.kind
-                        && candidate.public_id() == module.public_id()
-                }) {
+                if !package
+                    .manifest
+                    .modules
+                    .iter()
+                    .any(|candidate| candidate.id == module.id && candidate.kind == module.kind)
+                {
                     match module.kind {
                         PluginModuleKind::Source => {
                             if self
                                 .store
-                                .get_source_package(module.public_id())
+                                .get_source_package(&module.id)
                                 .await?
                                 .is_some_and(|source| source.state == SourcePackageState::Enabled)
                             {
@@ -896,7 +896,7 @@ impl AppServices {
                                     name: name.clone(),
                                     reason: format!(
                                         "removed source `{}` is enabled; disable it first",
-                                        module.public_id()
+                                        module.id
                                     ),
                                 });
                             }
@@ -905,41 +905,40 @@ impl AppServices {
                                 .snapshot()
                                 .await
                                 .iter()
-                                .find(|miner| miner.source == module.public_id())
+                                .find(|miner| miner.source == module.id)
                             {
                                 return Err(Error::PluginBlocked {
                                     name: name.clone(),
                                     reason: format!(
                                         "removed source `{}` is still configured by miner `{}`",
-                                        module.public_id(),
-                                        miner.name
+                                        module.id, miner.name
                                     ),
                                 });
                             }
                             if self
                                 .store
-                                .active_mine_job_for_sources(&[module.public_id().to_string()])
+                                .active_mine_job_for_sources(std::slice::from_ref(&module.id))
                                 .await?
                             {
                                 return Err(Error::PluginBlocked {
                                     name: name.clone(),
                                     reason: format!(
                                         "removed source `{}` still has an active job",
-                                        module.public_id()
+                                        module.id
                                     ),
                                 });
                             }
                         }
                         PluginModuleKind::Integration => {
                             if crate::config::paths::default_agents_dir()
-                                .join(module.public_id())
+                                .join(&module.id)
                                 .exists()
                             {
                                 return Err(Error::PluginBlocked {
                                     name: name.clone(),
                                     reason: format!(
                                         "removed integration `{}` is still installed for an agent",
-                                        module.public_id()
+                                        module.id
                                     ),
                                 });
                             }
@@ -1030,10 +1029,11 @@ impl AppServices {
         for module in &package.manifest.modules {
             if installed.iter().any(|other| {
                 other.id != *name
-                    && other.manifest.modules.iter().any(|owned| {
-                        owned.kind == module.kind
-                            && (owned.id == module.id || owned.public_id() == module.public_id())
-                    })
+                    && other
+                        .manifest
+                        .modules
+                        .iter()
+                        .any(|owned| owned.id == module.id && owned.kind == module.kind)
             }) {
                 return Err(Error::PluginBlocked {
                     name: name.clone(),
@@ -1045,16 +1045,12 @@ impl AppServices {
             }
             match module.kind {
                 PluginModuleKind::Source => {
-                    if self
-                        .store
-                        .get_source_package(module.public_id())
-                        .await?
-                        .is_some()
+                    if self.store.get_source_package(&module.id).await?.is_some()
                         && !installed.iter().any(|owner| {
                             owner.id == *name
                                 && owner.manifest.modules.iter().any(|previous| {
-                                    previous.kind == PluginModuleKind::Source
-                                        && previous.public_id() == module.public_id()
+                                    previous.id == module.id
+                                        && previous.kind == PluginModuleKind::Source
                                 })
                         })
                     {
@@ -1062,32 +1058,29 @@ impl AppServices {
                             name: name.clone(),
                             reason: format!(
                                 "source `{}` is already installed from a legacy package or another plugin; remove or migrate it explicitly",
-                                module.public_id()
+                                module.id
                             ),
                         });
                     }
-                    if let Some(owner) = self
-                        .store
-                        .get_plugin_source_owner(module.public_id())
-                        .await?
+                    if let Some(owner) = self.store.get_plugin_source_owner(&module.id).await?
                         && owner != *name
                     {
                         return Err(Error::PluginBlocked {
                             name: name.clone(),
                             reason: format!(
                                 "source `{}` and its retained data belong to plugin `{owner}`",
-                                module.public_id()
+                                module.id
                             ),
                         });
                     }
                     if self
                         .store
-                        .get_plugin_source_owner(module.public_id())
+                        .get_plugin_source_owner(&module.id)
                         .await?
                         .is_none()
-                        && self.store.has_mined_source_name(module.public_id()).await?
+                        && self.store.has_mined_source_name(&module.id).await?
                     {
-                        adoptions.push(module.public_id().to_string());
+                        adoptions.push(module.id.clone());
                     }
                     let bytes = package
                         .files
@@ -1101,12 +1094,12 @@ impl AppServices {
                     let permissions = source.permissions.normalized();
                     if !permissions.is_empty() {
                         source_consents.push(SourceConsent {
-                            source: module.public_id().to_string(),
-                            digest: permissions.consent_digest(module.public_id()),
+                            source: module.id.clone(),
+                            digest: permissions.consent_digest(&module.id),
                             permissions: permissions.describe(),
                             already_granted: self
                                 .store
-                                .get_source_package(module.public_id())
+                                .get_source_package(&module.id)
                                 .await?
                                 .is_some_and(|old| {
                                     old.plugin.as_deref() == Some(name)

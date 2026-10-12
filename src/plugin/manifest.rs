@@ -105,7 +105,6 @@ pub fn validate(manifest: &PluginManifest) -> Result<()> {
         requirement(&dependency.version, "dependency.version")?;
     }
     let mut modules = HashSet::new();
-    let mut public_ids = HashSet::new();
     let mut paths = HashSet::new();
     for module in &manifest.modules {
         // A provider can expose a source and an agent integration with the same public name.
@@ -113,15 +112,6 @@ pub fn validate(manifest: &PluginManifest) -> Result<()> {
             return Err(invalid(format!(
                 "module `{}` is invalid or duplicated",
                 module.id
-            )));
-        }
-        if !is_valid_source_name(module.public_id())
-            || !public_ids.insert((module.kind, module.public_id()))
-        {
-            return Err(invalid(format!(
-                "module `{}` has an invalid or duplicated public identity `{}`",
-                module.id,
-                module.public_id()
             )));
         }
         version(&module.version, "module.version")?;
@@ -315,14 +305,6 @@ mod tests {
             }),
             ("duplicated", |m| {
                 let duplicate = m.modules[0].clone();
-                m.modules.push(duplicate);
-            }),
-            ("public identity", |m| {
-                let mut duplicate = m.modules[0].clone();
-                duplicate.id = "another-module".into();
-                duplicate.manifest = "modules/another-module/memcastle-source.toml".into();
-                duplicate.entry = "modules/another-module/source.wasm".into();
-                duplicate.identity = Some("source-one".into());
                 m.modules.push(duplicate);
             }),
         ];

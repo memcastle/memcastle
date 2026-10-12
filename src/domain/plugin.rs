@@ -89,11 +89,8 @@ pub enum PluginModuleKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginModule {
-    /// Stable archive/module ID within its kind; it may differ from the source or integration's public identity.
+    /// Stable within its module kind; miners and integrations retain their respective IDs across releases.
     pub id: String,
-    /// Public source or integration ID when it differs from the archive module ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<String>,
     /// Independent capability, not a second installable package.
     #[serde(rename = "type")]
     pub kind: PluginModuleKind,
@@ -116,24 +113,6 @@ pub struct PluginModule {
     /// Optional JSON Schema for this module's instance settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<Value>,
-}
-
-impl PluginModule {
-    /// The name clients and existing mining/integration records use, including old same-ID packages.
-    #[must_use]
-    pub fn public_id(&self) -> &str {
-        self.identity.as_deref().unwrap_or(&self.id)
-    }
-
-    /// Module ownership also claims integration names, preventing two differently named modules from racing.
-    #[must_use]
-    pub fn owner_keys(&self) -> Vec<String> {
-        let mut keys = vec![self.id.clone()];
-        if self.kind == PluginModuleKind::Integration {
-            keys.push(format!("integration:{}", self.public_id()));
-        }
-        keys
-    }
 }
 
 /// One installed package and the immutable artifact generation it currently uses.
