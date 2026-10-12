@@ -233,7 +233,7 @@ impl Catalog {
                 let entry = entry.map_err(|e| Error::io(directory.display().to_string(), e))?;
                 let dir = entry.path();
                 let manifest_path = dir.join(MANIFEST_FILE);
-                // `integrations/common` and the like hold no manifest: they are not integrations, and are skipped.
+                // A directory without a manifest is not an integration and must be skipped.
                 if !manifest_path.is_file() {
                     continue;
                 }

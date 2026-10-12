@@ -18,7 +18,8 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package unpacked beside the binary (`pi`, `opencode`, `claude`, `codex`, `chatgpt`, `github`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
+| Bundled | An ordinary package unpacked beside the binary (`opencode`, `claude`, `codex`, `chatgpt`, `github`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
+| Provider plugin | A separately released multi-module archive (for example, `memcastle-pi`). | `memcastle plugin install <archive>`; enable each source separately. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
 

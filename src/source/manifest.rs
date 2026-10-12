@@ -493,7 +493,6 @@ read = ["locator"]
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sources");
         for (name, expected) in [
             ("directory", vec!["schedule", "poll", "webhook", "watch"]),
-            ("pi", vec!["schedule", "poll", "watch"]),
             ("opencode", vec!["schedule", "poll", "watch"]),
         ] {
             let text = std::fs::read_to_string(root.join(name).join("memcastle-source.toml"))

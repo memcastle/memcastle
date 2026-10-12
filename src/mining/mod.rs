@@ -838,7 +838,7 @@ mod tests {
     ///
     /// What the pipeline does for such a source (a transcript kind, its own room and drawer name, the raw kept next to
     /// the drawers, a grown document re-filed by its tail) is the pipeline's, so it is tested here with no real
-    /// source involved: Pi's history is an installed component (`sources/pi`), tested in `tests/wasm_pi.rs`.
+    /// source involved: Pi's history is an installed component, tested in its provider repository.
     struct Transcript {
         body: std::sync::Mutex<String>,
     }

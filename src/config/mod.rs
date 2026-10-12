@@ -1931,7 +1931,7 @@ mod tests {
 
     #[test]
     fn a_worktrees_source_projects_are_not_a_bundle() {
-        // `sources/pi/` in a checkout has a manifest and no component: a project, to be built, not a package.
+        // A provider source checkout has a manifest and no component: a project, not a package.
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("sources/pi");
         std::fs::create_dir_all(&project).unwrap();

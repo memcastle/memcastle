@@ -1033,7 +1033,7 @@ impl AppServices {
                         .manifest
                         .modules
                         .iter()
-                        .any(|owned| owned.id == module.id)
+                        .any(|owned| owned.id == module.id && owned.kind == module.kind)
             }) {
                 return Err(Error::PluginBlocked {
                     name: name.clone(),
@@ -1048,11 +1048,10 @@ impl AppServices {
                     if self.store.get_source_package(&module.id).await?.is_some()
                         && !installed.iter().any(|owner| {
                             owner.id == *name
-                                && owner
-                                    .manifest
-                                    .modules
-                                    .iter()
-                                    .any(|previous| previous.id == module.id)
+                                && owner.manifest.modules.iter().any(|previous| {
+                                    previous.id == module.id
+                                        && previous.kind == PluginModuleKind::Source
+                                })
                         })
                     {
                         return Err(Error::PluginBlocked {

@@ -3,8 +3,8 @@
 #
 # Usage: packaging/integrations/build.sh [out-dir]
 #
-# Always: bundles each integration into `integrations/<id>/dist/`, one self-contained JavaScript file (plus, for Pi,
-# the `package.json` Pi reads) with every dependency inlined. That is what makes the official installation path need no
+# Always: bundles each integration into `integrations/<id>/dist/`, one self-contained JavaScript file with every
+# dependency inlined. That is what makes the official installation path need no
 # npm publication and no `bun install` on the user's machine (docs/adr/034), and it is also all the development mode
 # needs: `memcastle integration install <id> --assets-dir <checkout>` installs from these `dist/` directories.
 #
@@ -16,8 +16,6 @@
 #
 # Needs bun. The agents' own SDKs stay external: the agent provides them (they are type-only imports, plus OpenCode's
 # optional `tool` helper), and a second copy in the bundle would be a second copy of its classes.
-# Pi supplies only the packages listed in its docs (docs/packages.md); every other `@earendil-works/*` package, such as
-# the MCP client library `@earendil-works/pi-mcp`, is not provided to an extension and so is bundled.
 set -euo pipefail
 
 if [ "$#" -gt 1 ]; then
@@ -28,7 +26,7 @@ out="${1:-}"
 
 # Which integrations ship is a packaging decision and does not constrain the runtime (docs/adr/034): any directory
 # under `integrations/` with a `memcastle-integration.toml` and a `dist/` could be added here.
-BUNDLED=(pi opencode claude-code codex)
+BUNDLED=(opencode claude-code codex)
 
 cd "$(dirname "$0")/../.."
 root="$PWD"
@@ -54,28 +52,6 @@ bundle() {
   )
   test -f "${dir}/dist/$(basename "${entry%.ts}").js" || { echo "error: bundling ${id} produced no output" >&2; exit 1; }
 }
-
-bundle pi src/extension.ts \
-  --external '@earendil-works/pi-coding-agent' \
-  --external '@earendil-works/pi-ai' \
-  --external '@earendil-works/pi-agent-core' \
-  --external '@earendil-works/pi-tui'
-# Pi reads its entry points from the `package.json` of the package it installs, which here is the installed copy.
-# No `dependencies`: the bundle has everything, and Pi does not install a local package's dependencies anyway.
-version="$(sed -n 's/^version = "\(.*\)"$/\1/p' integrations/pi/memcastle-integration.toml | head -n 1)"
-cat > integrations/pi/dist/package.json << EOF
-{
-  "name": "memcastle-pi",
-  "version": "${version}",
-  "private": true,
-  "description": "MemCastle lifecycle extension for Pi, installed by 'memcastle integration install pi'",
-  "type": "module",
-  "license": "MIT",
-  "pi": {
-    "extensions": ["./extension.js"]
-  }
-}
-EOF
 
 # OpenCode 1 treats every export of a plugin module as a plugin; the entry exports only `default`, and bun keeps it so.
 bundle opencode src/index.ts --external '@opencode-ai/*' --external '@opencode/*'

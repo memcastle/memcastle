@@ -89,7 +89,7 @@ pub enum PluginModuleKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginModule {
-    /// Globally stable module ID; miners/integrations keep referring to this across releases.
+    /// Stable within its module kind; miners and integrations retain their respective IDs across releases.
     pub id: String,
     /// Independent capability, not a second installable package.
     #[serde(rename = "type")]

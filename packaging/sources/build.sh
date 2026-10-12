@@ -8,7 +8,7 @@
 #                              `share/memcastle/sources/` and is installed from the start, run in place (docs/adr/040)
 #   archives/<name>-<ver>.tar.gz and .sha256
 #                              the same packages as archives, attached to the release: what the official registry
-#                              resolves to when a daemon with no bundle installs `pi` or `opencode`
+#                              resolves to when a daemon with no bundle installs a Core-shipped source
 #
 # There is no registry index here. The official registry is a static file in the documentation
 # (`docs/registry.json`) that names this repository, and a daemon reads its releases, so publishing a
@@ -28,7 +28,7 @@ out="$2"
 
 # Which sources ship is a packaging decision and does not constrain the runtime (docs/adr/033): any directory under
 # `sources/` could be added here. `directory` is the worked example of the built-in source and is not bundled.
-BUNDLED=(pi opencode claude codex chatgpt github)
+BUNDLED=(opencode claude codex chatgpt github)
 
 cd "$(dirname "$0")/../.."
 mkdir -p "${out}"

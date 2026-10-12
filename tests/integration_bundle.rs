@@ -76,9 +76,9 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     assert_eq!(names(&package), ["integrations", "skills"]);
     assert_eq!(
         names(&package.join("integrations")),
-        ["claude-code", "codex", "opencode", "pi"]
+        ["claude-code", "codex", "opencode"]
     );
-    for id in ["pi", "opencode", "claude-code", "codex"] {
+    for id in ["opencode", "claude-code", "codex"] {
         let dir = package.join("integrations").join(id);
         // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
         let own: Vec<String> = names(&dir)
@@ -156,14 +156,10 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
 fn the_bundles_import_nothing_the_installed_copy_would_not_have() {
     // A bare import left in a bundle would fail the moment the agent loads it, on a machine with no `node_modules`.
     let package = package();
-    for (id, file) in [("pi", "dist/extension.js"), ("opencode", "dist/index.js")] {
+    for (id, file) in [("opencode", "dist/index.js")] {
         let text =
             std::fs::read_to_string(package.join("integrations").join(id).join(file)).unwrap();
-        for dependency in [
-            "@modelcontextprotocol/sdk",
-            "@earendil-works/pi-mcp",
-            "smol-toml",
-        ] {
+        for dependency in ["@modelcontextprotocol/sdk", "smol-toml"] {
             assert!(
                 !text.contains(&format!("from \"{dependency}")),
                 "{id} still imports {dependency} instead of carrying it"
@@ -177,7 +173,7 @@ fn lifecycle_from(assets: &Path) {
     let machine = Machine::new();
     let flag = assets.to_str().unwrap();
 
-    for id in ["pi", "opencode", "claude-code", "codex"] {
+    for id in ["opencode", "claude-code", "codex"] {
         machine
             .memcastle()
             .args(["integration", "install", id, "--assets-dir", flag])
@@ -195,15 +191,8 @@ fn lifecycle_from(assets: &Path) {
         assert_eq!(integration["state"], "installed", "{integration}");
     }
 
-    // The installed Pi copy is a package Pi can read: its entry exists, and the skills sit beside it.
-    let pi = machine.installed("pi");
-    let package: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(pi.join("package.json")).unwrap()).unwrap();
-    let extension = package["pi"]["extensions"][0].as_str().unwrap();
-    assert!(pi.join(extension).is_file(), "{extension}");
-    assert!(pi.join("skills/wake-up/SKILL.md").is_file());
     // Whatever layout `assets` is, each integration exposes exactly the skills its own manifest names.
-    for id in ["pi", "opencode", "claude-code", "codex"] {
+    for id in ["opencode", "claude-code", "codex"] {
         let text =
             std::fs::read_to_string(assets.join("integrations").join(id).join(MANIFEST_FILE))
                 .unwrap();
@@ -231,7 +220,7 @@ fn lifecycle_from(assets: &Path) {
             );
         }
     }
-    assert_eq!(machine.pi_packages(), [pi.display().to_string()]);
+    assert!(machine.pi_packages().is_empty());
     // OpenCode's shim points at a file that exists.
     let shim = std::fs::read_to_string(machine.plugin_file()).unwrap();
     assert!(
@@ -247,7 +236,7 @@ fn lifecycle_from(assets: &Path) {
     assert_eq!(machine.claude_plugins(), ["memcastle@memcastle-local"]);
     assert_eq!(machine.codex_plugins(), ["memcastle@memcastle-local"]);
 
-    for id in ["pi", "opencode", "claude-code", "codex"] {
+    for id in ["opencode", "claude-code", "codex"] {
         let again = machine
             .memcastle()
             .args(["integration", "install", id, "--json", "--assets-dir", flag])

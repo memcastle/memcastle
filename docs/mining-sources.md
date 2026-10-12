@@ -161,12 +161,12 @@ The trigger only decides when; the source still decides how to read.
 
 The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
 
-## The sources MemCastle ships
+## Available sources
 
 | Source | Kind | Reads | Cursor | Keeps raw | Credentials |
 |---|---|---|---|---|---|
 | `directory` | built in | the text files under a directory | modification time | no | no |
-| `pi` | bundled package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
+| `pi` | external `memcastle-pi` plugin | Pi coding-agent session history | modification time | yes | no |
 | `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 | `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
@@ -175,10 +175,11 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 
 Only `directory` is compiled into MemCastle.
 `pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github` are [WebAssembly sources](writing-sources.md).
-They are built from their directories in the repository and shipped alongside each release
+The in-tree ones are built from their directories in the repository and shipped alongside each release
 (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start.
-`memcastle source enable <name>` is all one needs, with no registry and no network.
+`memcastle source enable <name>` is all one needs for a bundled source, with no registry and no network.
+Install the external Pi plugin before enabling its source.
 No Pi, OpenCode, Claude Code, Codex, ChatGPT or GitHub acquisition code is part of the core.
 They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
@@ -204,31 +205,29 @@ The conversation history of the [Pi](https://github.com/badlogic/pi-mono) coding
 files: `~/.pi/agent/sessions/<working directory>/<session>.jsonl`,
 or the folder you name as the place to read (`memcastle mine pi <folder>`).
 It works on sessions of any age and with no Pi process running.
-This is how Pi's *history* gets into MemCastle; the live integration (`integrations/pi/`) is a separate thing that talks
-to the daemon over MCP and decides *when* to ask for mining, and never reads these files itself.
+This is how Pi's *history* gets into MemCastle.
+The live integration (also in `memcastle-pi`) is a separate module that talks to the daemon over MCP, decides *when* to
+ask for mining and never reads these files itself.
 
-It ships with your MemCastle and is installed already: turn it on, and mine it:
+Install the standalone plugin first, then turn on the source and mine it:
 
 ```sh
+memcastle plugin install /path/to/pi-0.1.0.tar.gz --consent pi=SHA256_FROM_PREVIEW
 memcastle source enable pi
 memcastle mine pi
 ```
 
-A build that was not installed from a release (a checkout, `cargo install`) has no bundle.
-Install it from the [official registry](publishing-sources.md#the-official-registry) (`memcastle source install pi --enable`),
-or from the project directory, which builds and packages it first, or write the two steps out:
+Add `--adopt-source pi` only if the preview reports previously mined `pi` history from a Core-bundled or legacy source.
+Remove a separately installed legacy `pi` package first (`memcastle source remove pi`); its mined data stays in the palace.
+The installation preview shows the exact permissions and consent digest to provide with the install command.
+Until an independent release exists, build the archive in the `memcastle-pi` checkout with `mise run package`.
 
-```sh
-memcastle source install sources/pi --enable
-# or: memcastle source package sources/pi && memcastle source install sources/pi/dist/pi-0.1.0.tar.gz --enable
-```
-
-Installing it from a registry or a directory lists what the source asks for and needs your consent to exactly that;
-`memcastle source show pi` lists the same for the bundled one, which is enabled without it.
+Installing the plugin lists what the source asks for and needs your consent to exactly that;
+`memcastle source show pi` lists the installed source's permissions afterward.
 It asks for read-only access to the folder it is asked to mine and to `~/.pi/agent/sessions`,
 and the one environment variable `HOME` (to find that folder when no place is given).
 It asks for no network, runs no program, writes no file and needs no credentials.
-`memcastle source test sources/pi` runs its conformance cases, and CI does the same on every change.
+`memcastle source test modules/pi` runs its conformance cases from the external checkout.
 
 Two options narrow what is read.
 `since=2026-09` keeps the sessions whose file was modified at or after the date,

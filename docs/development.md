@@ -83,7 +83,7 @@ They apply to `mise run`, to `mise cli` and to any shell with [mise activated](h
 once you are in the project directory, so `mise cli serve` already serves the dashboard from `web/dist` (after
 `mise run web:build`) and finds the integrations and sources of the checkout, with no flag.
 Because the variables follow the shell, **any `memcastle` you run from the project directory uses them, including an
-installed one**: `memcastle integration install pi` there installs the bundle built in the checkout
+installed one**: `memcastle integration install opencode` there installs the bundle built in the checkout
 (`mise run integrations:build`) and not the package's.
 Run it from another directory, or `env -u MEMCASTLE_ASSETS_DIR memcastle ...`, to use the installed assets.
 A flag still wins over the variable (`--assets-dir`), and your own `mise.local.toml` can override or drop either.
@@ -202,10 +202,6 @@ Every path, environment variable, flag and the precedence between them is in [Co
     (manifests accepted by this MemCastle, no sources or `node_modules`, the skills) and runs the same lifecycle from the
     packaged tree and from the checkout.
     It needs bun, so it is `#[ignore]`d in the basic suite and `mise run integrations:check` runs it.
-  - `integrations/common/test/` — what needs two integrations at once: sessions in every memory mode against one
-    daemon, and the proof, from the requests on the wire, that an `off` session receives nothing.
-    It is test-only and imports the integrations' sources, see
-    [ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md).
   - `tests/in_process/events.rs` — `GET /api/events` against a real daemon: a note, a wing and a job's progress arrive as
     identifiers and never as content, a `disabled` session is refused and a `read_only` one served, the token is
     required, and an open stream does not keep the daemon from shutting down.
@@ -221,9 +217,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     against a real `memcastle serve` (`web/test/daemon`, bun), see [Web UI](web.md#developing-the-dashboard).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
-  - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,
-    discovery and the credentials file it must never open, provenance, and an install, mine and re-mine against a real
-    daemon (in-process, WebAssembly suite).
+  - The Pi history source and lifecycle extension have their own tests and fixtures in
+    [`memcastle-pi`](https://github.com/memcastle/memcastle-pi), run against a released or locally built Core binary.
   - `tests/wasm_opencode.rs` — the OpenCode history source (`sources/opencode/`) built and run as a component against a
     stand-in `opencode` command: what it files and leaves out, the discovery cursor and the query it never lets a
     cursor change, provenance, a machine without OpenCode, and an install, mine, re-mine and grow against a real daemon
@@ -237,8 +232,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     stand-in for the API, with a digest that does not match and a repository that cannot be read), an unreadable
     registry, and the CLI publishing, signing, searching, installing and updating (in-process and subprocess,
     WebAssembly suite).
-  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the script a release runs, packaging `pi` and `opencode` as an
-    unpacked bundle and as `<name>-<version>.tar.gz` archives, and a daemon that lists both as installed and enables them
+  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the script a release runs, packaging `opencode` as an
+    unpacked bundle and as `<name>-<version>.tar.gz` archives, and a daemon that lists it as installed and enables it
     with no consent (WebAssembly suite, Unix only).
   - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
     shared pipeline, and refusing a component altered on disk (in-process, WebAssembly suite).

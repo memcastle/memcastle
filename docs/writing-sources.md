@@ -361,13 +361,13 @@ Publishing one, finding one by name, updating it, signing it and trusting a publ
 
 `sources/` holds maintained reference sources, one directory each, with the same package layout as any other.
 `sources/directory/` is the built-in `directory` source as a Rust component, and is the worked example to read.
-`sources/pi/` is the Pi coding agent's session history, the first official source that is not a built-in: it reads a
-real, evolving format, keeps raw documents and asks for two permissions (`docs/mining-sources.md#pi`).
+The Pi coding agent's session-history source now lives in
+[`memcastle-pi`](https://github.com/memcastle/memcastle-pi) and retains its original `pi` ID.
 `sources/chatgpt/` imports ChatGPT export ZIPs or standalone JSON, with an experimental private-web backend described in
 [ChatGPT](mining-sources.md#chatgpt).
 `sources/opencode/` is the OpenCode coding agent's session history, and the worked example of a source that wraps a
 program through `run-process` and is tested against a stand-in for it (`docs/mining-sources.md#opencode`).
-The sources that ship with MemCastle's releases (`pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github`)
+The sources that ship with MemCastle's releases (`opencode`, `claude`, `codex`, `chatgpt` and `github`)
 are built from here.
 They are bundled without being compiled into the binary.
 They use exactly the package contract a user installs; a release carries them unpacked, so they are installed from the

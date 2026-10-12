@@ -6,7 +6,6 @@ that implements `wit/memcastle-source.wit`, and the conformance cases it is test
 | Directory | Source name | What it is |
 |---|---|---|
 | `directory/` | `directory-wasm` | The built-in `directory` source, written as a Rust component. The worked example. |
-| `pi/` | `pi` | The Pi coding agent's session history. The official Pi source: the core has no Pi-specific code. Bundled with releases. |
 | `opencode/` | `opencode` | The OpenCode coding agent's session history, acquired through its `opencode` command. Official. Bundled with releases. |
 | `codex/` | `codex` | The Codex coding agent's rollout history, read from its JSONL session files. Official. Bundled with releases. |
 
@@ -19,6 +18,6 @@ on the `PATH`; run `memcastle source test` by hand with the same prefix.
 CI runs one job per directory here, found automatically, so a new source needs no workflow change.
 They are not compiled into MemCastle, and a source that ships with MemCastle's releases uses exactly the same package
 contract as one a user installs.
-`packaging/sources/build.sh` packages the bundled ones (`pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github`) as
+`packaging/sources/build.sh` packages the bundled ones (`opencode`, `claude`, `codex`, `chatgpt` and `github`) as
 unpacked packages under `share/memcastle/sources/`, with no bundle index. `mise run sources:package` runs it locally, and
 `docs/publishing-sources.md` is how a source gets from here to a user.

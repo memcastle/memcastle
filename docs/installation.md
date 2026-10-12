@@ -39,7 +39,7 @@ One package asset is the set of sources that ship with MemCastle, under `share/m
 `.rpm`, the AUR package and the Homebrew formula carry them, unpacked and installed from the start, and a standalone binary
 does not, so it installs a source from a file or from the official registry instead.
 The other package assets are the agent integrations and the skills they expose, under `share/memcastle/integrations/` and
-`share/memcastle/skills/`; `memcastle integration install pi` copies one to your home and registers it with the agent
+`share/memcastle/skills/`; `memcastle integration install opencode` copies one to your home and registers it with the agent
 (see [Agent integrations](integrations.md)).
 The same release packages carry them, and a standalone binary does not.
 The last package asset is the [web UI](web.md), under `share/memcastle/web/dist/`, which the daemon serves only when
@@ -54,8 +54,8 @@ brew install noirbizarre/homebrew-tap/memcastle
 ```
 
 The formula ships macOS builds only (Apple silicon and Intel), the sources bundled with MemCastle under its
-`share/memcastle/sources/`, so `memcastle source enable pi` works with no registry, and the agent integrations under
-`share/memcastle/integrations/`, so `memcastle integration install pi` works without any other download.
+`share/memcastle/sources/`, so `memcastle source enable opencode` works with no registry, and the agent integrations under
+`share/memcastle/integrations/`, so `memcastle integration install opencode` works without any other download.
 On Linux, use one of the other methods, including under Linuxbrew.
 
 ### Arch Linux (AUR)
@@ -67,8 +67,8 @@ paru -S memcastle-bin   # or your AUR helper of choice
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
 a systemd user unit, `/usr/lib/systemd/user/memcastle.service`,
 the bash, zsh and fish completion scripts,
-the sources bundled with MemCastle under `/usr/share/memcastle/sources/`, so `memcastle source enable pi` and
-`memcastle source enable opencode` work with no registry,
+the sources bundled with MemCastle under `/usr/share/memcastle/sources/`, so `memcastle source enable opencode` works
+with no registry,
 and the agent integrations and skills under `/usr/share/memcastle/integrations/` and `/usr/share/memcastle/skills/`.
 
 The package owns only those files and its licence under `/usr`.

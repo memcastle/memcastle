@@ -107,7 +107,8 @@ pub fn validate(manifest: &PluginManifest) -> Result<()> {
     let mut modules = HashSet::new();
     let mut paths = HashSet::new();
     for module in &manifest.modules {
-        if !is_valid_source_name(&module.id) || !modules.insert(&module.id) {
+        // A provider can expose a source and an agent integration with the same public name.
+        if !is_valid_source_name(&module.id) || !modules.insert((module.kind, &module.id)) {
             return Err(invalid(format!(
                 "module `{}` is invalid or duplicated",
                 module.id
@@ -313,6 +314,27 @@ mod tests {
             let error = validate(&manifest).unwrap_err().to_string();
             assert!(error.contains(reason), "{reason}: {error}");
         }
+    }
+
+    #[test]
+    fn a_source_and_an_integration_can_share_their_public_id() {
+        let mut manifest = fixture();
+        let mut integration = manifest.modules[0].clone();
+        integration.kind = PluginModuleKind::Integration;
+        integration.manifest = "modules/source-one/memcastle-integration.toml".into();
+        integration.entry = "modules/source-one/dist/extension.js".into();
+        integration.contract = None;
+        manifest.modules.push(integration);
+        validate(&manifest).unwrap();
+
+        // A second integration with that ID would make its install receipt ambiguous.
+        manifest.modules.push(manifest.modules[1].clone());
+        assert!(
+            validate(&manifest)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicated")
+        );
     }
 
     #[test]

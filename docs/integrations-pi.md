@@ -8,17 +8,22 @@ It is installed with [`memcastle integration`](integrations.md); this page is wh
 
 - Pi 1.0 or later, with the `pi` command on your `PATH`.
   The installer runs `pi --version` and refuses an older Pi, naming the version it found.
-- MemCastle 0.2 or later.
+- MemCastle 0.4 or later with plugin installation support.
 - A running daemon when you use Pi, not when you install:
   the extension loads without one and tells you once how to start it.
 
 ## Install, update, remove
 
 ```sh
+memcastle plugin install /path/to/pi-0.1.0.tar.gz --consent pi=SHA256_FROM_PREVIEW
 memcastle integration install pi
 memcastle integration update pi
 memcastle integration remove pi
 ```
+
+Build the archive from the [`memcastle-pi` repository](https://github.com/memcastle/memcastle-pi) until an independent
+release is available. Add `--adopt-source pi` only when the preview reports previously mined legacy Pi history;
+follow the install preview's instructions for the exact source consent.
 
 Restart Pi after each, because it loads extensions when it starts.
 [Integrations](integrations.md) describes what each command does and checks.
@@ -68,7 +73,7 @@ The ones you are most likely to set:
 `MEMCASTLE_MODE` takes this integration's labels (`full`, `read-only`, `off`), which are not the daemon's
 (`full`, `read_only`, `disabled`).
 The complete list, and what each [memory mode](memory-modes.md) does to a session, is in the
-[extension's README](https://github.com/memcastle/memcastle/blob/main/integrations/pi/README.md#configuration).
+[extension's README](https://github.com/memcastle/memcastle-pi/blob/main/modules/pi/README.md).
 
 ## Troubleshooting
 
