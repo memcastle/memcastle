@@ -179,7 +179,7 @@ surrealkit = { version = "1.0.0-beta.2", default-features = false }
 # in its GraphQL stack or any storage engine of its own: it is already in the
 # lockfile through `surrealdb`, and `tests/dependencies.rs` guards the engines.
 surrealdb-core = { version = "=3.3.0", default-features = false }
-surrealdb-rpc = "=3.3.0"
+surrealdb-rpc = "=3.3.2"
 
 # HTTP API + MCP-over-HTTP share one axum router. `ws` backs the admin
 # endpoint's `/rpc` WebSocket.
