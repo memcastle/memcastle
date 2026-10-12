@@ -334,6 +334,8 @@ file: it runs the `opencode` command, which owns the database, and turns its ans
 It works on sessions of any age and with no OpenCode session running, calls no model and replays nothing.
 This is how OpenCode's *history* gets into MemCastle; the live integration (`integrations/opencode/`) is a separate
 thing that talks to the daemon over MCP and decides *when* to ask for mining.
+The standalone [memcastle-opencode](https://github.com/memcastle/memcastle-opencode) project develops both modules
+as one plugin while this Core release continues to ship the legacy source and integration.
 
 It needs OpenCode 1.2 or later (the version that moved history into the database) installed so that `opencode` is on the
 daemon's `PATH`; it was written against 1.18.

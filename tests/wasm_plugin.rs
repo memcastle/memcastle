@@ -25,6 +25,7 @@ fn release(root: &Path) -> Vec<u8> {
         let component = std::fs::read(project.build().unwrap()).unwrap();
         let manifest = std::fs::read(root.join(name).join("memcastle-source.toml")).unwrap();
         modules.push(PluginModule {
+            identity: None,
             id: name.to_string(),
             kind: PluginModuleKind::Source,
             version: "0.1.0".into(),
@@ -42,6 +43,7 @@ fn release(root: &Path) -> Vec<u8> {
     let integration = b"format = 1\n[integration]\nid = 'assistant'\nversion = '0.1.0'\ndescription = 'agent-side lifecycle'\n[compatibility]\nmemcastle = '>=0.4'\n[agent]\nkind = 'opencode'\nentry = 'index.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
     let entry = b"export default { id: 'assistant', server: async () => ({}) };\n";
     modules.push(PluginModule {
+        identity: None,
         id: "assistant".into(),
         kind: PluginModuleKind::Integration,
         version: "0.1.0".into(),

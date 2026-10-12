@@ -166,7 +166,7 @@ impl Catalog {
                     .filter(|(name, _)| name.starts_with(&prefix))
                 {
                     let relative = name.strip_prefix(&prefix).expect("prefix matched");
-                    let projected = format!("integrations/{}/{relative}", module.id);
+                    let projected = format!("integrations/{}/{relative}", module.public_id());
                     verify_plugin_file(&root, &projected, bytes)?;
                     projected_files.insert(root.join(projected));
                 }
@@ -178,7 +178,7 @@ impl Catalog {
             for shipped in &catalog.integrations {
                 if !package.manifest.modules.iter().any(|module| {
                     module.kind == crate::domain::PluginModuleKind::Integration
-                        && module.id == shipped.id()
+                        && module.public_id() == shipped.id()
                 }) {
                     return Err(Error::PluginPackageInvalid {
                         message: format!(

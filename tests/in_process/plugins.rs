@@ -261,12 +261,13 @@ async fn plugin_installation_exposes_an_integration_in_the_local_catalog() {
         shared_config_schema: None,
         authentication: None,
         modules: vec![PluginModule {
-            id: "assistant".into(),
+            identity: Some("assistant".into()),
+            id: "assistant-module".into(),
             kind: PluginModuleKind::Integration,
             version: "0.1.0".into(),
-            manifest: "modules/assistant/memcastle-integration.toml".into(),
+            manifest: "modules/assistant-module/memcastle-integration.toml".into(),
             manifest_sha256: sha256_hex(manifest_text),
-            entry: "modules/assistant/dist/index.js".into(),
+            entry: "modules/assistant-module/dist/index.js".into(),
             sha256: sha256_hex(entry),
             optional: false,
             contract: None,
@@ -279,11 +280,11 @@ async fn plugin_installation_exposes_an_integration_in_the_local_catalog() {
             toml::to_string(&manifest).unwrap().into_bytes(),
         ),
         (
-            "modules/assistant/memcastle-integration.toml".to_string(),
+            "modules/assistant-module/memcastle-integration.toml".to_string(),
             manifest_text.to_vec(),
         ),
         (
-            "modules/assistant/dist/index.js".to_string(),
+            "modules/assistant-module/dist/index.js".to_string(),
             entry.to_vec(),
         ),
     ]))
@@ -718,6 +719,7 @@ async fn a_plugin_with_a_component_that_cannot_load_leaves_no_module_or_package_
         shared_config_schema: None,
         authentication: None,
         modules: vec![PluginModule {
+            identity: None,
             id: "broken".into(),
             kind: PluginModuleKind::Source,
             version: "0.1.0".into(),

@@ -256,7 +256,9 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
             PluginModuleKind::Source => {
                 let source =
                     crate::source::manifest::parse(text, &crate::mining::registry::BUILTIN_NAMES)?;
-                if source.source.name != module.id || source.source.version != module.version {
+                if source.source.name != module.public_id()
+                    || source.source.version != module.version
+                {
                     return Err(invalid(format!(
                         "source module `{}` identity/version differs from its own manifest",
                         module.id
@@ -277,7 +279,7 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
             }
             PluginModuleKind::Integration => {
                 let integration = crate::integration::manifest::parse(text)?;
-                if integration.integration.id != module.id
+                if integration.integration.id != module.public_id()
                     || integration.integration.version != module.version
                 {
                     return Err(invalid(format!(
@@ -353,6 +355,7 @@ mod tests {
         let modules = [("one", source.as_slice()), ("two", second.as_slice())]
             .into_iter()
             .map(|(id, bytes)| PluginModule {
+                identity: None,
                 id: id.to_string(),
                 kind: PluginModuleKind::Source,
                 version: "0.1.0".to_string(),
@@ -520,6 +523,7 @@ mod tests {
         let integration = b"format = 1\n[integration]\nid = 'one'\nversion = '0.1.0'\ndescription = 'An assistant integration'\n[compatibility]\nmemcastle = '>=0.4.0'\n[agent]\nkind = 'opencode'\nentry = 'dist/plugin.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
         let entry = b"export default () => {}";
         manifest.modules.push(PluginModule {
+            identity: None,
             id: "one".to_string(),
             kind: PluginModuleKind::Integration,
             version: "0.1.0".to_string(),
@@ -551,6 +555,7 @@ mod tests {
             package.manifest.modules[1].kind,
             PluginModuleKind::Integration
         );
+        assert_eq!(package.manifest.modules[1].public_id(), "one");
         let root = tempfile::tempdir().unwrap();
         for (path, bytes) in &files {
             let target = root.path().join(path);
@@ -565,6 +570,34 @@ mod tests {
     }
 
     #[test]
+    fn a_source_module_directory_can_differ_from_its_persisted_source_name() {
+        let mut files = fixture();
+        let mut manifest =
+            manifest::parse(std::str::from_utf8(&files[MANIFEST_FILE]).unwrap()).unwrap();
+        manifest.modules.retain(|module| module.id == "one");
+        files.remove("modules/two/memcastle-source.toml");
+        files.remove("modules/two/source.wasm");
+        let source = &mut manifest.modules[0];
+        source.id = "one-module".into();
+        source.identity = Some("one".into());
+        for path in [&mut source.manifest, &mut source.entry] {
+            *path = path.replace("modules/one/", "modules/one-module/");
+        }
+        for path in ["memcastle-source.toml", "source.wasm"] {
+            let bytes = files.remove(&format!("modules/one/{path}")).unwrap();
+            files.insert(format!("modules/one-module/{path}"), bytes);
+        }
+        files.insert(
+            MANIFEST_FILE.into(),
+            toml::to_string(&manifest).unwrap().into_bytes(),
+        );
+        assert_eq!(
+            unpack(&pack(&files).unwrap()).unwrap().manifest.modules[0].public_id(),
+            "one"
+        );
+    }
+
+    #[test]
     fn an_embedding_module_is_discoverable_without_pretending_to_be_a_source_adapter() {
         let mut files = fixture();
         let mut manifest =
@@ -572,6 +605,7 @@ mod tests {
         let entry = b"future embedding contract";
         let config = b"{\"format\":1}";
         manifest.modules.push(PluginModule {
+            identity: None,
             id: "embeddings".into(),
             kind: PluginModuleKind::EmbeddingProvider,
             version: "0.1.0".into(),

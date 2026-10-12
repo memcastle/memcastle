@@ -109,7 +109,13 @@ impl SurrealStore {
         let mut sql = String::from(
             "BEGIN TRANSACTION; UPSERT type::record('plugin', $plugin_id) SET name = $plugin_id, manifest = $manifest, digest = $digest, generation = $generation, upstream = $upstream, signed_by = $signed_by, installed_at = <datetime>$installed_at, updated_at = <datetime>$updated_at;",
         );
-        for (index, _) in plugin.manifest.modules.iter().enumerate() {
+        let owner_keys: Vec<_> = plugin
+            .manifest
+            .modules
+            .iter()
+            .flat_map(crate::domain::PluginModule::owner_keys)
+            .collect();
+        for (index, _) in owner_keys.iter().enumerate() {
             // All kinds share one live ID namespace. An integration cannot become ambiguous after two installs
             // race past application-level preflight; historical source ownership remains separately permanent.
             sql.push_str(&format!(" LET $module_owner{index} = (SELECT plugin FROM plugin_module_owner WHERE id = type::record('plugin_module_owner', $module{index}_name)); IF array::len($module_owner{index}) > 0 && $module_owner{index}[0].plugin != $plugin_id {{ THROW 'plugin module ownership conflict'; }}; UPSERT type::record('plugin_module_owner', $module{index}_name) SET name = $module{index}_name, plugin = $plugin_id;"));
@@ -147,8 +153,8 @@ impl SurrealStore {
             .bind(("signed_by", plugin.signed_by.clone()))
             .bind(("installed_at", super::stored(plugin.installed_at)))
             .bind(("updated_at", super::stored(plugin.updated_at)));
-        for (index, module) in plugin.manifest.modules.iter().enumerate() {
-            query = query.bind((format!("module{index}_name"), module.id.clone()));
+        for (index, key) in owner_keys.iter().enumerate() {
+            query = query.bind((format!("module{index}_name"), key.clone()));
         }
         for (index, source) in sources.iter().enumerate() {
             query = query
@@ -194,7 +200,7 @@ impl SurrealStore {
                     Error::PluginBlocked {
                     name: plugin.id.clone(),
                     reason:
-                        "a module ID was claimed by another installation; preview the release again"
+                        "a module or public ID was claimed by another installation; preview the release again"
                             .into(),
                 }
                 } else {
@@ -514,12 +520,13 @@ mod tests {
                 shared_config_schema: None,
                 authentication: None,
                 modules: vec![PluginModule {
-                    id: "assistant".into(),
+                    identity: Some("assistant".into()),
+                    id: "assistant-module".into(),
                     kind: PluginModuleKind::Integration,
                     version: "0.1.0".into(),
-                    manifest: "modules/assistant/memcastle-integration.toml".into(),
+                    manifest: "modules/assistant-module/memcastle-integration.toml".into(),
                     manifest_sha256: "a".repeat(64),
-                    entry: "modules/assistant/dist/index.js".into(),
+                    entry: "modules/assistant-module/dist/index.js".into(),
                     sha256: "b".repeat(64),
                     optional: false,
                     contract: None,
@@ -536,6 +543,10 @@ mod tests {
         let mut second = first.clone();
         second.id = "second".into();
         second.manifest.plugin.id = "second".into();
+        second.manifest.modules[0].id = "another-module".into();
+        second.manifest.modules[0].manifest =
+            "modules/another-module/memcastle-integration.toml".into();
+        second.manifest.modules[0].entry = "modules/another-module/dist/index.js".into();
         store
             .publish_plugin_with_sources(&first, &[], &[], &[])
             .await
@@ -547,7 +558,11 @@ mod tests {
         assert!(matches!(error, Error::PluginBlocked { .. }), "{error:?}");
         assert!(store.get_plugin("second").await.unwrap().is_none());
         store
-            .delete_plugin_with_sources("first", &[], &["assistant".into()])
+            .delete_plugin_with_sources(
+                "first",
+                &[],
+                &["assistant-module".into(), "integration:assistant".into()],
+            )
             .await
             .unwrap();
         store

@@ -23,6 +23,10 @@ memcastle integration remove opencode
 
 Restart OpenCode after each, because it loads plugins when it starts.
 [Integrations](integrations.md) describes what each command does and checks.
+The independently developed provider is at
+[memcastle-opencode](https://github.com/memcastle/memcastle-opencode), with the source and integration in one plugin archive.
+Until that archive is published and verified against a Core release, this Core release still bundles the legacy
+OpenCode integration; the installed integration ID and agent configuration remain `opencode`.
 
 ## What it changes
 
@@ -74,7 +78,7 @@ The ones you are most likely to set:
 `MEMCASTLE_MODE` takes this integration's labels (`full`, `read-only`, `off`), which are not the daemon's
 (`full`, `read_only`, `disabled`).
 The complete list is in the
-[plugin's README](https://github.com/memcastle/memcastle/blob/main/integrations/opencode/README.md#configuration).
+[plugin's README](https://github.com/memcastle/memcastle-opencode/blob/main/modules/opencode-integration/README.md#configuration).
 
 The plugin also accepts options, which win over the environment, but only when it is listed in `opencode.json`'s
 `plugin` (OpenCode 1) or `plugins` (OpenCode 2) list, and MemCastle does not edit that file.
