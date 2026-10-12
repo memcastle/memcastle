@@ -238,14 +238,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_catalogue_does_not_change_the_legacy_source_registry_contract() {
-        let text = include_str!("../../docs/plugins.json");
-        let index = PluginIndex::parse(text).unwrap();
-        assert!(index.plugins.is_empty());
-        assert!(serde_json::from_str::<super::super::SourceIndex>(text).is_err());
-    }
-
-    #[test]
     fn a_pinned_older_release_uses_its_own_module_inventory() {
         let index = PluginIndex::parse(
             &serde_json::json!({

@@ -217,16 +217,16 @@ mod tests {
     #[tokio::test]
     async fn a_custom_directory_catalogue_is_read_without_touching_the_source_index() {
         let directory = tempfile::tempdir().unwrap();
-        std::fs::write(
-            directory.path().join("plugins.json"),
-            include_bytes!("../../docs/plugins.json"),
-        )
-        .unwrap();
+        // A local fixture keeps the loader test independent of the reviewed catalogue's changing inventory.
+        let catalogue = r#"{"format":1,"name":"fixture","plugins":[{"id":"example","description":"Example provider","repository":"example/plugin","modules":[{"id":"files","type":"source"}]}]}"#;
+        std::fs::write(directory.path().join("plugins.json"), catalogue).unwrap();
         let registry = PluginRegistry::load(directory.path().to_str().unwrap())
             .await
             .unwrap();
-        assert!(registry.index.plugins.is_empty());
+        assert_eq!(registry.index.plugins.len(), 1);
+        assert_eq!(registry.index.plugins[0].id, "example");
         assert_eq!(registry.index.format, 1);
+        assert!(crate::domain::SourceIndex::parse(catalogue).is_err());
     }
 
     #[tokio::test]
