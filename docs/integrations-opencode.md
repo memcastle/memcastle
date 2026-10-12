@@ -9,30 +9,33 @@ It is installed with [`memcastle integration`](integrations.md); this page is wh
 
 - OpenCode 1.18.29 or later (2.x included), with the `opencode` command on your `PATH`.
   The installer runs `opencode --version` and refuses an older release, naming the version it found.
-- MemCastle 0.2 or later.
+- MemCastle 0.4 or later with plugin installation support.
 - A running daemon when you use OpenCode, not when you install: the plugin connects lazily and OpenCode starts normally
   without one.
 
 ## Install, update, remove
 
 ```sh
+memcastle plugin install /path/to/opencode-0.1.0.tar.gz --consent opencode=SHA256_FROM_PREVIEW
 memcastle integration install opencode
 memcastle integration update opencode
 memcastle integration remove opencode
 ```
 
+Build the archive from [memcastle-opencode](https://github.com/memcastle/memcastle-opencode) until an independent release
+is available. If the preview reports previously mined legacy OpenCode history, also pass `--adopt-source opencode` after
+reviewing the source identity; `--consent` must match the digest shown for this release's permissions.
+
 Restart OpenCode after each, because it loads plugins when it starts.
 [Integrations](integrations.md) describes what each command does and checks.
-The independently developed provider is at
-[memcastle-opencode](https://github.com/memcastle/memcastle-opencode), with the source and integration in one plugin archive.
-Until that archive is published and verified against a Core release, this Core release still bundles the legacy
-OpenCode integration; the installed integration ID and agent configuration remain `opencode`.
+The source and integration have separate lifecycles under one plugin archive; the installed integration ID and agent
+configuration remain `opencode`.
 
 ## What it changes
 
 | Where | What |
 |---|---|
-| `~/.local/share/memcastle/agents/opencode/` | `index.js` (the bundled plugin), `skills/` and the install receipt |
+| `~/.local/share/memcastle/agents/opencode/` | `index.js` (the installed integration), `skills/` and the install receipt |
 | `~/.config/opencode/plugins/memcastle.ts` | one marked line that re-exports `index.js` from there |
 
 OpenCode loads every file in its `plugins/` directory, so the shim is the whole registration:

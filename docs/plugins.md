@@ -45,6 +45,8 @@ An optional `identity` names the public source or integration ID when the archiv
 it must match that module's own manifest, and public IDs must be unique within each module type.
 For example, the OpenCode plugin uses module IDs `opencode` and `opencode-integration`,
 while both modules expose the public ID `opencode` through their respective source and integration interfaces.
+The reviewed [`plugins.json`](plugins.json) catalogue lists the standalone `memcastle-pi` and `memcastle-opencode`
+repositories; until a provider publishes a release, build its archive locally before installing it.
 Source modules retain their `memcastle-source.toml` and `source.wasm` contract;
 integration modules retain their `memcastle-integration.toml` and agent assets.
 An embedding-provider module may be declared for discovery, but its execution contract and selection belong to #256.

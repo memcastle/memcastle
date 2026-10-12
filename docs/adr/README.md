@@ -97,8 +97,9 @@ The history is the value.
   only to choose a mined directory's wing (and the CLI only for `note`, per ADR-031),
   and a project file cannot pick a palace
 - [ADR-030](030-opencode-history-is-an-installed-webassembly-source.md) — OpenCode's conversation history is an
-  installed WebAssembly source built from `sources/opencode/` that acquires sessions by running the `opencode` command,
-  a wider permission than a file grant, so no OpenCode or SQLite code enters the core
+  installed WebAssembly source that acquires sessions by running the `opencode` command,
+  a wider permission than a file grant, so no OpenCode or SQLite code enters the core;
+  its implementation moved to `memcastle-opencode` in #289
 - [ADR-031](031-note-capture.md) — `memcastle note` captures a thought as an unnamed drawer of source kind `note`, written
   through a synchronous service like the diary and read for entities like mined content; the CLI resolves the project
   scope itself with the reader the mining adapter shares, and there is no MCP tool
@@ -111,7 +112,8 @@ The history is the value.
 - [ADR-033](033-source-distribution.md) — sources are distributed as versioned packages through static JSON registry
   indexes (a URL, a `file://` URL or a directory, so offline needs no separate mechanism), pinned by SHA-256 and optionally
   signed with ed25519 under a `mining.trust` policy; bundled, registry and local sources share one lifecycle, `update`
-  never widens a source's permissions without consent, and releases bundle `pi`, `opencode` and `claude` as ordinary packages
+  never widens a source's permissions without consent; Core bundles `claude`, `codex`, `chatgpt` and `github` as ordinary
+  packages while Pi and OpenCode ship as provider plugins
   (completes ADR-026)
 - [ADR-034](034-agent-integration-distribution.md) — integrations ship with MemCastle as bundles (no npm package, no
   `bun install`) under the one assets root beside `sources/` and `skills/`, a checkout being a valid root;

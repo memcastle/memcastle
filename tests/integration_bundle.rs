@@ -2,9 +2,9 @@
 //! the tree it writes and from the checkout it builds in: the same lifecycle through both ways of choosing the root.
 //!
 //! This is what keeps the shipped integrations from being a claim about the
-//! release workflow that only a tag would test. It needs bun, so it is `#[ignore]`d from the basic suite and run by
-//! `mise run integrations:check` (`cargo test --test integration_bundle -- --ignored`); an ignored test says so in the
-//! output, which a silent skip would not.
+//! release workflow that only a tag would test. It is `#[ignore]`d from the basic suite and run by
+//! `mise run integrations:check` (`cargo test --test integration_bundle -- --ignored`) so builds cannot race with the
+//! basic suite's worktree reads.
 
 #![cfg(unix)]
 
@@ -68,7 +68,7 @@ fn names(dir: &Path) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "needs bun; `mise run integrations:check` runs it"]
+#[ignore = "`mise run integrations:check` runs the package check without racing another build"]
 fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills_and_nothing_else()
 {
     let package = package();
@@ -76,9 +76,9 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     assert_eq!(names(&package), ["integrations", "skills"]);
     assert_eq!(
         names(&package.join("integrations")),
-        ["claude-code", "codex", "opencode"]
+        ["claude-code", "codex"]
     );
-    for id in ["opencode", "claude-code", "codex"] {
+    for id in ["claude-code", "codex"] {
         let dir = package.join("integrations").join(id);
         // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
         let own: Vec<String> = names(&dir)
@@ -151,29 +151,12 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     }
 }
 
-#[test]
-#[ignore = "needs bun; `mise run integrations:check` runs it"]
-fn the_bundles_import_nothing_the_installed_copy_would_not_have() {
-    // A bare import left in a bundle would fail the moment the agent loads it, on a machine with no `node_modules`.
-    let package = package();
-    for (id, file) in [("opencode", "dist/index.js")] {
-        let text =
-            std::fs::read_to_string(package.join("integrations").join(id).join(file)).unwrap();
-        for dependency in ["@modelcontextprotocol/sdk", "smol-toml"] {
-            assert!(
-                !text.contains(&format!("from \"{dependency}")),
-                "{id} still imports {dependency} instead of carrying it"
-            );
-        }
-    }
-}
-
 /// Install every integration from `assets`, install again, then remove them, checking the state on the way.
 fn lifecycle_from(assets: &Path) {
     let machine = Machine::new();
     let flag = assets.to_str().unwrap();
 
-    for id in ["opencode", "claude-code", "codex"] {
+    for id in ["claude-code", "codex"] {
         machine
             .memcastle()
             .args(["integration", "install", id, "--assets-dir", flag])
@@ -192,7 +175,7 @@ fn lifecycle_from(assets: &Path) {
     }
 
     // Whatever layout `assets` is, each integration exposes exactly the skills its own manifest names.
-    for id in ["opencode", "claude-code", "codex"] {
+    for id in ["claude-code", "codex"] {
         let text =
             std::fs::read_to_string(assets.join("integrations").join(id).join(MANIFEST_FILE))
                 .unwrap();
@@ -221,22 +204,12 @@ fn lifecycle_from(assets: &Path) {
         }
     }
     assert!(machine.pi_packages().is_empty());
-    // OpenCode's shim points at a file that exists.
-    let shim = std::fs::read_to_string(machine.plugin_file()).unwrap();
-    assert!(
-        machine.installed("opencode").join("index.js").is_file(),
-        "{shim}"
-    );
-    assert!(
-        machine
-            .installed("opencode")
-            .join("skills/wake-up/SKILL.md")
-            .is_file()
-    );
+    // Installing the remaining agents never writes an OpenCode plugin shim.
+    assert!(!machine.plugin_file().exists());
     assert_eq!(machine.claude_plugins(), ["memcastle@memcastle-local"]);
     assert_eq!(machine.codex_plugins(), ["memcastle@memcastle-local"]);
 
-    for id in ["opencode", "claude-code", "codex"] {
+    for id in ["claude-code", "codex"] {
         let again = machine
             .memcastle()
             .args(["integration", "install", id, "--json", "--assets-dir", flag])
@@ -259,13 +232,13 @@ fn lifecycle_from(assets: &Path) {
 }
 
 #[test]
-#[ignore = "needs bun; `mise run integrations:check` runs it"]
+#[ignore = "`mise run integrations:check` runs the package check without racing another build"]
 fn the_packaged_tree_installs_and_removes_every_integration() {
     lifecycle_from(&package());
 }
 
 #[test]
-#[ignore = "needs bun; `mise run integrations:check` runs it"]
+#[ignore = "`mise run integrations:check` runs the package check without racing another build"]
 fn the_development_checkout_installs_and_removes_every_integration_through_the_same_code() {
     // Building the package built `dist/` in the checkout, which is all development mode needs.
     package();

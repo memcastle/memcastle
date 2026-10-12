@@ -274,11 +274,8 @@ raw_args = true
 run = "cargo nextest run --profile wasm --test 'wasm_*'"
 
 [tasks."integrations:check"]
-description = "Typecheck and test every package under integrations/ against a real daemon"
-# bun is declared here and not in `[tools]`, for the same reason as cargo-insta: only this task needs it, and
-# `mise install` in every CI job would otherwise fetch it too.
-tools = { bun = "1" }
-# The packages replay their tests against a real `memcastle serve`, so the debug binary must exist and be current.
+description = "Package and test the Core-shipped declarative integrations"
+# The installer tests run the real binary against the package tree and checkout.
 depends = ["build"]
 run = """
 #!/usr/bin/env bash
@@ -288,32 +285,20 @@ set -euo pipefail
 for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
 export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
 # The bundles the release ships, built by the release's own script and installed from both the package tree and this
-# checkout (docs/adr/034). The test is `#[ignore]`d in the basic suite because it needs bun; here bun is on the PATH.
+# checkout (docs/adr/034). The ignored test runs only here, so simultaneous suites never rebuild the same `dist/`.
 packaging/integrations/build.sh target/bundled-integrations
 cargo test --test integration_bundle -- --ignored
-packages=()
-for manifest in integrations/*/package.json; do
-  package="$(dirname "$manifest")"
-  packages+=("$package")
-done
-for package in "${packages[@]}"; do
-  echo "==> $package"
-  # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
-  (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)")
-done
 """
 
 [tasks."integrations:build"]
-description = "Bundle the OpenCode integration into integrations/<id>/dist, which is all development mode needs"
-# After this, `memcastle integration install opencode --assets-dir "$PWD"` installs the checkout bundle.
-tools = { bun = "1" }
+description = "Prepare the declarative integrations under integrations/<id>/dist for development"
+# After this, `memcastle integration install claude-code --assets-dir "$PWD"` installs the checkout assets.
 run = "packaging/integrations/build.sh"
 
 [tasks."integrations:package"]
 description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
 # The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
-# (`memcastle integration install opencode --assets-dir target/bundled-integrations`).
-tools = { bun = "1" }
+# (`memcastle integration install claude-code --assets-dir target/bundled-integrations`).
 run = "packaging/integrations/build.sh target/bundled-integrations"
 
 [tasks."web:check"]
@@ -374,7 +359,7 @@ set -euo pipefail
 for manifest in sources/*/memcastle-source.toml; do
   source="$(dirname "$manifest")"
   echo "==> $source"
-  # A source that wraps a program ships a stand-in for it in `fixtures/bin` (sources/opencode), which its cases need
+  # A source that wraps a program ships a stand-in for it in `fixtures/bin`, which its cases need
   # first on the PATH because the real program needs data no fixture can carry.
   PATH="$PWD/$source/fixtures/bin:$PATH" ./target/debug/memcastle source test "$source"
 done

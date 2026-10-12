@@ -3,10 +3,9 @@
 #
 # Usage: packaging/integrations/build.sh [out-dir]
 #
-# Always: bundles each integration into `integrations/<id>/dist/`, one self-contained JavaScript file with every
-# dependency inlined. That is what makes the official installation path need no
-# npm publication and no `bun install` on the user's machine (docs/adr/034), and it is also all the development mode
-# needs: `memcastle integration install <id> --assets-dir <checkout>` installs from these `dist/` directories.
+# Always: copies each declarative integration's agent assets into `integrations/<id>/dist/`.
+# No package manager is needed on the user's machine (docs/adr/034); a development checkout can be installed from
+# these same `dist/` directories with `memcastle integration install <id> --assets-dir <checkout>`.
 #
 # With <out-dir>: also writes the tree an OS package installs under `share/memcastle/` -
 #   <out-dir>/integrations/<id>/{memcastle-integration.toml,dist/,skills/ (only if the integration has its own)}
@@ -14,8 +13,7 @@
 # and checks that nothing which must not ship came along. One script for 📦 Publish Release and for
 # `mise run integrations:package`, so what a release bundles is what a developer can build and test.
 #
-# Needs bun. The agents' own SDKs stay external: the agent provides them (they are type-only imports, plus OpenCode's
-# optional `tool` helper), and a second copy in the bundle would be a second copy of its classes.
+# The remaining integrations use their agents' declarative plugin assets, without a JavaScript build.
 set -euo pipefail
 
 if [ "$#" -gt 1 ]; then
@@ -26,36 +24,9 @@ out="${1:-}"
 
 # Which integrations ship is a packaging decision and does not constrain the runtime (docs/adr/034): any directory
 # under `integrations/` with a `memcastle-integration.toml` and a `dist/` could be added here.
-BUNDLED=(opencode claude-code codex)
+BUNDLED=(claude-code codex)
 
 cd "$(dirname "$0")/../.."
-root="$PWD"
-
-# bun may be provided by mise (see `mise.toml`), which `mise run` puts on the PATH; a bare shell needs it installed.
-if ! command -v bun > /dev/null; then
-  echo "error: bun is not on the PATH; install it (https://bun.sh), or run this through 'mise run integrations:build'" >&2
-  exit 1
-fi
-
-bundle() {
-  local id="$1" entry="$2"
-  shift 2
-  local dir="${root}/integrations/${id}"
-  # A stale bundle would be installed if the build below failed half-way and left it.
-  rm -rf "${dir}/dist"
-  (
-    cd "${dir}"
-    # --frozen-lockfile: a lockfile that disagrees with package.json is a failure, not a silent rewrite.
-    bun install --frozen-lockfile > /dev/null
-    # `--target=node` because nothing here uses a Bun API, so the bundle loads under any runtime an agent embeds.
-    bun build "${entry}" --outdir dist --target=node "$@" > /dev/null
-  )
-  test -f "${dir}/dist/$(basename "${entry%.ts}").js" || { echo "error: bundling ${id} produced no output" >&2; exit 1; }
-}
-
-# OpenCode 1 treats every export of a plugin module as a plugin; the entry exports only `default`, and bun keeps it so.
-bundle opencode src/index.ts --external '@opencode-ai/*' --external '@opencode/*'
-
 # Claude Code loads declarative plugin assets itself, so no JavaScript runtime is bundled.
 rm -rf integrations/claude-code/dist
 mkdir -p integrations/claude-code/dist

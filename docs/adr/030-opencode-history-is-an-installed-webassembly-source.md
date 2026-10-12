@@ -5,6 +5,9 @@
 Accepted, builds on [ADR-023](023-unified-source-model-for-mining.md) (the source model),
 [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md) (sources as WebAssembly components) and
 [ADR-028](028-pi-history-is-an-installed-webassembly-source.md) (Pi's history as an installed source), issue #90.
+The source implementation, fixtures and tests moved to the standalone
+[`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode) plugin in #289;
+the historical Core paths and bundling decision below describe the original rollout, not current packaging.
 
 ## Context
 
