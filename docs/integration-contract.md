@@ -13,7 +13,7 @@ There is no shared runtime, no abstract base class and no code that hides how Pi
 ```mermaid
 flowchart LR
     subgraph client["One per agent: lifecycle"]
-        pi["integrations/pi"]
+        pi["memcastle-pi/modules/pi"]
         oc["integrations/opencode"]
         cc["integrations/claude-code"]
     end
@@ -110,13 +110,9 @@ A disabled session must behave as if MemCastle does not exist, and context isola
 
 Daemon-side (tested): three sessions in three modes share one daemon and each reads back its own mode,
 every wire value outcome in the fixture holds for every gated tool, and a refused mode leaves the session unchanged.
-Client-side (tested): `integrations/common/test/off-isolation.test.ts` replays `off-isolation.json` against each
-integration, driving every path that could put MemCastle material in front of the model in `off`
-(which must surface nothing and make no request) and in `full` (which must surface something, so the driver is not vacuous);
-`integrations/common/test/mixed-modes.test.ts` runs Pi and OpenCode sessions in all three modes against one daemon
-and checks, from the requests each made, that a `full` session's checkpoint lands while an `off` session beside it does
-nothing and a `read-only` session never calls a write tool.
-A new integration adds its drivers and an actor to those two files ([ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md)).
+Client-side (tested): each integration tests `off` and `full` against the same versioned conformance fixtures and a
+real Core daemon; the Pi implementation does so in `memcastle-pi`, and Core's OpenCode integration does so here.
+Daemon-side session isolation is tested in Core independently of which provider supplies an agent client.
 
 ### Wake-up
 

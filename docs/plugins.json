@@ -1,5 +1,15 @@
 {
   "format": 1,
   "name": "MemCastle plugins",
-  "plugins": []
+  "plugins": [
+    {
+      "id": "pi",
+      "description": "Pi coding-agent history and lifecycle integration",
+      "repository": "memcastle/memcastle-pi",
+      "modules": [
+        { "id": "pi", "type": "source" },
+        { "id": "pi", "type": "integration" }
+      ]
+    }
+  ]
 }

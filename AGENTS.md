@@ -300,10 +300,11 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
-sources/        official and reference WebAssembly sources (`directory`, `pi`, `opencode`), one package per directory, built and
-                tested but not compiled into MemCastle; `pi` and `opencode` ship with releases (`packaging/sources/build.sh`)
-integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only;
+sources/        official and reference WebAssembly sources (`directory`, `opencode`, ...), one package per directory, built and
+                tested but not compiled into MemCastle; `opencode` ships with releases (`packaging/sources/build.sh`)
+integrations/   per-agent lifecycle adapters (OpenCode, Claude Code, ...), in each agent's own language, over MCP and HTTP only;
                 each carries a `memcastle-integration.toml` and is bundled into `dist/` for `memcastle integration install`
+                Pi's source and integration live together in the standalone `memcastle-pi` provider plugin.
 web/            the web UI: a Vue 3 and OpenVue application, a client of the REST API, built into `web/dist/` and
                 served under `/ui` from the assets root when `web.enable` is set (docs/web.md)
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the

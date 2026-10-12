@@ -289,9 +289,8 @@ The label is translated to the daemon's wire value (`off` is `disabled`, `read-o
 - **`off` is absent, not refused.**
   `createCore` returns nothing, so V1 returns no hooks and V2 registers none: there is no connection, no health check,
   no system transform, no compaction hook, no skills path, no tool and no command.
-  `integrations/common/test/off-isolation.test.ts` proves it on the wire against a real daemon holding a marker drawer:
-  no request is made and no marker reaches the model, through every path listed in
-  `tests/fixtures/integration/off-isolation.json`.
+  The client suite checks `off` behavior, and the Core conformance suite checks daemon isolation
+  against the versioned cases in `tests/fixtures/integration/off-isolation.json`.
 - **A skill copied by hand is out of reach.**
   The plugin registers the shared skills itself and registers none in `off`.
   Refusing a skill's load from `tool.execute.before` would need the plugin to stay active in `off` just to guard a hook,
@@ -299,12 +298,12 @@ The label is translated to the daemon's wire value (`off` is `disabled`, `read-o
   A copy a user installed under `.agents/skills`, or `mcp.memcastle` in `opencode.json`, is OpenCode's to load,
   so remove those when a project must be free of MemCastle.
 - **A mode that cannot be parsed fails closed:** the plugin logs why and does nothing.
-- **Mixed sessions:** `integrations/common/test/mixed-modes.test.ts` runs OpenCode and Pi sessions in `full`,
-  `read-only` and `off` against one daemon and checks each against the requests it made.
+- **Concurrent sessions:** the daemon's session-mode tests keep each session's mode independent.
 
 ### Connection lifecycle
 
-This differs from the [Pi adapter](../pi/README.md#connection-lifecycle), which holds a single connection.
+This differs from the [Pi adapter](https://github.com/memcastle/memcastle-pi/blob/main/docs/integration.md#connection-lifecycle),
+which holds a single connection.
 One OpenCode process hosts many sessions, and OpenCode's own MCP client shares one connection across all of them.
 MemCastle's memory mode belongs to a connection, so a shared one could not give two sessions different modes
 (see [Session mode](docs/research.md#session-mode-to-set_mode)).

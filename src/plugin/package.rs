@@ -510,38 +510,35 @@ mod tests {
     }
 
     #[test]
-    fn a_source_and_integration_share_a_package_but_remain_distinct_modules() {
+    fn a_source_and_integration_with_the_same_id_remain_distinct_in_the_archive() {
         let mut files = fixture();
         let mut manifest =
             manifest::parse(std::str::from_utf8(&files[MANIFEST_FILE]).unwrap()).unwrap();
         manifest.modules.retain(|module| module.id == "one");
         files.remove("modules/two/memcastle-source.toml");
         files.remove("modules/two/source.wasm");
-        let integration = b"format = 1\n[integration]\nid = 'assistant'\nversion = '0.1.0'\ndescription = 'An assistant integration'\n[compatibility]\nmemcastle = '>=0.4.0'\n[agent]\nkind = 'opencode'\nentry = 'dist/plugin.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
+        let integration = b"format = 1\n[integration]\nid = 'one'\nversion = '0.1.0'\ndescription = 'An assistant integration'\n[compatibility]\nmemcastle = '>=0.4.0'\n[agent]\nkind = 'opencode'\nentry = 'dist/plugin.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
         let entry = b"export default () => {}";
         manifest.modules.push(PluginModule {
-            id: "assistant".to_string(),
+            id: "one".to_string(),
             kind: PluginModuleKind::Integration,
             version: "0.1.0".to_string(),
-            manifest: "modules/assistant/memcastle-integration.toml".to_string(),
+            manifest: "modules/one/memcastle-integration.toml".to_string(),
             manifest_sha256: sha256_hex(integration),
-            entry: "modules/assistant/dist/plugin.js".to_string(),
+            entry: "modules/one/dist/plugin.js".to_string(),
             sha256: sha256_hex(entry),
             optional: false,
             contract: None,
             config_schema: None,
         });
         files.insert(
-            "modules/assistant/memcastle-integration.toml".to_string(),
+            "modules/one/memcastle-integration.toml".to_string(),
             integration.to_vec(),
         );
-        files.insert(
-            "modules/assistant/dist/plugin.js".to_string(),
-            entry.to_vec(),
-        );
+        files.insert("modules/one/dist/plugin.js".to_string(), entry.to_vec());
         // The installer needs the entire declared asset tree, including chunks beside the entry point.
         files.insert(
-            "modules/assistant/dist/chunks/runtime.js".to_string(),
+            "modules/one/dist/chunks/runtime.js".to_string(),
             b"export const chunk = true;".to_vec(),
         );
         files.insert(

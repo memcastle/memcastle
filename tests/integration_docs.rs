@@ -115,8 +115,12 @@ fn every_integration_the_repository_ships_has_a_manifest_this_memcastle_accepts(
         found += 1;
     }
     assert_eq!(
-        found, 4,
-        "Pi, OpenCode, Claude Code and Codex ship; add the new one to this count and to packaging/integrations/build.sh"
+        found, 3,
+        "OpenCode, Claude Code and Codex ship; add the new one to this count and to packaging/integrations/build.sh"
+    );
+    assert!(
+        !root().join("integrations/pi").exists(),
+        "the Pi integration ships from its plugin"
     );
 }
 
@@ -162,7 +166,7 @@ fn the_release_script_bundles_exactly_the_integrations_that_have_a_manifest() {
         .lines()
         .find(|line| line.starts_with("BUNDLED=("))
         .expect("the script lists what it bundles");
-    for id in ["pi", "opencode", "claude-code", "codex"] {
+    for id in ["opencode", "claude-code", "codex"] {
         assert!(line.contains(id), "BUNDLED lacks {id}: {line}");
         assert!(
             root()

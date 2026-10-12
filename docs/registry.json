@@ -36,13 +36,6 @@
       "homepage": "https://memcastle.github.io/mining-sources/#opencode",
       "license": "MIT",
       "repository": "memcastle/memcastle"
-    },
-    {
-      "name": "pi",
-      "description": "Pi coding-agent session history (JSONL files under ~/.pi/agent/sessions), one document per session",
-      "homepage": "https://memcastle.github.io/mining-sources/#pi",
-      "license": "MIT",
-      "repository": "memcastle/memcastle"
     }
   ]
 }

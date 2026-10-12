@@ -120,7 +120,7 @@ impl PluginIndex {
             }
             let mut modules = HashSet::new();
             for module in &plugin.modules {
-                if !is_valid_source_name(&module.id) || !modules.insert(&module.id) {
+                if !is_valid_source_name(&module.id) || !modules.insert((module.kind, &module.id)) {
                     return Err(format!(
                         "plugin `{}` has invalid or duplicated module `{}`",
                         plugin.id, module.id
@@ -152,7 +152,9 @@ impl PluginIndex {
                 if let Some(modules) = &version.modules {
                     let mut ids = HashSet::new();
                     for module in modules {
-                        if !is_valid_source_name(&module.id) || !ids.insert(&module.id) {
+                        if !is_valid_source_name(&module.id)
+                            || !ids.insert((module.kind, &module.id))
+                        {
                             return Err(format!(
                                 "plugin `{}` version `{}` has invalid or duplicated module `{}`",
                                 plugin.id, version.version, module.id
@@ -217,21 +219,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_catalogue_cannot_publish_the_same_module_twice() {
+    fn a_catalogue_can_list_a_source_and_integration_with_one_id_but_not_two_of_a_kind() {
         let index = r#"{"format":1,"name":"test","plugins":[{"id":"acme","description":"test","repository":"acme/acme","modules":[{"id":"alpha","type":"source"},{"id":"alpha","type":"integration"}]}]}"#;
-        assert!(
-            PluginIndex::parse(index)
-                .unwrap_err()
-                .contains("duplicated module")
-        );
-    }
-
-    #[test]
-    fn an_empty_catalogue_does_not_change_the_legacy_source_registry_contract() {
-        let text = include_str!("../../docs/plugins.json");
-        let index = PluginIndex::parse(text).unwrap();
-        assert!(index.plugins.is_empty());
-        assert!(serde_json::from_str::<super::super::SourceIndex>(text).is_err());
+        let mut parsed = PluginIndex::parse(index).unwrap();
+        let inventory = parsed.plugins[0].modules.clone();
+        parsed.plugins[0].versions.push(IndexedPluginVersion {
+            version: "0.1.0".into(),
+            url: "https://example.com/acme.tar.gz".into(),
+            sha256: "0".repeat(64),
+            signature: None,
+            modules: Some(inventory),
+            yanked: false,
+        });
+        parsed.validate().unwrap();
+        let duplicate = parsed.plugins[0].modules[0].clone();
+        parsed.plugins[0].modules.push(duplicate);
+        assert!(parsed.validate().unwrap_err().contains("duplicated module"));
     }
 
     #[test]

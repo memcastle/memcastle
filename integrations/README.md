@@ -45,19 +45,16 @@ does not classify.
 
 ```text
 integrations/
-  pi/            TypeScript/bun — the primary V1 integration (Phase 2); scaffolded
-  opencode/      TypeScript/bun — an OpenCode plugin (Phase 3); scaffolded
+  opencode/      TypeScript/bun — an OpenCode plugin
   claude-code/   Claude Code local-marketplace plugin with native MCP and commands
-  common/        test-only: the tests that need two integrations side by side, and the harness they share
 ```
 
 Each TypeScript package is self-contained, with its own `package.json`, lockfile and tests, and carries its own copy of
 the small client it needs.
 `mise run integrations:check` typechecks and tests every one of them against a real daemon;
 see [ADR-022](../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
-`common/` is the one exception to "nothing shared": it holds no production code, only tests that import the other
-packages' sources, such as mixed-mode sessions and the proof that an `off` session receives nothing
-([ADR-027](../docs/adr/027-cross-integration-tests-live-in-a-common-package.md)).
+The Pi integration and its tests now ship from the standalone
+[`memcastle-pi`](https://github.com/memcastle/memcastle-pi) repository.
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
@@ -101,15 +98,13 @@ it is not a package manager and resolves nothing.
 
 ## Status
 
-The Pi and OpenCode packages are scaffolds in that two capabilities are still unbuilt, but the rest works: their
-connection, mode, discovery and failure handling are tested, and wake-up on session start (#22, #33), search-before-answer with the shared skills
-(#25, #36), checkpointing (interval and manual in both, #23 and #24; emergency in both, #34) and the project context
-(#183) are implemented in both.
-The manual audit/repair command is implemented in both (#28, #127); background mining is not built in either, by design: the daemon keeps that schedule when the user enables a [trigger](../docs/triggers.md) (#26 and #125, superseded by #189).
-Explicit memory modes (`full`, `read-only`, `off`) are complete in both (#27, #35): `read-only` never attempts a write
-and `off` registers nothing, proved on the wire in `common/`.
-The persistent MCP session is complete in both: one connection for the whole session, kept alive, and replaced with its
-mode re-selected if the daemon forgets it.
+The OpenCode package tests connection, mode, discovery and failure handling against a real daemon.
+It supports wake-up at session start, search-before-answer, interval/manual/emergency checkpoints, project context and
+manual audit/repair.
+Background mining is daemon-side: a user-enabled [trigger](../docs/triggers.md) schedules a miner without an agent timer.
+In `read-only` mode the client sends no write; in `off` it registers nothing.
+Its persistent MCP connection is re-established with the same session mode if the daemon forgets it.
+The Pi extension has its own client tests in [`memcastle-pi`](https://github.com/memcastle/memcastle-pi).
 Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.

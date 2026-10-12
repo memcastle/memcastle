@@ -17,6 +17,7 @@ Its format-1 `plugins[]` entries name an `id`, `description`, GitHub `owner/repo
 `{id, type}` modules.
 Entries may list signed versions with `version`, archive `url` and `sha256`, or omit `versions` to discover
 digest-bearing GitHub Release assets named `<plugin-id>-<version>.tar.gz`.
+An entry may appear before its first release; it is searchable, but cannot be installed until an archive is published.
 For a signed static entry, run `memcastle source keygen <private-key>` once, then
 `memcastle plugin sign <archive> --key <private-key>` and publish its reported `sha256` and `signature` fields.
 Users who require that publisher's signature set `plugins.trust = "required"` and list its public key under
@@ -36,6 +37,8 @@ An optional dependency may be absent, but is version-checked when present.
 Removing a plugin blocks required dependents; optional dependents remain installed without it.
 Each module specifies a stable `id`, `type`, semantic `version`, paths `manifest` and `entry`,
 SHA-256 values `manifest_sha256` and `sha256`, and optionally `optional`, `config_schema` and a source `contract`.
+A source and an integration may share an ID (for example, Pi's two `pi` modules); identities are unique by `(type, id)`.
+Two modules of the same type cannot share an ID, and their artifact paths must remain distinct.
 The parent may also declare `shared_config_schema` and `[authentication]` with a public `kind` and a credential reference;
 no login token or client secret is written into the manifest.
 Source modules retain their `memcastle-source.toml` and `source.wasm` contract;
@@ -82,6 +85,8 @@ Rust project template is not the provider-template toolchain.
 The parent composes source/integration templates for each selected module ID and records their resolved commits;
 an empty initial plugin is valid, and another module can be added by changing the recorded answer and updating GitTPL.
 Call `git tpl init` on those repositories directly rather than asking MemCastle to scaffold code.
+GitTPL 0.14 currently refuses the same name in both composition lists; a provider with shared source/integration IDs
+composes one module, overlays the other from its pinned child template, and records that step in its repository.
 
 From a directory containing local clones of all three template repositories:
 

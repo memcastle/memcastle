@@ -7,11 +7,11 @@ It decides *when* to call MemCastle and does nothing else; every call goes to th
 What each integration must do is the [Integration contract](integration-contract.md).
 This page is about getting one onto your machine.
 
-MemCastle ships integrations for **Pi**, **OpenCode**, **Claude Code** and **Codex**.
-`memcastle integration` installs them.
-Nothing is downloaded and no npm package is involved:
-the integrations are part of the MemCastle release, built and versioned with it.
-An installed [provider plugin](plugins.md) can also supply an integration module.
+MemCastle ships integrations for **OpenCode**, **Claude Code** and **Codex**.
+The **Pi** integration comes from the independently released [memcastle-pi provider plugin](integrations-pi.md).
+`memcastle integration` installs either locally, after its plugin is available.
+Core's integrations are part of its release; neither they nor an installed Pi plugin need an npm download on the
+user's machine.
 `plugin install` only makes it selectable; `integration install <module-id>` still copies and registers the selected
 agent-side files locally, and `integration remove` undoes that registration without uninstalling its parent plugin.
 
@@ -22,7 +22,7 @@ flowchart LR
         I -->|MCP and HTTP| D[memcastle daemon]
         I -.->|exposes| S[Skills it names]
     end
-    P[Package or checkout<br/>integrations/ and skills/] -->|memcastle integration install| I
+    P[Core assets or installed plugin] -->|memcastle integration install| I
 ```
 
 ## What an integration packages
@@ -46,25 +46,25 @@ flowchart TB
 - **Skills** need no integration either: [Install the skills](skills.md#install-the-skills) copies them into the
   directory a client scans.
 - **An integration** adds the lifecycle glue, and carries the skills the agent should have, so
-  `memcastle integration install pi` is the whole setup and no separate skill installation follows.
+  `memcastle integration install pi` installs both Pi's extension and its skills after the plugin is installed.
   Its manifest lists them, each either a [shared skill](skills.md) referenced by name or a skill of its own.
 
 ## Supported integrations
 
 | Integration | Agent | Agent versions | MemCastle versions | Guide |
 |---|---|---|---|---|
-| `pi` | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.2 and later | [Pi](integrations-pi.md) |
+| `pi` (external plugin) | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.4 and later | [Pi](integrations-pi.md) |
 | `opencode` | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.2 and later | [OpenCode](integrations-opencode.md) |
 | `claude-code` | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.2 and later | [Claude Code](integrations-claude-code.md) |
 | `codex` | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | 0.2 and later | [Codex](integrations-codex.md) |
 
-`memcastle integration list` shows the same ranges for the MemCastle you run, since they come from the integrations it ships.
+`memcastle integration list` shows installed plugin integrations alongside those Core ships, with their own version ranges.
 
 ## Requirements
 
 - The agent is installed and its command (`pi`, `opencode`, `claude`, `codex`) is on your `PATH`.
   The installer runs it to read its version and, for Pi, to register the integration with it.
-- The MemCastle you run ships integrations: a native package, a release tarball or a checkout (see
+- The MemCastle you run ships an integration, or you have installed its provider plugin (see
   [Where integrations come from](#where-integrations-come-from)).
   A standalone binary downloaded on its own ships none, and says so.
 - The agent and MemCastle versions are inside the ranges the integration declares.
@@ -77,15 +77,16 @@ The daemon does not have to be running to install one; it has to be running when
 
 ```sh
 memcastle integration list
-memcastle integration install pi
 memcastle integration install opencode
 memcastle integration install claude-code
 memcastle integration install codex
+# For Pi, first install its provider archive (see the Pi guide), then:
+memcastle integration install pi
 ```
 
 `install` does five things, in this order, and stops at the first one that fails:
 
-1. Finds the integration among the shipped ones and checks it against your MemCastle and your agent.
+1. Finds the integration among the shipped ones or installed plugins and checks it against your MemCastle and agent.
 2. Copies its files, and the [skills](skills.md) its manifest names, to `~/.local/share/memcastle/agents/<id>/`.
 3. Records what it copied, with a SHA-256 for each file, in a receipt beside them.
 4. Tells the agent about the copy: `pi install` for Pi, one plugin file for OpenCode, or the agent's
@@ -180,11 +181,6 @@ in a package and in a checkout alike:
 ```text
 <assets root>/
 ├── integrations/
-│   ├── pi/
-│   │   ├── memcastle-integration.toml
-│   │   ├── dist/
-│   │   └── skills/                (only for skills this integration alone needs)
-│   │       └── <name>/SKILL.md
 │   ├── opencode/
 │   │   ├── memcastle-integration.toml
 │   │   └── dist/
@@ -222,14 +218,14 @@ MemCastle:
 ```sh
 mise run integrations:build                                  # bundle integrations/*/src into integrations/*/dist
 memcastle integration list --assets-dir "$PWD"               # the checkout is the assets root
-memcastle integration install pi --assets-dir "$PWD"
+memcastle integration install opencode --assets-dir "$PWD"
 ```
 
 The checkout already has the layout above (`integrations/<id>/`, `skills/`), and `integrations:build` is the step that
 creates the `dist/` directories.
 Installing from a checkout goes through exactly the code a package install does, so what you test is what ships.
 Because a development build never changes the integration's version, the installer compares file contents as well:
-rebuild, run `memcastle integration update pi --assets-dir "$PWD"`, and the new bundle replaces the old one.
+rebuild, run `memcastle integration update opencode --assets-dir "$PWD"`, and the new bundle replaces the old one.
 `MEMCASTLE_ASSETS_DIR` does the same as the flag for a whole shell session.
 In this repository `mise.toml` sets it to the checkout for you: with mise active (`mise run`, `mise cli`, or an activated
 shell), any `memcastle integration ...` run from the project directory, even an installed `memcastle`, reads the
@@ -318,7 +314,7 @@ Adding an agent is a new adapter and a new `kind`; the manifest format does not 
   MemCastle version and no separate skill installation is needed.
   Both shipped integrations expose all five, and the agent lists them itself.
 - **Mining sources.**
-  `sources/pi` and `sources/opencode` are different things: WebAssembly sources that mine an agent's session history
+  `memcastle-pi`'s source module and `sources/opencode` are WebAssembly sources that mine an agent's session history
   ([Mining sources](mining-sources.md)).
   The lifecycle integrations on this page are what run inside the agent.
 

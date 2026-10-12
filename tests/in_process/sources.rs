@@ -3,8 +3,8 @@
 //! (docs/adr/023) every source goes through.
 //!
 //! The source is the built-in `directory` source adapter named explicitly, which is the form every other source takes
-//! on the wire. What is specific to one source (Pi's history, `sources/pi`) is tested with that source, in
-//! `tests/wasm_pi.rs`; what is tested here is what the daemon does for any source.
+//! on the wire. Provider-specific behavior (such as Pi's history) is tested in the provider repository, in
+//! the external provider repository; what is tested here is what the daemon does for any source.
 
 use crate::common;
 

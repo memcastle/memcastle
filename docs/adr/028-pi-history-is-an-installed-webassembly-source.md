@@ -7,6 +7,8 @@ Accepted, builds on [ADR-023](023-unified-source-model-for-mining.md) (the sourc
 [ADR-019](019-shared-integration-contract.md) (an integration is lifecycle glue over MCP and HTTP).
 It supersedes the part of ADR-023 that shipped `pi-sessions` as a built-in adapter, and the part of ADR-026 that kept it
 native (issue #161).
+The source and its tests moved from Core to the standalone `memcastle-pi` plugin in #290;
+the `pi` source ID, WIT contract and cursor format remain unchanged.
 
 ## Context
 

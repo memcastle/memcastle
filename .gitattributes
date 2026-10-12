@@ -2,9 +2,6 @@
 # would turn "alpha\n" into "alpha\r\n" and fail every case on that platform for a reason that is not the source's.
 tests/fixtures/sources/conformance/** -text
 
-# Pi session fixtures compare file contents byte for byte, like the shared conformance cases above.
-sources/pi/fixtures/** -text
-
 # OpenCode fixtures compare file contents byte for byte, and the stand-in `opencode` is a shell script that must keep
 # its line endings to run.
 sources/opencode/fixtures/** -text

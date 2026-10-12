@@ -88,9 +88,9 @@ The history is the value.
   (`pi-sessions` as a built-in adapter partly superseded by ADR-028, distribution completed by ADR-033)
 - [ADR-027](027-cross-integration-tests-live-in-a-common-package.md) — tests that need two integrations live in a
   test-only `integrations/common` package that imports their sources, and production code stays per package
-  (amends ADR-022)
+  (historical: superseded for Pi by the standalone provider split in #290)
 - [ADR-028](028-pi-history-is-an-installed-webassembly-source.md) — Pi's conversation history is an installed WebAssembly
-  source built from `sources/pi/`, and the core has no Pi-specific code; the native `pi-sessions` adapter is removed
+  source, with the native `pi-sessions` adapter removed; its implementation moved to `memcastle-pi` in #290
   (supersedes part of ADR-023 and ADR-026)
 - [ADR-029](029-project-local-configuration.md) — a project declares its wing and room in `.config/memcastle.toml`
   and `MEMCASTLE_WING` / `MEMCASTLE_ROOM`, read by each integration and passed as ordinary arguments; the daemon reads it

@@ -89,7 +89,8 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
         assert_eq!(source.homepage.as_deref(), Some(homepage.as_str()));
     }
 
-    for name in ["pi", "opencode", "claude", "codex"] {
+    // The external Pi plugin is not a source-only release asset in Core's index.
+    for name in ["opencode", "claude", "codex"] {
         let source = index
             .find(name)
             .unwrap_or_else(|| panic!("the official registry does not list `{name}`"));
@@ -102,6 +103,11 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
             "`{name}`'s description in the registry differs from its manifest"
         );
     }
+    assert!(
+        index.find("pi").is_none(),
+        "Pi is distributed as a plugin, not a Core source archive"
+    );
+    assert!(!root().join("sources/pi").exists());
 }
 
 #[test]

@@ -38,27 +38,6 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
-  # The test-only package that runs two integrations side by side (ADR-027): TypeScript and the bun types only.
-  - package-ecosystem: bun
-    directory: /integrations/common
-    schedule:
-      interval: weekly
-    rebase-strategy: disabled
-    groups:
-      common-dependencies:
-        patterns: ["*"]
-        update-types: [minor, patch]
-
-  - package-ecosystem: bun
-    directory: /integrations/pi
-    schedule:
-      interval: weekly
-    rebase-strategy: disabled
-    groups:
-      pi-dependencies:
-        patterns: ["*"]
-        update-types: [minor, patch]
-
   # The web UI (docs/adr/035): a Vue application built into static files that ship with releases.
   - package-ecosystem: bun
     directory: /web

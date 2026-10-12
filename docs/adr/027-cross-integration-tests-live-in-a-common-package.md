@@ -2,9 +2,12 @@
 
 ## Status
 
-Accepted, amends [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) (which said there is
-nothing shared between packages) and applies [ADR-019](019-shared-integration-contract.md) (the client half of the
-contract is proved by the clients, against the same fixtures).
+Superseded for Pi by its move to the standalone `memcastle-pi` repository (#290).
+The language-neutral daemon contract fixtures remain in Core, while each provider tests its client independently.
+Originally accepted, amends [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md)
+(which said there is nothing shared between packages).
+It also applies [ADR-019](019-shared-integration-contract.md): the client half of the contract is proved by the clients,
+against the same fixtures.
 
 ## Context
 
