@@ -17,6 +17,7 @@ Its format-1 `plugins[]` entries name an `id`, `description`, GitHub `owner/repo
 `{id, type}` modules.
 Entries may list signed versions with `version`, archive `url` and `sha256`, or omit `versions` to discover
 digest-bearing GitHub Release assets named `<plugin-id>-<version>.tar.gz`.
+An entry may appear before its first release; it is searchable, but cannot be installed until an archive is published.
 For a signed static entry, run `memcastle source keygen <private-key>` once, then
 `memcastle plugin sign <archive> --key <private-key>` and publish its reported `sha256` and `signature` fields.
 Users who require that publisher's signature set `plugins.trust = "required"` and list its public key under
