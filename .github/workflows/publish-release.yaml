@@ -266,8 +266,8 @@ jobs:
           # The release assets the official registry resolves to: `<name>-<version>.tar.gz`, and its checksum.
           cp stage-sources/archives/* dist/
 
-      # The agent integrations (docs/adr/034): OpenCode bundled into a self-contained file, with the
-      # shared skills they read. Nothing is published to npm: the bundles are release assets and package content, and
+      # The declarative agent integrations (docs/adr/034), with the shared skills they read.
+      # Nothing is published to npm: the bundles are release assets and package content, and
       # `memcastle integration install` copies them from `share/memcastle/`. The script is the one
       # `mise run integrations:package` runs and tests/integration_bundle.rs checks.
       - uses: oven-sh/setup-bun@v2
@@ -294,7 +294,7 @@ jobs:
       # (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each file
       # where a package manager would, and the daemon finds the bundle beside
       # the binary, and so does
-      # `memcastle integration install opencode`.
+      # `memcastle integration install claude-code`.
       #
       # Every flag that follows exists so the same inputs give the same bytes:
       # a fixed order, the commit time for every mtime, no owner, and `gzip -n`

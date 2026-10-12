@@ -299,9 +299,8 @@ jobs:
           SOURCE: ${{ matrix.source }}
         run: mise run sources:test -- "$SOURCE"
 
-  # The client half of the integration contract: each package under integrations/ is typechecked and tested against a
-  # real `memcastle serve` (ADR-022). It builds the daemon because that is what the tests talk to, and it is its own
-  # job because it needs bun, which `mise install` deliberately leaves out of [tools].
+  # The Core-shipped declarative integrations must install from a package and a checkout through the same local code.
+  # Their agent assets are checked without needing a provider's build or client test suite.
   # This job is local to this repository; the template does not have it.
   integrations:
     name: 🔌 Integrations
@@ -319,29 +318,9 @@ jobs:
         with:
           cache: true
 
-      # `build` is a dependency of the task, so the debug binary the tests start is built first.
-      - name: Typecheck and test the integrations
-        env:
-          # Makes the task run `test:cover`, which writes lcov beside each package.
-          COVERAGE: "1"
+      # `build` is a dependency of the task, so the installer tests have a current binary.
+      - name: Package and test the integrations
         run: mise run integrations:check
-
-      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
-      # apart from the daemon's own `src/`. Prefixing them makes each file unique.
-      - name: Make the integrations coverage paths relative to the repository
-        if: ${{ !cancelled() }}
-        run: |
-          for report in integrations/*/coverage/lcov.info; do
-            package="$(dirname "$(dirname "$report")")"
-            sed -i "s|^SF:|SF:$package/|" "$report"
-          done
-
-      - name: Upload integrations coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v7
-        with:
-          files: integrations/*/coverage/lcov.info
-          flags: integrations
 
   # The web UI (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
   # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
@@ -417,8 +396,8 @@ jobs:
           printf '\0asm' > bundle/demo/source.wasm
           # Likewise for the integrations (packaging/integrations/build.sh builds the real ones, which
           # tests/integration_bundle.rs checks): the layout is what the packages must carry.
-          mkdir -p integrations-bundle/integrations/opencode integrations-bundle/skills/wake-up
-          echo 'format = 1' > integrations-bundle/integrations/opencode/memcastle-integration.toml
+          mkdir -p integrations-bundle/integrations/claude-code integrations-bundle/skills/wake-up
+          echo 'format = 1' > integrations-bundle/integrations/claude-code/memcastle-integration.toml
           echo '# wake' > integrations-bundle/skills/wake-up/SKILL.md
           # And for the dashboard (packaging/web/build.sh builds the real one, which tests/web_bundle.rs checks).
           mkdir -p web-bundle/web/dist/assets
@@ -440,7 +419,7 @@ jobs:
                         usr/share/zsh/site-functions/_memcastle \
                         usr/share/fish/vendor_completions.d/memcastle.fish \
                         usr/share/memcastle/sources/demo/source.wasm \
-                        usr/share/memcastle/integrations/opencode/memcastle-integration.toml \
+                        usr/share/memcastle/integrations/claude-code/memcastle-integration.toml \
                         usr/share/memcastle/skills/wake-up/SKILL.md \
                         usr/share/memcastle/web/dist/index.html; do
               grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }

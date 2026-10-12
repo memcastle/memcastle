@@ -89,8 +89,8 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
         assert_eq!(source.homepage.as_deref(), Some(homepage.as_str()));
     }
 
-    // The external Pi plugin is not a source-only release asset in Core's index.
-    for name in ["opencode", "claude", "codex"] {
+    // Provider plugins are not source-only release assets in Core's index.
+    for name in ["claude", "codex"] {
         let source = index
             .find(name)
             .unwrap_or_else(|| panic!("the official registry does not list `{name}`"));
@@ -103,11 +103,18 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
             "`{name}`'s description in the registry differs from its manifest"
         );
     }
-    assert!(
-        index.find("pi").is_none(),
-        "Pi is distributed as a plugin, not a Core source archive"
-    );
-    assert!(!root().join("sources/pi").exists());
+    for name in ["pi", "opencode"] {
+        assert!(
+            index.find(name).is_none(),
+            "{name} is distributed as a plugin"
+        );
+        assert!(
+            !root()
+                .join(format!("sources/{name}/memcastle-source.toml"))
+                .is_file(),
+            "{name} must have no in-tree source manifest"
+        );
+    }
 }
 
 #[test]
@@ -115,7 +122,20 @@ fn plugin_discovery_does_not_reinterpret_the_legacy_source_index() {
     let legacy = std::fs::read_to_string(root().join("docs/registry.json")).unwrap();
     let plugins = std::fs::read_to_string(root().join("docs/plugins.json")).unwrap();
     assert!(memcastle::domain::SourceIndex::parse(&legacy).is_ok());
-    assert!(memcastle::domain::PluginIndex::parse(&plugins).is_ok());
+    let index = memcastle::domain::PluginIndex::parse(&plugins).unwrap();
+    let opencode = index
+        .plugins
+        .iter()
+        .find(|plugin| plugin.id == "opencode")
+        .expect("the extracted OpenCode provider is listed for plugin discovery");
+    assert_eq!(opencode.repository, "memcastle/memcastle-opencode");
+    assert_eq!(opencode.modules.len(), 2);
+    assert!(opencode.modules.iter().any(|module| {
+        module.id == "opencode" && module.kind == memcastle::domain::PluginModuleKind::Source
+    }));
+    assert!(opencode.modules.iter().any(|module| {
+        module.id == "opencode" && module.kind == memcastle::domain::PluginModuleKind::Integration
+    }));
     assert!(memcastle::domain::SourceIndex::parse(&plugins).is_err());
     assert!(memcastle::domain::PluginIndex::parse(&legacy).is_err());
 }

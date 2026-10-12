@@ -45,21 +45,19 @@ does not classify.
 
 ```text
 integrations/
-  opencode/      TypeScript/bun — an OpenCode plugin
   claude-code/   Claude Code local-marketplace plugin with native MCP and commands
+  codex/         Codex local-marketplace plugin with native MCP and commands
 ```
 
-Each TypeScript package is self-contained, with its own `package.json`, lockfile and tests, and carries its own copy of
-the small client it needs.
-`mise run integrations:check` typechecks and tests every one of them against a real daemon;
-see [ADR-022](../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
-The Pi integration and its tests now ship from the standalone
-[`memcastle-pi`](https://github.com/memcastle/memcastle-pi) repository.
+The Core-shipped integrations use their agents' declarative assets; `mise run integrations:check` tests their package
+layout and local installation without building an agent client.
+The Pi and OpenCode integrations and their client tests ship from the standalone
+[`memcastle-pi`](https://github.com/memcastle/memcastle-pi) and
+[`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode) repositories.
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
-manager across them. A MemCastle release can still ship the complete
-integration ecosystem from this one repository.
+manager across them. Each plugin releases independently of the Core-shipped integrations.
 
 ## Install and distribution
 
@@ -84,7 +82,8 @@ memory mode is off.
 
 ## Per-ecosystem findings
 
-- [`opencode/docs/research.md`](opencode/docs/research.md) maps OpenCode's plugin hooks, MCP client and skills onto
+- [`memcastle-opencode` research](https://github.com/memcastle/memcastle-opencode/blob/main/modules/opencode/docs/research.md)
+  maps OpenCode's plugin hooks, MCP client and skills onto
   MemCastle operations, and records where OpenCode has no clean equivalent.
 - [`claude-code/docs/research.md`](claude-code/docs/research.md) records Claude Code's supported declarative plugin API
   and the lifecycle gaps that it cannot safely emulate.
@@ -98,7 +97,7 @@ it is not a package manager and resolves nothing.
 
 ## Status
 
-The OpenCode package tests connection, mode, discovery and failure handling against a real daemon.
+The external OpenCode package tests connection, mode, discovery and failure handling against a real daemon.
 It supports wake-up at session start, search-before-answer, interval/manual/emergency checkpoints, project context and
 manual audit/repair.
 Background mining is daemon-side: a user-enabled [trigger](../docs/triggers.md) schedules a miner without an agent timer.

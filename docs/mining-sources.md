@@ -167,7 +167,7 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 |---|---|---|---|---|---|
 | `directory` | built in | the text files under a directory | modification time | no | no |
 | `pi` | external `memcastle-pi` plugin | Pi coding-agent session history | modification time | yes | no |
-| `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
+| `opencode` | external `memcastle-opencode` plugin | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 | `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
 | `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
@@ -179,7 +179,7 @@ The in-tree ones are built from their directories in the repository and shipped 
 (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start.
 `memcastle source enable <name>` is all one needs for a bundled source, with no registry and no network.
-Install the external Pi plugin before enabling its source.
+Install the external Pi or OpenCode plugin before enabling its source.
 No Pi, OpenCode, Claude Code, Codex, ChatGPT or GitHub acquisition code is part of the core.
 They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
@@ -332,29 +332,31 @@ The conversation history of the [OpenCode](https://opencode.ai) coding agent, ac
 OpenCode keeps every session in one SQLite database that it writes while it runs, so this source does not open that
 file: it runs the `opencode` command, which owns the database, and turns its answers into documents.
 It works on sessions of any age and with no OpenCode session running, calls no model and replays nothing.
-This is how OpenCode's *history* gets into MemCastle; the live integration (`integrations/opencode/`) is a separate
-thing that talks to the daemon over MCP and decides *when* to ask for mining.
+This is how OpenCode's *history* gets into MemCastle; its agent integration is a separate module in the same plugin.
+It talks to the daemon over MCP and decides *when* to ask for mining.
+The [memcastle-opencode](https://github.com/memcastle/memcastle-opencode) repository owns both modules.
 
 It needs OpenCode 1.2 or later (the version that moved history into the database) installed so that `opencode` is on the
 daemon's `PATH`; it was written against 1.18.
-It ships with MemCastle like `pi` (or install it from a checkout with `memcastle source install sources/opencode`):
+Build the archive from that repository until an independent release is available, then install it with the permission
+digest reported by its preview; previously mined legacy history also needs `--adopt-source opencode`:
 
 ```sh
+memcastle plugin install /path/to/opencode-0.1.0.tar.gz --consent opencode=SHA256_FROM_PREVIEW
 memcastle source enable opencode
 memcastle mine opencode
 ```
 
-Installing it from a registry or a directory lists what the source asks for and needs your consent to exactly that;
-`memcastle source show opencode` lists the same for the bundled one.
+The plugin preview lists what the source asks for and needs your consent to exactly that;
+`memcastle source show opencode` lists the same after installation.
 It asks for running the program `opencode`, and the environment variable `XDG_DATA_HOME`
 (OpenCode reads it to find its data when you have moved it; `PATH` and `HOME` are always passed to a program).
 It asks for no file access, no network, and needs no credentials.
 A program is a wider grant than a file: `opencode` runs with the daemon's own authority over the machine,
 and the sandbox only decides *which program*, not what that program does.
 That is the reason the grant is one named program, with no shell, and the reason installing asks you to agree to it.
-`memcastle source test sources/opencode` runs its conformance cases against a stand-in `opencode` that
-`sources/opencode/fixtures/bin/` ships, which has to be first on the `PATH` (`mise run sources:test -- opencode` does
-that), and CI does the same on every change.
+The provider's conformance suite runs against a stand-in `opencode` in
+`memcastle-opencode/modules/opencode/fixtures/bin/`, first on the `PATH`.
 
 Each session is one document, identified by its OpenCode session id (`ses_...`), filed in the wing `opencode`
 (or the one you give), in a room named after the session's working directory, and named by its id,

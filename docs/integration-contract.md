@@ -14,7 +14,7 @@ There is no shared runtime, no abstract base class and no code that hides how Pi
 flowchart LR
     subgraph client["One per agent: lifecycle"]
         pi["memcastle-pi/modules/pi"]
-        oc["integrations/opencode"]
+        oc["memcastle-opencode/modules/opencode"]
         cc["integrations/claude-code"]
     end
     skills["skills/: reusable agent instructions"]
@@ -34,7 +34,7 @@ flowchart LR
 | MemCastle core | What each operation does, what a mode permits, durable jobs, error codes | When a client calls it |
 | MCP and REST | The protocol every client speaks | Anything client specific |
 | `skills/` | Agent instructions that are the same text everywhere | Lifecycle hooks |
-| `integrations/<client>/` | When to call MemCastle: session start, compaction, timers, commands | How memory works |
+| Agent integrations, in Core or a provider plugin | When to call MemCastle: session start, compaction, timers, commands | How memory works |
 
 An integration talks to MemCastle only over MCP and HTTP, and carries no copy of the persistence layer.
 The one piece of memory logic that lives on the client is deciding what is worth remembering and which bucket it belongs
@@ -111,7 +111,7 @@ A disabled session must behave as if MemCastle does not exist, and context isola
 Daemon-side (tested): three sessions in three modes share one daemon and each reads back its own mode,
 every wire value outcome in the fixture holds for every gated tool, and a refused mode leaves the session unchanged.
 Client-side (tested): each integration tests `off` and `full` against the same versioned conformance fixtures and a
-real Core daemon; the Pi implementation does so in `memcastle-pi`, and Core's OpenCode integration does so here.
+real Core daemon; the Pi and OpenCode implementations do so in `memcastle-pi` and `memcastle-opencode`.
 Daemon-side session isolation is tested in Core independently of which provider supplies an agent client.
 
 ### Wake-up

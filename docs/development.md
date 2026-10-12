@@ -83,7 +83,7 @@ They apply to `mise run`, to `mise cli` and to any shell with [mise activated](h
 once you are in the project directory, so `mise cli serve` already serves the dashboard from `web/dist` (after
 `mise run web:build`) and finds the integrations and sources of the checkout, with no flag.
 Because the variables follow the shell, **any `memcastle` you run from the project directory uses them, including an
-installed one**: `memcastle integration install opencode` there installs the bundle built in the checkout
+installed one**: `memcastle integration install claude-code` there installs the assets prepared in the checkout
 (`mise run integrations:build`) and not the package's.
 Run it from another directory, or `env -u MEMCASTLE_ASSETS_DIR memcastle ...`, to use the installed assets.
 A flag still wins over the variable (`--assets-dir`), and your own `mise.local.toml` can override or drop either.
@@ -189,19 +189,18 @@ Every path, environment variable, flag and the precedence between them is in [Co
     `tests/fixtures/project-config/` (unit tests): discovery, nesting, the git and home boundaries, the environment,
     and what is refused.
     The integrations replay the same cases in TypeScript, see [Project configuration](project-config.md).
-  - `integrations/<name>/test/` — the client half of the same contract, one bun suite per integration:
-    each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
-    the integration's own client.
-    Run them with `mise run integrations:check`, see [ADR-022](adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
+  - The external Pi and OpenCode plugins run their own agent-client suites against a real daemon in their provider
+    repositories, replaying the integration contract's language-neutral fixtures.
   - `tests/integration_cli.rs` — `memcastle integration list|install|update|remove` through the real binary, with fake
-    `pi` and `opencode` programs and a throwaway home: the lifecycle, idempotence, compatibility refusals,
+    fake `pi` and `opencode` programs and a throwaway home: the lifecycle, idempotence, compatibility refusals,
     preservation of the user's other plugins and settings,
     and resolution from `--assets-dir`, the environment and the binary's own prefix.
     The installer's unit tests are in `src/integration/` (manifest, discovery, adapters, install, update, remove, rollback).
   - `tests/integration_bundle.rs` — builds the bundles with `packaging/integrations/build.sh`, checks the package tree
     (manifests accepted by this MemCastle, no sources or `node_modules`, the skills) and runs the same lifecycle from the
     packaged tree and from the checkout.
-    It needs bun, so it is `#[ignore]`d in the basic suite and `mise run integrations:check` runs it.
+    It is `#[ignore]`d in the basic suite so that `mise run integrations:check` can build the checkout assets without a
+    second suite racing it.
   - `tests/in_process/events.rs` — `GET /api/events` against a real daemon: a note, a wing and a job's progress arrive as
     identifiers and never as content, a `disabled` session is refused and a `read_only` one served, the token is
     required, and an open stream does not keep the daemon from shutting down.
@@ -219,10 +218,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
   - The Pi history source and lifecycle extension have their own tests and fixtures in
     [`memcastle-pi`](https://github.com/memcastle/memcastle-pi), run against a released or locally built Core binary.
-  - `tests/wasm_opencode.rs` — the OpenCode history source (`sources/opencode/`) built and run as a component against a
-    stand-in `opencode` command: what it files and leaves out, the discovery cursor and the query it never lets a
-    cursor change, provenance, a machine without OpenCode, and an install, mine, re-mine and grow against a real daemon
-    (in-process, WebAssembly suite, Unix only).
+  - The OpenCode history source's fixtures, conformance and installation/mining smoke checks live in
+    [`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode).
   - `tests/source_docs.rs` — the guide's list of conformance cases and of diagnostic codes against what ships
     (no build, basic suite).
   - `tests/wasm_registry.rs` — registries against a real daemon (a directory registry written with the same calls
@@ -232,7 +229,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
     stand-in for the API, with a digest that does not match and a repository that cannot be read), an unreadable
     registry, and the CLI publishing, signing, searching, installing and updating (in-process and subprocess,
     WebAssembly suite).
-  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the script a release runs, packaging `opencode` as an
+  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the release script, packaging Core-shipped sources as an
     unpacked bundle and as `<name>-<version>.tar.gz` archives, and a daemon that lists it as installed and enables it
     with no consent (WebAssembly suite, Unix only).
   - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
@@ -254,9 +251,9 @@ mise run test -- --filter-expr 'test(job)'
 
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
-The TypeScript suites report coverage too: with `COVERAGE=1`, `mise run web:check` and `mise run integrations:check`
-run each package's `test:cover` script, which writes lcov under `web/coverage/` and `integrations/*/coverage/`.
-CI uploads them to Codecov under the `web` and `integrations` flags.
+The web TypeScript suite reports coverage too: with `COVERAGE=1`, `mise run web:check` runs its `test:cover` script,
+which writes lcov under `web/coverage/`; CI uploads it to Codecov under the `web` flag.
+Standalone agent plugins run their own client suites in their provider repositories.
 `.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web, integrations)
 by path, so the Codecov page shows each area whatever flag covered it.
 Each component reflects the merged execution coverage from every reporting suite.

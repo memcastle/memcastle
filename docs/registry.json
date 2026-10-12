@@ -29,13 +29,6 @@
       "homepage": "https://memcastle.github.io/mining-sources/#github",
       "license": "MIT",
       "repository": "memcastle/memcastle"
-    },
-    {
-      "name": "opencode",
-      "description": "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session",
-      "homepage": "https://memcastle.github.io/mining-sources/#opencode",
-      "license": "MIT",
-      "repository": "memcastle/memcastle"
     }
   ]
 }

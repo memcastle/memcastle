@@ -10,6 +10,15 @@
         { "id": "pi", "type": "source" },
         { "id": "pi", "type": "integration" }
       ]
+    },
+    {
+      "id": "opencode",
+      "description": "OpenCode coding-agent history and lifecycle integration",
+      "repository": "memcastle/memcastle-opencode",
+      "modules": [
+        { "id": "opencode", "type": "source" },
+        { "id": "opencode", "type": "integration" }
+      ]
     }
   ]
 }
