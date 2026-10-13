@@ -1,5 +1,5 @@
-# The `test` job is a three-OS matrix and each leg uploads its own report, and
-# the `wasm` job uploads a fourth. Without this, Codecov posts the project
+# The `test` job is a three-OS matrix; `slow`, `wasm` and `web` each upload
+# one more report. Without this, Codecov posts the project
 # status as soon as the first reports settle — in practice before Windows,
 # which is ~4x slower than the other two, has uploaded. That compares a partial
 # report against a complete base and reports a coverage drop that did not
@@ -7,7 +7,7 @@
 # (`src/mining/wasm`, much of `src/source`) is missing from the three OS reports.
 codecov:
   notify:
-    after_n_builds: 7
+    after_n_builds: 6
 
 # Every leg runs on every commit, so a missing report means a broken run,
 # not an untested platform — nothing should be carried forward to hide it.
@@ -24,10 +24,8 @@ flags:
     carryforward: false
   slow:
     carryforward: false
-  # The TypeScript suites run on every commit as well (the `web` and `integrations` jobs).
+  # The web suite runs on every commit too.
   web:
-    carryforward: false
-  integrations:
     carryforward: false
 
 coverage:
@@ -94,8 +92,8 @@ component_management:
       name: Agent integrations
       paths: [integrations/*/src/**]
 
-# Require any change in coverage to post
+# Refresh the PR comment even when the merged coverage has not changed.
 comment:
-  require_changes: true
-  # Three OS legs plus `slow`, `wasm`, `web` and `integrations`.
-  after_n_builds: 7
+  require_changes: false
+  # Three OS legs plus `slow`, `wasm` and `web`.
+  after_n_builds: 6
