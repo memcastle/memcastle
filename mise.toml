@@ -320,12 +320,64 @@ cargo test --test integration_bundle -- --ignored
 [tasks."integrations:build"]
 description = "Prepare the declarative integrations under integrations/<id>/dist for development"
 # After this, `memcastle integration install claude-code --assets-dir "$PWD"` installs the checkout assets.
+# Include dot-directories explicitly: the plugin manifests are hidden, and a plain glob can omit them.
+sources = [
+  "packaging/integrations/build.sh",
+  "integrations/claude-code/plugin/**",
+  "integrations/claude-code/plugin/.claude-plugin/**",
+  "integrations/claude-code/plugin/.mcp.json",
+  "integrations/codex/plugin/**",
+  "integrations/codex/plugin/.agents/**",
+]
+outputs = [
+  "integrations/claude-code/dist/.claude-plugin/plugin.json",
+  "integrations/claude-code/dist/.claude-plugin/marketplace.json",
+  "integrations/claude-code/dist/.mcp.json",
+  "integrations/claude-code/dist/hooks/hooks.json",
+  "integrations/codex/dist/plugin.json",
+  "integrations/codex/dist/mcp.json",
+  "integrations/codex/dist/.agents/plugins/marketplace.json",
+]
 run = "packaging/integrations/build.sh"
 
 [tasks."integrations:package"]
 description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
 # The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
 # (`memcastle integration install claude-code --assets-dir target/bundled-integrations`).
+sources = [
+  "packaging/integrations/build.sh",
+  "integrations/claude-code/plugin/**",
+  "integrations/claude-code/plugin/.claude-plugin/**",
+  "integrations/claude-code/plugin/.mcp.json",
+  "integrations/codex/plugin/**",
+  "integrations/codex/plugin/.agents/**",
+  "integrations/claude-code/memcastle-integration.toml",
+  "integrations/codex/memcastle-integration.toml",
+  "integrations/claude-code/skills/**",
+  "integrations/codex/skills/**",
+  "skills/*/**",
+]
+# The package script also refreshes the checkout's dist trees; their absence must rebuild the package.
+outputs = [
+  "integrations/claude-code/dist/.claude-plugin/plugin.json",
+  "integrations/claude-code/dist/.claude-plugin/marketplace.json",
+  "integrations/claude-code/dist/.mcp.json",
+  "integrations/claude-code/dist/hooks/hooks.json",
+  "integrations/codex/dist/plugin.json",
+  "integrations/codex/dist/mcp.json",
+  "integrations/codex/dist/.agents/plugins/marketplace.json",
+  "target/bundled-integrations/integrations/claude-code/memcastle-integration.toml",
+  "target/bundled-integrations/integrations/claude-code/dist/.mcp.json",
+  "target/bundled-integrations/integrations/claude-code/dist/.claude-plugin/marketplace.json",
+  "target/bundled-integrations/integrations/codex/memcastle-integration.toml",
+  "target/bundled-integrations/integrations/codex/dist/.agents/plugins/marketplace.json",
+  "target/bundled-integrations/integrations/codex/dist/mcp.json",
+  "target/bundled-integrations/skills/checkpoint-instructions/SKILL.md",
+  "target/bundled-integrations/skills/diary/SKILL.md",
+  "target/bundled-integrations/skills/memcastle-setup/SKILL.md",
+  "target/bundled-integrations/skills/search-before-answer/SKILL.md",
+  "target/bundled-integrations/skills/wake-up/SKILL.md",
+]
 run = "packaging/integrations/build.sh target/bundled-integrations"
 
 [tasks."web:check"]
@@ -359,6 +411,19 @@ bun run test:daemon
 description = "Build the web UI into web/dist, which is all development mode needs"
 # After this, `memcastle serve --assets-dir "$PWD"` with `web.enable` serves the dashboard as built in this checkout.
 tools = { bun = "1", node = "24" }
+sources = [
+  "packaging/web/build.sh",
+  "web/package.json",
+  "web/bun.lock",
+  "web/vite.config.ts",
+  "web/tsconfig.json",
+  "web/env.d.ts",
+  "web/index.html",
+  "web/src/**",
+  "web/public/**",
+  "docs/images/icon.svg", # Vite's @brand alias imports this file from outside web/.
+]
+outputs = ["web/dist/index.html", "web/dist/assets"]
 run = "packaging/web/build.sh"
 
 [tasks."web:dev"]
@@ -373,6 +438,20 @@ description = "Lay out the dashboard that ships with releases in target/bundled-
 # The script `publish-release.yaml` runs: what a release bundles is what a developer can build and serve from
 # (`memcastle serve --assets-dir target/bundled-web`).
 tools = { bun = "1", node = "24" }
+sources = [
+  "packaging/web/build.sh",
+  "web/package.json",
+  "web/bun.lock",
+  "web/vite.config.ts",
+  "web/tsconfig.json",
+  "web/env.d.ts",
+  "web/index.html",
+  "web/src/**",
+  "web/public/**",
+  "docs/images/icon.svg",
+]
+# Packaging rebuilds the checkout as well as the release tree, so require both entrypoints.
+outputs = ["web/dist/index.html", "web/dist/assets", "target/bundled-web/web/dist/index.html", "target/bundled-web/web/dist/assets"]
 run = "packaging/web/build.sh target/bundled-web"
 
 [tasks."sources:check"]

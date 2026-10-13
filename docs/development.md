@@ -62,6 +62,12 @@ mise run docs       # serve this documentation locally
 mise run docs:build # build it into site/
 ```
 
+The project-owned `web:build`, `web:package`, `integrations:build` and `integrations:package` tasks skip their build
+when their inputs have not changed and their required outputs still exist.
+Changing a source or removing an output makes the corresponding task run again; use `mise run --force web:build`
+(or the other task name) to rebuild regardless of freshness.
+The test and check tasks still run on every invocation, including when used through `mise run check` or `mise run ci`.
+
 `prek install` (once) wires the same checks into `git commit` as pre-commit hooks —
 formatting, Clippy, spelling, actionlint, markdownlint, commitlint, basic file hygiene,
 and the architecture guard described below.
