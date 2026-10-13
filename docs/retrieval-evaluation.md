@@ -15,11 +15,12 @@ mise run eval                       # measure the bundled dataset, print a repor
 mise run eval:compare -- a.json b.json   # what changed between two reports, failing on a drop
 mise run eval:baseline              # re-measure and rewrite the committed baseline (a deliberate act)
 mise run eval:longmemeval -- longmemeval_s.json   # session retrieval on a downloaded LongMemEval file
-mise run test -- retrieval_eval     # the everyday check: the bundled dataset against the committed baseline
+mise run test:slow                   # Linux CI gate: the bundled dataset against the committed baseline
 ```
 
 The `eval*` tasks are explicit and are never part of `mise run check` or `mise run ci`.
-`mise run test -- retrieval_eval` is the part that runs in the everyday suite, in about half a minute.
+The baseline comparison runs in Linux CI's slow suite (`mise run test:slow` locally), rather than every OS's basic suite;
+the dataset and report unit tests still run in the basic suite.
 
 A typical before-and-after of a change looks like this:
 
@@ -56,7 +57,7 @@ The code is under `tests/in_process/retrieval_eval/`, which keeps it out of the 
 
 `tests/fixtures/retrieval/core.json` is a small household-and-team knowledge base:
 59 drawers in four wings, four of them corrections of an earlier drawer, fifteen entity links, and 39 judged queries.
-It is small on purpose, so it is deterministic and cheap enough for the everyday suite.
+It is small enough to produce a reproducible baseline in the Linux slow suite.
 
 Each query belongs to one category, and a report breaks the numbers down by category:
 
@@ -191,7 +192,7 @@ The harness starts the daemon of the checkout it runs from, so it measures the r
 
 `tests/fixtures/retrieval/baseline.json` holds the quality metrics of the bundled dataset, with no timings,
 since those belong to a machine.
-The everyday suite (`mise run test`) runs the dataset against it,
+The Linux slow suite (`mise run test:slow`) runs the dataset against it,
 and fails when any metric of any configuration falls by more than 0.02.
 That margin is not a target.
 It absorbs an approximate vector index and the arbitrary order of equal scores without hiding a real regression.
@@ -292,7 +293,7 @@ The data is not bundled and never will be.
 It is large, and its licence and where to obtain it are the benchmark's own.
 Download it from the project, check its terms for your use, and pass the path.
 A tiny synthetic file in the same format (`tests/fixtures/retrieval/longmemeval-synthetic.json`)
-is what the everyday suite uses to prove the path works, and it says nothing about the real data.
+is what the basic suite uses to prove the path works, and it says nothing about the real data.
 
 The mapping is:
 
@@ -337,6 +338,6 @@ It does not answer the questions, so it says nothing about end-to-end accuracy a
 ## Not goals
 
 - Making benchmark performance a release gate.
-  The floor in the everyday suite protects against regressing what the dataset covers; it is not a quality bar for a release.
+  The floor in the Linux slow suite protects against regressing what the dataset covers; it is not a quality bar for a release.
 - Embedding a large dataset in the binary or in a release artifact.
 - Claiming equivalence with another memory system without a directly comparable evaluation.

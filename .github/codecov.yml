@@ -7,7 +7,7 @@
 # (`src/mining/wasm`, much of `src/source`) is missing from the three OS reports.
 codecov:
   notify:
-    after_n_builds: 6
+    after_n_builds: 7
 
 # Every leg runs on every commit, so a missing report means a broken run,
 # not an untested platform — nothing should be carried forward to hide it.
@@ -21,6 +21,8 @@ flags:
   # The WebAssembly suite runs on every commit too, so a missing report is a
   # failed job, not a reason to reuse an old one.
   wasm:
+    carryforward: false
+  slow:
     carryforward: false
   # The TypeScript suites run on every commit as well (the `web` and `integrations` jobs).
   web:
@@ -95,5 +97,5 @@ component_management:
 # Require any change in coverage to post
 comment:
   require_changes: true
-  # Held back for the same reason as the status above: three OS legs plus `wasm`, `web` and `integrations`.
-  after_n_builds: 6
+  # Three OS legs plus `slow`, `wasm`, `web` and `integrations`.
+  after_n_builds: 7

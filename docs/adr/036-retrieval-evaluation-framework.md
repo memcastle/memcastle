@@ -32,9 +32,9 @@ Four decisions follow, and each has an alternative that is easier for one force 
   Living in the test tree keeps it out of the binary and out of the release allowlist,
   and being a module of the existing binary adds no second link of the 600 MB server.
   There is no `memcastle eval` command, no MCP tool and no route.
-- **The everyday suite runs the small bundled dataset as a regression floor, and everything heavier is an `#[ignore]`d test
-  behind a `mise` task.**
-  `tests/fixtures/retrieval/core.json` (59 drawers, 39 judged queries in five categories) runs in `mise run test` against
+- **The Linux slow suite runs the small bundled dataset as a regression floor;
+  report generation is an `#[ignore]`d test behind a `mise` task.**
+  `tests/fixtures/retrieval/core.json` (59 drawers, 39 judged queries in five categories) runs in `mise run test:slow` against
   `baseline.json`, and fails when any metric of any configuration falls more than 0.02.
   `eval`, `eval:baseline`, `eval:compare` and `eval:longmemeval` are explicit and are not part of `check` or `ci`.
 - **Vectors come from the harness, not from a provider.**
@@ -88,7 +88,7 @@ Four decisions follow, and each has an alternative that is easier for one force 
 
 ## Consequences
 
-- The everyday suite gains one test of about half a minute (seeding a daemon is most of it), with its own slow-timeout
+- The Linux slow suite has one test of about half a minute (seeding a daemon is most of it), with its own slow-timeout
   override, and a baseline file that a deliberate retrieval change must update in the same pull request.
 - A change to the dataset invalidates the baseline.
   The comparison says so, through the hash, rather than reporting a difference that is the data.

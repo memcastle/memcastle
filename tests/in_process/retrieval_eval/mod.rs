@@ -1,7 +1,7 @@
 //! Retrieval evaluation: a reproducible measurement of how well search finds what it should (docs/retrieval-evaluation.md).
 //!
 //! The harness is a client of a real daemon over HTTP, like an integration (invariant 8), and lives in the test tree
-//! so nothing of it ships in the binary or in a release. The small bundled dataset runs in the everyday suite as a
+//! so nothing of it ships in the binary or in a release. The small bundled dataset runs in the Linux slow suite as a
 //! regression floor; the explicit entry points (`mise run eval`, ...) print a full report, rewrite the baseline,
 //! compare two reports and run a downloaded LongMemEval file. Those are `#[ignore]`d, so `mise run check` never runs them.
 //!
@@ -125,7 +125,8 @@ fn committed_baseline() -> Report {
     Report::from_json(&json).unwrap_or_else(|problem| panic!("{}: {problem}", path.display()))
 }
 
-/// The everyday regression floor, and the checks that the measurement itself is sound.
+/// The Linux slow-suite regression floor, and the checks that the measurement itself is sound.
+#[cfg(feature = "slow-tests")]
 mod suite {
     use super::*;
 

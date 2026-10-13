@@ -42,6 +42,19 @@ fn archive(version: &str, network: bool, memcastle: &str) -> Vec<u8> {
     package::pack(&manifest, component, &[]).expect("the reference source packs")
 }
 
+/// Rejection and preview checks never load the guest. A valid package with a minimal WASM header avoids compiling a
+/// source just to have its digest, manifest or registry location rejected before installation.
+fn preview_archive(version: &str, network: bool, memcastle: &str) -> Vec<u8> {
+    let manifest = include_str!("../sources/directory/memcastle-source.toml")
+        .replace("version = \"0.1.0\"", &format!("version = \"{version}\""))
+        .replace(
+            "memcastle = \">=0.2\"",
+            &format!("memcastle = \"{memcastle}\""),
+        )
+        .replace(LOCATOR, if network { NETWORK } else { LOCATOR });
+    package::pack(&manifest, b"\0asm\x01\0\0\0", &[]).expect("the preview source packs")
+}
+
 /// A registry directory under construction: archives beside an index.
 struct Registry {
     dir: tempfile::TempDir,
@@ -223,14 +236,14 @@ async fn a_search_lists_what_a_registry_offers_and_a_source_installs_by_name_aft
 #[tokio::test(flavor = "multi_thread")]
 async fn an_archive_that_is_not_the_one_the_index_published_is_refused_and_nothing_is_installed() {
     let registry = Registry::new();
-    registry.publish(&archive("0.1.0", false, ">=0.2"));
+    registry.publish(&preview_archive("0.1.0", false, ">=0.2"));
     let fixture = Fixture::start(vec![registry.label()]).await;
 
     // The registry now serves other bytes than it published.
     let entry = &registry.index().sources[0].versions[0];
     std::fs::write(
         registry.path().join(&entry.url),
-        archive("0.1.0", true, ">=0.2"),
+        preview_archive("0.1.0", true, ">=0.2"),
     )
     .unwrap();
 
@@ -247,7 +260,7 @@ async fn an_archive_that_is_not_the_one_the_index_published_is_refused_and_nothi
 #[tokio::test(flavor = "multi_thread")]
 async fn a_package_that_is_not_the_one_the_index_says_it_is_fails_its_integrity_check() {
     let registry = Registry::new();
-    registry.publish(&archive("0.1.0", false, ">=0.2"));
+    registry.publish(&preview_archive("0.1.0", false, ">=0.2"));
     // The index lists the digest of a harmless 0.1.0 under a version the package inside does not carry.
     let index_path = registry.path().join(memcastle::distribution::INDEX_FILE);
     let text = std::fs::read_to_string(&index_path)
@@ -267,8 +280,8 @@ async fn a_package_that_is_not_the_one_the_index_says_it_is_fails_its_integrity_
 #[tokio::test(flavor = "multi_thread")]
 async fn the_newest_version_that_runs_here_is_chosen_and_an_incompatible_one_can_not_be_forced() {
     let registry = Registry::new();
-    registry.publish(&archive("0.1.0", false, ">=0.2"));
-    registry.publish(&archive("0.2.0", false, ">=99"));
+    registry.publish(&preview_archive("0.1.0", false, ">=0.2"));
+    registry.publish(&preview_archive("0.2.0", false, ">=99"));
     let fixture = Fixture::start(vec![registry.label()]).await;
 
     let (_, found) = fixture.get("/api/source-registry/search").await;
@@ -588,7 +601,7 @@ async fn a_package_file_installed_over_a_bundled_source_wins_and_removing_it_bri
 #[tokio::test(flavor = "multi_thread")]
 async fn a_registry_that_is_down_is_a_warning_for_search_and_an_error_when_it_was_asked_for() {
     let registry = Registry::new();
-    registry.publish(&archive("0.1.0", false, ">=0.2"));
+    registry.publish(&preview_archive("0.1.0", false, ">=0.2"));
     let gone = registry.path().join("gone").display().to_string();
     let fixture = Fixture::start(vec![gone.clone(), registry.label()]).await;
 
@@ -614,9 +627,9 @@ async fn a_registry_that_is_down_is_a_warning_for_search_and_an_error_when_it_wa
 #[tokio::test(flavor = "multi_thread")]
 async fn a_registry_chosen_for_one_install_replaces_the_configured_ones_for_it() {
     let configured = Registry::new();
-    configured.publish(&archive("0.1.0", false, ">=0.2"));
+    configured.publish(&preview_archive("0.1.0", false, ">=0.2"));
     let chosen = Registry::new();
-    chosen.publish(&archive("0.1.5", false, ">=0.2"));
+    chosen.publish(&preview_archive("0.1.5", false, ">=0.2"));
     let fixture = Fixture::start(vec![configured.label()]).await;
 
     let (status, preview) = fixture

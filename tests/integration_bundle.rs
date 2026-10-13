@@ -11,7 +11,6 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::sync::Once;
 
 use common::agents::Machine;
 use memcastle::integration::manifest::{self, MANIFEST_FILE};
@@ -20,24 +19,14 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// The package tree, built once for every test in this binary: the script rebuilds `dist/` in the checkout, so two
-/// builds at once would race.
+/// The package tree prepared by `integrations:check` before nextest starts its separate test processes. Rebuilding it
+/// here would race those processes and repeat the release script for every test.
 fn package() -> PathBuf {
-    static BUILD: Once = Once::new();
-    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("bundled-integrations");
-    BUILD.call_once(|| {
-        let output = std::process::Command::new("bash")
-            .arg(root().join("packaging/integrations/build.sh"))
-            .arg(&out)
-            .output()
-            .expect("bash starts");
-        assert!(
-            output.status.success(),
-            "packaging/integrations/build.sh failed:\n{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    });
+    let out = root().join("target/bundled-integrations");
+    assert!(
+        out.is_dir(),
+        "run `mise run integrations:check` to build the package"
+    );
     out
 }
 

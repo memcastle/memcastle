@@ -111,8 +111,7 @@ jobs:
       - name: Run hooks
         run: prek run --all-files --show-diff-on-failure
 
-  # The basic suite: every test binary but the `wasm_*` ones (.config/nextest.toml), so it needs no WebAssembly target
-  # and its time does not include building components. The `wasm` job below runs the rest.
+  # Basic behavior on every OS; expensive process-boundary and retrieval-baseline tests run in the Linux slow job.
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
     needs: changes
@@ -182,7 +181,17 @@ jobs:
 
       - name: Run tests (with coverage)
         run: |
-          cargo llvm-cov nextest --profile ci
+          # nextest's filter skips execution, not linking; select only basic Cargo targets too.
+          targets=(--lib --bin memcastle --test in_process)
+          for file in tests/*.rs; do
+            name="${file#tests/}"
+            name="${name%.rs}"
+            case "$name" in
+              wasm_*|persistence|mcp_smoke|auth_lifecycle) ;;
+              *) targets+=(--test "$name") ;;
+            esac
+          done
+          cargo llvm-cov nextest --profile ci "${targets[@]}"
           cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
@@ -198,6 +207,38 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           directory: target/nextest/ci
+          report_type: test_results
+
+  slow:
+    name: 🐢 Process and retrieval tests
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+      - name: Run slow tests (with coverage)
+        run: |
+          cargo llvm-cov nextest --profile ci-slow --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
+          cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: slow
+      - name: Upload test results to Codecov
+        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() }}
+        with:
+          directory: target/nextest/ci-slow
           report_type: test_results
 
   # The WebAssembly suite: every `tests/wasm_*.rs` binary, which builds components with Cargo and runs them in the

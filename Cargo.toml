@@ -92,6 +92,38 @@ strip = true
 # its own would open a conflict against every one of those PRs. Resolve in
 # favour of the project if `git tpl update` ever touches it.
 
+[features]
+# Separate genuinely expensive process-boundary and retrieval-baseline checks from the cross-platform basic suite.
+slow-tests = []
+provider-tests = []
+
+[[test]]
+name = "source_claude"
+path = "sources/claude/core-tests.rs"
+required-features = ["provider-tests"]
+
+[[test]]
+name = "source_chatgpt"
+path = "sources/chatgpt/core-tests.rs"
+required-features = ["provider-tests"]
+
+[[test]]
+name = "source_github"
+path = "sources/github/core-tests.rs"
+required-features = ["provider-tests"]
+
+[[test]]
+name = "persistence"
+required-features = ["slow-tests"]
+
+[[test]]
+name = "mcp_smoke"
+required-features = ["slow-tests"]
+
+[[test]]
+name = "auth_lifecycle"
+required-features = ["slow-tests"]
+
 [dependencies]
 # Errors & diagnostics. `thiserror` for typed errors inside the library,
 # `miette` to render them at the binary edge.
