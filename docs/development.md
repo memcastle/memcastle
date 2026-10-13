@@ -102,17 +102,22 @@ Every path, environment variable, flag and the precedence between them is in [Co
   `store`'s migrations/persistence — the storage tests use SurrealDB's in-memory engine for speed, plus one test
   against a real SurrealKV directory; survival across a restart is proven at the process boundary in
   `tests/persistence.rs`, because SurrealKV's file lock is not released within one process).
-- **Two suites.** A test binary that builds or runs a WebAssembly component is named `tests/wasm_*.rs`,
+- **Three suites.** Core test binaries that build or run a WebAssembly component are named `tests/wasm_*.rs`,
   and that prefix is the whole definition of the WebAssembly suite: `.config/nextest.toml` selects it with
   `binary(/^wasm_/)`, and `mise run test:wasm` and CI's `wasm` job pass the same prefix to Cargo as `--test 'wasm_*'`,
   so that the other test binaries are not compiled for nothing.
   A new `wasm_` file therefore joins the suite with no configuration.
-  Everything else is the basic suite, which is what `mise run test` and the `default` and `ci` nextest profiles run;
-  the `wasm` and `ci-wasm` profiles run the other one.
+  Most other tests are the basic suite, which is what `mise run test:fast` and the `default` and `ci` nextest profiles run;
+  the `wasm` and `ci-wasm` profiles run Core's component tests.
+  `mise run test` uses the same execution filter but may still compile excluded component test binaries;
+  use `test:fast` to avoid linking them.
+  Process-boundary durability, MCP and auth tests and the committed retrieval baseline form the Linux-only slow suite,
+  selected with the `slow-tests` Cargo feature by `mise run test:slow` and CI's `ci-slow` profile.
+  `mise run check:all` combines the template's `check` task with this project-specific slow gate.
   The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.
   The WebAssembly suite runs in CI on Linux only, in its own `wasm` job with its own Codecov flag,
   and each directory under `sources/` also gets a CI leg of its own (`mise run sources:test -- <name>`), found automatically.
-  A test that only reads files, such as `tests/source_docs.rs`, builds nothing and stays in the basic suite.
+  Each source's own CI leg runs conformance, plus any source-owned `core-tests.rs` cases not expressible as conformance.
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
   Those that start the daemon inside the test process are modules of one binary, `tests/in_process/main.rs`:
   each `tests/` binary links the whole server, about 600 MB with debug info, so sixteen of them were most of what
@@ -196,8 +201,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
     preservation of the user's other plugins and settings,
     and resolution from `--assets-dir`, the environment and the binary's own prefix.
     The installer's unit tests are in `src/integration/` (manifest, discovery, adapters, install, update, remove, rollback).
-  - `tests/integration_bundle.rs` — builds the bundles with `packaging/integrations/build.sh`, checks the package tree
-    (manifests accepted by this MemCastle, no sources or `node_modules`, the skills) and runs the same lifecycle from the
+  - `tests/integration_bundle.rs` — checks the bundles built by `integrations:check` with
+    `packaging/integrations/build.sh`: the package tree (manifests accepted by this MemCastle, no sources or
+    `node_modules`, the skills) and the same lifecycle from the
     packaged tree and from the checkout.
     It is `#[ignore]`d in the basic suite so that `mise run integrations:check` can build the checkout assets without a
     second suite racing it.
@@ -214,14 +220,15 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `web/test/` — the dashboard's client, login, route guard, event-stream parser and live loader
     (vitest, no daemon), and the same client, login and event stream
     against a real `memcastle serve` (`web/test/daemon`, bun), see [Web UI](web.md#developing-the-dashboard).
-  - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
-    reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
+  - `tests/in_process/native_conformance.rs` and `tests/wasm_conformance.rs` — the same conformance cases run against
+    the built-in `directory` source in the basic suite and the reference WebAssembly source built from
+    `sources/directory/` in the Linux WebAssembly suite.
   - The Pi history source and lifecycle extension have their own tests and fixtures in
     [`memcastle-pi`](https://github.com/memcastle/memcastle-pi), run against a released or locally built Core binary.
   - The OpenCode history source's fixtures, conformance and installation/mining smoke checks live in
     [`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode).
-  - `tests/source_docs.rs` — the guide's list of conformance cases and of diagnostic codes against what ships
-    (no build, basic suite).
+  - `sources/{claude,chatgpt,github}/core-tests.rs` — source-owned behavior beyond conformance, run in each source's
+    Linux CI leg; Codex's behavior is covered by its conformance fixture.
   - `tests/wasm_registry.rs` — registries against a real daemon (a directory registry written with the same calls
     `source index` makes): search, install by name with consent, an archive that is not the one published, a package that
     is not the one the index says, version choice, the trust policy, update with and without new permissions, a bundled
@@ -370,7 +377,8 @@ The integration installer is local tooling like the source tooling, and is held 
 `tests/integration_isolation.rs` fails when `src/integration/` mentions the store, the jobs, the daemon client, the
 network or an agent's settings file or a credential, and when anything under `src/mcp`, `src/api`, `src/app` or
 `src/server` (or any module but the binary) calls it.
-`tests/integration_docs.rs` holds [Agent integrations](integrations.md) to the manifest parser and the error codes.
+`tests/integration_cli.rs` exercises the installer with synthetic integrations;
+`tests/integration_bundle.rs` checks the Core-shipped package tree on Linux.
 
 The web UI is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
 `SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `web/` (Markdown, `node_modules` and `dist` are

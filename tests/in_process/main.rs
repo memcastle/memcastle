@@ -26,6 +26,7 @@ mod mcp_memory_mode;
 mod mcp_temporal;
 mod memory_mode;
 mod miners;
+mod native_conformance;
 mod notes;
 mod palace;
 mod plugins;

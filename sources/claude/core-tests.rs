@@ -1,7 +1,5 @@
 //! The Claude Code history source is exercised as the installed WebAssembly component, not as host Rust.
 
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
@@ -10,11 +8,10 @@ use memcastle::config::MiningConfig;
 use memcastle::domain::RawDocument;
 use memcastle::mining::adapter::SourceAdapter;
 use memcastle::mining::wasm::WasmAdapter;
-use memcastle::source::{build::Project, conformance};
+use memcastle::source::build::Project;
 use serde_json::json;
 
-const SESSION: &str =
-    include_str!("../sources/claude/fixtures/claude-projects/tree/-work-app/session-a.jsonl");
+const SESSION: &str = include_str!("fixtures/claude-projects/tree/-work-app/session-a.jsonl");
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -35,22 +32,6 @@ fn adapter() -> WasmAdapter {
     .unwrap()
 }
 
-fn text(body: &str) -> String {
-    adapter()
-        .normalize(&RawDocument {
-            external_id: "-work-app/session-a.jsonl".into(),
-            revision: RawDocument::revision_of(body),
-            body: body.into(),
-            metadata: json!({"path":"/sessions/session-a.jsonl"}),
-            occurred_at: None,
-        })
-        .unwrap()
-        .segments
-        .into_iter()
-        .map(|segment| segment.text)
-        .collect()
-}
-
 fn write(root: &Path, name: &str, content: &str, seconds: u64) {
     let path = root.join(name);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -61,30 +42,6 @@ fn write(root: &Path, name: &str, content: &str, seconds: u64) {
         .unwrap()
         .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
         .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_claude_source_passes_the_conformance_cases_it_ships_with() {
-    let report = conformance::run_all(&adapter(), &root().join("sources/claude/fixtures"))
-        .await
-        .unwrap();
-    for case in report.cases {
-        assert!(
-            case.failures.is_empty(),
-            "{}: {}",
-            case.name,
-            case.failures.join("\n")
-        );
-    }
-}
-
-#[test]
-fn private_and_unknown_claude_records_are_never_normalized() {
-    let normalized = text(SESSION);
-    assert!(normalized.contains("[tool: Read]"));
-    assert!(!normalized.contains("PRIVATE-REASONING"));
-    assert!(!normalized.contains("SECRET-TOOL-OUTPUT"));
-    assert!(!normalized.contains("compact_boundary"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

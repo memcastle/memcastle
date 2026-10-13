@@ -40,12 +40,8 @@ fn default_bundle() -> tempfile::TempDir {
     out
 }
 
-#[test]
-fn the_release_script_writes_the_unpacked_bundle_and_the_archives_the_official_registry_resolves_to()
- {
-    let out = default_bundle();
-    let out = out.path();
-
+/// Check release contents in the same test process that enables them, so packaging four components is done once.
+fn assert_release_contents(out: &Path) {
     for name in ["claude", "codex", "chatgpt", "github"] {
         let package = out.join("sources").join(name);
         assert!(package.join("memcastle-source.toml").is_file(), "{name}");
@@ -74,6 +70,7 @@ fn the_release_script_writes_the_unpacked_bundle_and_the_archives_the_official_r
 #[tokio::test(flavor = "multi_thread")]
 async fn the_bundled_sources_are_installed_from_the_start_and_only_need_enabling() {
     let out = default_bundle();
+    assert_release_contents(out.path());
     let scratch = tempfile::tempdir().unwrap();
 
     let sources_dir = scratch.path().join("installed");

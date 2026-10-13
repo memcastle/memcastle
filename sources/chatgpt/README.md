@@ -91,5 +91,5 @@ Validate it with a fresh user-owned session before relying on unattended mining.
 ## Development
 
 `mise run sources:test -- chatgpt` builds the component and runs its synthetic export conformance cases.
-`tests/wasm_chatgpt.rs` also exercises the source against a stand-in `curl`, not a real account.
+`sources/chatgpt/core-tests.rs` also exercises the source against a stand-in `curl`, not a real account.
 Keep exports, session credentials and traffic captures private: they contain conversation text and account access.

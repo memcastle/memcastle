@@ -273,6 +273,30 @@ description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, ne
 raw_args = true
 run = "cargo nextest run --profile wasm --test 'wasm_*'"
 
+[tasks."test:fast"]
+description = "Run basic tests without compiling WebAssembly or Linux-only slow test binaries"
+# nextest's profile filters execution only; enumerating Cargo targets avoids linking skipped WASM binaries.
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+targets=(--lib --bin memcastle --test in_process)
+for file in tests/*.rs; do
+  name="${file#tests/}"
+  name="${name%.rs}"
+  [[ "$name" == wasm_* ]] || targets+=(--test "$name")
+done
+cargo nextest run "${targets[@]}"
+"""
+
+[tasks."test:slow"]
+description = "Run the process-boundary and retrieval-baseline tests (Linux CI gate)"
+run = "cargo nextest run --profile slow --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process"
+
+[tasks."check:all"]
+description = "Run the local checks and the additional Linux-only slow suite"
+# The template owns `check` above the project-specific marker; compose it rather than editing template content.
+depends = ["check", "test:slow"]
+
 [tasks."integrations:check"]
 description = "Package and test the Core-shipped declarative integrations"
 # The installer tests run the real binary against the package tree and checkout.
@@ -362,6 +386,10 @@ for manifest in sources/*/memcastle-source.toml; do
   # A source that wraps a program ships a stand-in for it in `fixtures/bin`, which its cases need
   # first on the PATH because the real program needs data no fixture can carry.
   PATH="$PWD/$source/fixtures/bin:$PATH" ./target/debug/memcastle source test "$source"
+  name="${source#sources/}"
+  if [[ -f "$source/core-tests.rs" ]]; then
+    cargo nextest run --features provider-tests --test "source_$name"
+  fi
 done
 """
 
@@ -382,11 +410,13 @@ run = """
 set -euo pipefail
 # The stand-in for a wrapped program, when the source ships one (see `sources:check`).
 PATH="$PWD/sources/${usage_name?}/fixtures/bin:$PATH" ./target/debug/memcastle source test "sources/${usage_name?}"
+if [[ -f "sources/${usage_name?}/core-tests.rs" ]]; then
+  cargo nextest run --features provider-tests --test "source_${usage_name?}"
+fi
 """
 
-# The retrieval evaluation (docs/retrieval-evaluation.md). Explicit tasks, deliberately outside `check` and `ci`: they print
-# and write reports, take longer than the everyday suite, and a benchmark number is not a release gate. The small
-# bundled dataset also runs in the everyday suite as a regression floor (`mise run test -- retrieval_eval`).
+# The retrieval evaluation (docs/retrieval-evaluation.md). Explicit report-writing tasks stay outside `check` and `ci`;
+# the committed baseline runs separately in Linux's slow test suite (`mise run test:slow`).
 # They run the `#[ignore]`d tests of `tests/in_process/retrieval_eval`, with `--no-capture` so the report reaches the
 # terminal, and with the `[env]` development defaults dropped for the reason `integrations:check` gives.
 
@@ -404,7 +434,7 @@ cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E '
 [tasks."eval:baseline"]
 description = "Re-measure the bundled dataset and rewrite the committed baseline (tests/fixtures/retrieval/baseline.json)"
 # Only for a change that is meant to move retrieval quality, and then reviewed like any other diff: the baseline is the
-# floor the everyday suite holds the engine to.
+# floor the Linux slow suite holds the engine to.
 run = """
 #!/usr/bin/env bash
 set -euo pipefail

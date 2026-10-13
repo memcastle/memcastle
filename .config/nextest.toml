@@ -5,8 +5,8 @@
 # 30-second periods without progress is a hang, and killing it turns a job that
 # would burn the full runner timeout into one that fails in two minutes.
 slow-timeout = { period = "30s", terminate-after = 4 }
-# The basic suite: everything but the `wasm_*` binaries (see the project-specific section below).
-default-filter = "not binary(/^wasm_/)"
+# Basic execution excludes `wasm_*`, the process-boundary suite and the retrieval baseline.
+default-filter = "not binary(/^wasm_/) and not binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) and not test(retrieval_eval::suite::)"
 
 [profile.ci]
 # CI wants the full picture from one run, not the first failure.
@@ -21,8 +21,8 @@ path = "junit.xml"
 # --- project-specific --------------------------------------------------------
 
 # A test binary that builds or runs a WebAssembly component is named `wasm_*` (docs/development.md), and that prefix is
-# the whole definition of the wasm suite: a new `tests/wasm_*.rs` lands in it with no change here. The basic suite is
-# the fast one, and runs on every OS; the wasm suite needs the `wasm32-wasip2` target and runs on Linux only.
+# the whole definition of Core's wasm suite: a new `tests/wasm_*.rs` lands in it with no change here. The basic suite
+# runs on every OS; wasm and source-owned component checks need `wasm32-wasip2` and run on Linux only.
 # The basic filter is set on `profile.default` at the top of this file, and `ci` inherits it.
 # `mise run test:wasm`.
 [profile.wasm]
@@ -34,6 +34,17 @@ inherits = "ci"
 default-filter = "binary(/^wasm_/)"
 
 [profile.ci-wasm.junit]
+path = "junit.xml"
+
+# The process-boundary tests and committed retrieval baseline run once, on Linux, with coverage.
+[profile.slow]
+default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and test(retrieval_eval::suite::))"
+
+[profile.ci-slow]
+inherits = "ci"
+default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and test(retrieval_eval::suite::))"
+
+[profile.ci-slow.junit]
 path = "junit.xml"
 
 # These binaries build WebAssembly components with Cargo and compile them with Cranelift (docs/adr/026). Each test is

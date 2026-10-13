@@ -1,4 +1,5 @@
 //! ChatGPT is exercised through its installed component and the same adapter contract as other sources.
+#[path = "../../tests/common/mod.rs"]
 mod common;
 
 use std::path::{Path, PathBuf};
@@ -10,7 +11,7 @@ use memcastle::config::MiningConfig;
 use memcastle::domain::{AccessTokens, Job, JobStatus, OAuthRequirement, Secret};
 use memcastle::mining::adapter::SourceAdapter;
 use memcastle::mining::wasm::WasmAdapter;
-use memcastle::source::{build::Project, conformance};
+use memcastle::source::build::Project;
 use serde_json::json;
 
 fn root() -> PathBuf {
@@ -89,14 +90,6 @@ async fn web_fixture() -> (
     options.insert("mode".into(), "web".into());
     let source = adapter.identify(None, &options).unwrap();
     (lock, adapter, source)
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_synthetic_export_passes_the_source_contract() {
-    let report = conformance::run_all(&adapter(), &root().join("sources/chatgpt/fixtures"))
-        .await
-        .unwrap();
-    assert!(report.passed(), "{report:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -446,7 +439,7 @@ async fn the_installed_source_mines_an_export_idempotently_and_finds_a_later_edi
     );
 
     let file = scratch.path().join("conversations.json");
-    let original = include_str!("../sources/chatgpt/fixtures/export/conversations.json");
+    let original = include_str!("fixtures/export/conversations.json");
     std::fs::write(&file, original).unwrap();
     let mine = || async {
         let response = client.post(url("/api/jobs"))

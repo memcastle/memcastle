@@ -1,11 +1,9 @@
-//! The same conformance cases, run against a built-in adapter and against a WebAssembly component
+//! The same conformance cases as the built-in adapter, run against a WebAssembly component
 //! (docs/adr/026, docs/writing-sources.md).
 //!
-//! If the two kinds of source ever disagree about what the contract requires, a case fails for one and not the
-//! other, here.
+//! The native counterpart runs in `tests/in_process/native_conformance.rs` on every OS.
 //!
-//! This binary builds a component, so it is part of the `wasm_` suite; the guide's documentation guards, which build
-//! nothing, are in `tests/source_docs.rs`.
+//! This binary builds a component, so it is part of the `wasm_` suite.
 
 use std::path::PathBuf;
 
@@ -14,7 +12,6 @@ mod common;
 use common::wasm::reference_component;
 
 use memcastle::config::MiningConfig;
-use memcastle::mining::adapters::directory::DirectoryAdapter;
 use memcastle::mining::wasm::WasmAdapter;
 use memcastle::source::build::Project;
 use memcastle::source::conformance;
@@ -44,15 +41,6 @@ fn assert_passes(report: &conformance::Report) {
             case.failures.join("\n")
         );
     }
-}
-
-#[tokio::test]
-async fn the_native_directory_source_passes_every_conformance_case() {
-    let report = conformance::run_all(&DirectoryAdapter::new(2 * 1024 * 1024), &cases())
-        .await
-        .unwrap();
-    assert!(!report.cases.is_empty());
-    assert_passes(&report);
 }
 
 #[tokio::test(flavor = "multi_thread")]

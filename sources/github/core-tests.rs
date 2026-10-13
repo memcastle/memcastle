@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+#[path = "../../tests/common/mod.rs"]
 mod common;
 
 use common::{TestDaemon, wait_for_job_status};
@@ -11,7 +12,7 @@ use memcastle::config::MiningConfig;
 use memcastle::domain::{Job, JobStatus, Options};
 use memcastle::mining::adapter::SourceAdapter;
 use memcastle::mining::wasm::WasmAdapter;
-use memcastle::source::{build::Project, conformance};
+use memcastle::source::build::Project;
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -130,15 +131,6 @@ async fn ids(adapter: &WasmAdapter, options: &Options) -> Vec<String> {
         }
     }
     panic!("source did not exhaust its cursor");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_github_source_passes_its_offline_contract() {
-    let _fixture = Fixture::new().await;
-    let report = conformance::run_all(&adapter(), &root().join("sources/github/fixtures"))
-        .await
-        .unwrap();
-    assert!(report.passed(), "{report:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

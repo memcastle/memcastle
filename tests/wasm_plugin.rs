@@ -3,7 +3,7 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::sync::OnceLock;
 
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::config::CredentialBackend;
@@ -11,19 +11,20 @@ use memcastle::domain::{
     Job, JobStatus, PluginInfo, PluginManifest, PluginModule, PluginModuleKind, sha256_hex,
 };
 use memcastle::plugin::package;
-use memcastle::source::{build::Project, scaffold};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
-fn release(root: &Path) -> Vec<u8> {
+fn release() -> Vec<u8> {
+    // Plugin ownership is what these tests exercise. Reusing the same runnable directory guest for both names avoids
+    // compiling two scaffolded projects per nextest process while still proving that each source can mine.
+    static SOURCE: OnceLock<(Vec<u8>, String)> = OnceLock::new();
+    let (component, reference_manifest) = SOURCE.get_or_init(common::wasm::reference_component);
     let mut files = BTreeMap::new();
     let mut modules = Vec::new();
     for name in ["first", "second"] {
-        scaffold::init(root, name, scaffold::Template::Rust).unwrap();
-        common::wasm::share_target_of(root, name);
-        let project = Project::open(&root.join(name)).unwrap();
-        let component = std::fs::read(project.build().unwrap()).unwrap();
-        let manifest = std::fs::read(root.join(name).join("memcastle-source.toml")).unwrap();
+        let manifest = reference_manifest
+            .replace("name = \"directory-wasm\"", &format!("name = \"{name}\""))
+            .into_bytes();
         modules.push(PluginModule {
             id: name.to_string(),
             kind: PluginModuleKind::Source,
@@ -31,13 +32,13 @@ fn release(root: &Path) -> Vec<u8> {
             manifest: format!("modules/{name}/memcastle-source.toml"),
             manifest_sha256: sha256_hex(&manifest),
             entry: format!("modules/{name}/source.wasm"),
-            sha256: sha256_hex(&component),
+            sha256: sha256_hex(component),
             optional: false,
             contract: Some("0.4.0".into()),
             config_schema: None,
         });
         files.insert(format!("modules/{name}/memcastle-source.toml"), manifest);
-        files.insert(format!("modules/{name}/source.wasm"), component);
+        files.insert(format!("modules/{name}/source.wasm"), component.to_vec());
     }
     let integration = b"format = 1\n[integration]\nid = 'assistant'\nversion = '0.1.0'\ndescription = 'agent-side lifecycle'\n[compatibility]\nmemcastle = '>=0.4'\n[agent]\nkind = 'opencode'\nentry = 'index.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
     let entry = b"export default { id: 'assistant', server: async () => ({}) };\n";
@@ -83,9 +84,8 @@ fn release(root: &Path) -> Vec<u8> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_uninstall_keeps_live_credentials_until_the_plugin_ledger_is_removed() {
-    let project = tempfile::tempdir().unwrap();
     let credentials = tempfile::tempdir().unwrap();
-    let archive = release(project.path());
+    let archive = release();
     let daemon = TestDaemon::start_configured(|config| {
         config.credentials.backend = CredentialBackend::File;
         config.credentials.dir = Some(credentials.path().to_path_buf());
@@ -178,8 +178,7 @@ async fn a_failed_uninstall_keeps_live_credentials_until_the_plugin_ledger_is_re
 
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_mined_data() {
-    let project = tempfile::tempdir().unwrap();
-    let archive = release(project.path());
+    let archive = release();
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview: Value = client
@@ -485,8 +484,7 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
 
 #[tokio::test(flavor = "multi_thread")]
 async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_the_other_state() {
-    let project = tempfile::tempdir().unwrap();
-    let archive = release(project.path());
+    let archive = release();
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview: Value = client
