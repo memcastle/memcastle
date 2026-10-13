@@ -28,10 +28,6 @@ jobs:
       matrix:
         include:
           - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "", smoke: true }
-          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-arm64, cross: true, ext: "", smoke: false }
-          - { target: x86_64-apple-darwin, runner: macos-15, asset: darwin-amd64, cross: false, ext: "", smoke: false }
-          - { target: aarch64-apple-darwin, runner: macos-15, asset: darwin-arm64, cross: false, ext: "", smoke: true }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2022, asset: windows-amd64, cross: false, ext: ".exe", smoke: true }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -113,9 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64.exe; do
-            test -s "dist/memcastle_${SHA}_${target}"
-          done
+          test -s "dist/memcastle_${SHA}_linux-amd64"
           git fetch origin main
           if [[ "$(git rev-parse origin/main)" != "$SHA" ]]; then
             echo '::notice::Newer main commit exists; keep the last completed prerelease.'

@@ -167,12 +167,11 @@ neither normal provider CI nor its release workflow builds unrelated providers o
 ### Shared CI and development Core
 
 Every successful Core CI run on `main` that passes the basic, slow, WebAssembly and other required Core jobs
-publishes five development binaries to the fixed
+publishes a Linux amd64 development binary to the fixed
 [`development` prerelease](https://github.com/memcastle/memcastle/releases/tag/development).
-The release body contains `Core main SHA: <40-character SHA>`; assets are named
-`memcastle_<SHA>_{linux-amd64,linux-arm64,darwin-amd64,darwin-arm64}` and
-`memcastle_<SHA>_windows-amd64.exe`, with `SHA256SUMS_<SHA>` covering all five.
-Only after all assets are uploaded does the publisher change the body to the new SHA.
+The release body contains `Core main SHA: <40-character SHA>`; the binary is named
+`memcastle_<SHA>_linux-amd64`, with `SHA256SUMS_<SHA>` covering it.
+Only after the binary and checksum are uploaded does the publisher change the body to the new SHA.
 If CI, a build, or an upload fails, the previously advertised SHA stays in place;
 a superseded commit is not published.
 The `development` tag is a fixed discovery address, **not** a pointer to the newest source commit:
