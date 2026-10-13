@@ -15,9 +15,11 @@ To test a Core change across repositories, build a Core binary in that checkout 
 `MEMCASTLE_BIN=/absolute/path/to/memcastle python3 scripts/smoke_install.py` in the generated project.
 The smoke test uses a disposable palace and agent directory and validates preview, consent, install and separate module
 activation; it never uses a user's installed plugin or agent configuration.
-Provider CI checks sources against the latest stable Core; current-Core plugin-contract CI also composes and installs a
-generated project. This split matters while stable Core 0.4.1 predates the plugin installation command.
-See [Plugin packages](plugins.md#standalone-development-and-compatibility) for the compatibility and release policy.
+Provider CI checks source conformance and archive installation against the successful `main` CI prerelease and any
+explicitly selected plugin-capable stable releases; each matrix leg records its exact Core revision.
+Current-Core plugin-contract CI also composes and installs a generated project against the checkout being changed.
+See [Plugin packages](plugins.md#shared-ci-and-development-core) for the release assets, SHA verification, reusable
+workflow inputs and compatibility policy.
 
 ## Prerequisites
 

@@ -156,9 +156,64 @@ From a generated provider checkout, run `python3 scripts/package.py`, `python3 s
 Set `MEMCASTLE_BIN` to a Core binary with plugin support and run `python3 scripts/smoke_install.py` to preview and install
 the archive into a disposable palace, check installed-but-disabled sources, enable them and register integrations with an
 isolated test agent. The script does not use the user's palace or agent files.
-The provider's CI runs source fixture conformance against the latest stable released Core and also tests plugin install
-when that release supports it; Core's plugin-contract CI builds a generated project against the current Core binary.
-The latest stable Core 0.4.1 predates plugin installation, so source conformance and the current-Core install check are
-separate until a plugin-capable Core is released.
+The shared plugin validation workflow always tests source conformance and archive installation/activation against the
+tested Core `main` prerelease.
+Callers may additionally name exact plugin-capable stable versions; each gets the same required integration checks.
+Stable Core 0.4.1 does not support plugin installation, so it cannot be added to this matrix.
+Core's separate plugin-contract CI builds a generated project against the Core checkout under test.
 For cross-repository development, set `MEMCASTLE_BIN` to a binary built in the Core worktree and run the same smoke check;
 neither normal provider CI nor its release workflow builds unrelated providers or Core from source.
+
+### Shared CI and development Core
+
+Every successful Core CI run on `main` that passes the basic, slow, WebAssembly and other required Core jobs
+publishes five development binaries to the fixed
+[`development` prerelease](https://github.com/memcastle/memcastle/releases/tag/development).
+The release body contains `Core main SHA: <40-character SHA>`; assets are named
+`memcastle_<SHA>_{linux-amd64,linux-arm64,darwin-amd64,darwin-arm64}` and
+`memcastle_<SHA>_windows-amd64.exe`, with `SHA256SUMS_<SHA>` covering all five.
+Only after all assets are uploaded does the publisher change the body to the new SHA.
+If CI, a build, or an upload fails, the previously advertised SHA stays in place;
+a superseded commit is not published.
+The `development` tag is a fixed discovery address, **not** a pointer to the newest source commit:
+read the release body.
+Stable tags, versioning, Homebrew and AUR publication remain independent of this prerelease.
+Core's publishing job uses the existing GitHub App credentials in its `release` environment;
+binary build jobs need only `contents: read`.
+
+Standalone plugins own their build, packaging, versioning and release workflow.
+They keep local `scripts/package.py`, `scripts/check_modules.py`, tests and smoke scripts, then upload a built archive
+and source components as an Actions artifact before calling Core's shared validation workflow.
+The shared workflow downloads that artifact; it never builds or packages a plugin.
+Caller jobs grant `contents: read` for validation and `contents: write` only where the provider publishes its release.
+For example, after a provider's `package` job uploads the archive and exposes its relative path:
+
+```yaml
+permissions:
+  contents: read
+jobs:
+  validate:
+    needs: package
+    uses: memcastle/memcastle/.github/workflows/plugin-validation.yaml@<reviewed Core commit>
+    with:
+      artifact-name: plugin-package
+      archive-path: ${{ needs.package.outputs.archive }}
+      core-versions: '[]'
+      extra-smoke-command: python3 scripts/smoke_adoption.py
+```
+
+`core-versions` is a JSON array of exact stable version tags and defaults to `[]`,
+yielding the required `[main]` matrix.
+Add a version such as `"0.5.0"` only after its released Core binary supports the plugin install contract;
+there is no conditional integration-test skip.
+The required `artifact-name` and `archive-path` identify the exact uploaded, already-built plugin;
+include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
+The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow provider-owned installation checks and fixtures.
+The provider's release workflow decides when to validate, requires its own reviewed version tag,
+and publishes the archive only after the shared validation succeeds.
+The Core binary action accepts `version: main` or an exact stable tag and returns `binary` and `core_sha` outputs;
+`main` is verified against the SHA-qualified development checksums and stable binaries against their release checksums.
+Each compatibility matrix leg reports its exact Core revision in the job summary.
+To add another provider, supply its own package/check and archive install scripts,
+select compatible stable tags explicitly, and keep provider-specific fixture setup or legacy migration smokes
+in the caller's inputs.

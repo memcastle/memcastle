@@ -1,0 +1,107 @@
+name: Validate built standalone plugin
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Actions artifact containing the built plugin archive and source components
+        type: string
+        required: true
+      archive-path:
+        description: Path to the single already-built archive, relative to the artifact root
+        type: string
+        required: true
+      smoke-command:
+        description: Provider-owned installation and activation check
+        type: string
+        required: false
+        default: python3 scripts/smoke_install.py
+      extra-smoke-command:
+        description: Optional provider-owned migration check
+        type: string
+        required: false
+        default: ""
+      fixture-bin:
+        description: Optional fixture commands to prepend to PATH for source conformance
+        type: string
+        required: false
+        default: ""
+      core-versions:
+        description: JSON array of additional exact plugin-capable Core release tags
+        type: string
+        required: false
+        default: "[]"
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      cores: ${{ steps.list.outputs.cores }}
+    steps:
+      - id: list
+        env:
+          VERSIONS: ${{ inputs.core-versions }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re
+          versions = json.loads(os.environ['VERSIONS'])
+          if not isinstance(versions, list) or any(not isinstance(v, str) or not re.fullmatch(r'\d+\.\d+\.\d+', v) for v in versions):
+              raise ValueError('core-versions must be a JSON array of exact stable tags')
+          if len(set(versions)) != len(versions):
+              raise ValueError('core-versions must not contain duplicates')
+          print('cores=' + json.dumps(['main', *versions]))
+          PY
+
+  compatibility:
+    needs: matrix
+    name: Core ${{ matrix.core }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ${{ fromJSON(needs.matrix.outputs.cores) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+      - name: Require the provider's built archive
+        env:
+          ARCHIVE: ${{ inputs.archive-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARCHIVE" == dist/* && "$ARCHIVE" != *..* && "$ARCHIVE" == *.tar.gz ]] || {
+            echo '::error::archive-path must name one archive below dist/'
+            exit 1
+          }
+          test -s "$ARCHIVE" || { echo "::error::built archive missing: $ARCHIVE"; exit 1; }
+      - uses: memcastle/memcastle/.github/actions/core-binary@main
+        id: core
+        with:
+          version: ${{ matrix.core }}
+      - name: Check source conformance and installation
+        env:
+          MEMCASTLE_BIN: ${{ steps.core.outputs.binary }}
+          FIXTURE_BIN: ${{ inputs.fixture-bin }}
+          SMOKE: ${{ inputs.smoke-command }}
+          EXTRA_SMOKE: ${{ inputs.extra-smoke-command }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$FIXTURE_BIN" ]]; then
+            export PATH="$PWD/$FIXTURE_BIN:$PATH"
+          fi
+          for manifest in modules/*/memcastle-source.toml; do
+            if [[ -f "$manifest" ]]; then
+              "$MEMCASTLE_BIN" source test "$(dirname "$manifest")" --no-build
+            fi
+          done
+          bash -e -o pipefail -c "$SMOKE"
+          if [[ -n "$EXTRA_SMOKE" ]]; then
+            bash -e -o pipefail -c "$EXTRA_SMOKE"
+          fi
+          echo 'Core ${{ matrix.core }} (${{ steps.core.outputs.core_sha }}) passed conformance and installation' >> "$GITHUB_STEP_SUMMARY"
