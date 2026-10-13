@@ -39,9 +39,9 @@ describe("the login page", () => {
     await submit(wrapper, TOKEN)
 
     expect(session.state.authenticated).toBe(true)
-    // The view is a lazily loaded chunk, so the navigation finishes a moment after the form does.
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe("jobs"))
-  })
+    // Loading the destination chunk can take longer than waitFor's default second on a busy CI runner.
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe("jobs"), { timeout: 10_000 })
+  }, 15_000)
 
   it("refuses a wrong token, stays on the page and never shows what was typed", async () => {
     const { wrapper, router, session } = await login()

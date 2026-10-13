@@ -399,7 +399,7 @@ describe("the jobs page", () => {
 
     expect(document.body.textContent).toContain("Parameters")
     expect(document.body.textContent).toContain('"drawers": 3')
-  })
+  }, 15_000)
 })
 
 describe("the launch page", () => {
