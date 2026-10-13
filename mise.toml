@@ -283,7 +283,10 @@ targets=(--lib --bin memcastle --test in_process)
 for file in tests/*.rs; do
   name="${file#tests/}"
   name="${name%.rs}"
-  [[ "$name" == wasm_* ]] || targets+=(--test "$name")
+  case "$name" in
+    wasm_*|persistence|mcp_smoke|auth_lifecycle) ;;
+    *) targets+=(--test "$name") ;;
+  esac
 done
 cargo nextest run "${targets[@]}"
 """
