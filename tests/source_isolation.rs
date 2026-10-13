@@ -53,6 +53,32 @@ fn rust_files(dir: &str) -> Vec<String> {
     files
 }
 
+#[test]
+fn generic_component_tests_use_only_the_mock_and_directory_conformance_stays_source_owned() {
+    for file in [
+        "tests/common/wasm.rs",
+        "tests/wasm_runtime.rs",
+        "tests/wasm_registry.rs",
+        "tests/wasm_plugin.rs",
+    ] {
+        let source = code(file);
+        assert!(
+            !source.contains("sources/directory") && !source.contains("reference_component"),
+            "{file} must use the synthetic mock instead of building a provider fixture"
+        );
+    }
+    let manifest =
+        std::fs::read_to_string(root().join("sources/directory/memcastle-source.toml")).unwrap();
+    assert!(
+        manifest.contains("fixtures = \"../../tests/fixtures/sources/conformance\""),
+        "directory conformance must still run in its source-owned test leg"
+    );
+    assert!(
+        !root().join("tests/wasm_conformance.rs").exists(),
+        "Core must not run the same provider conformance a second time"
+    );
+}
+
 /// The source names the pipeline must never mention, in every spelling they appear in:
 /// the built-in `directory` adapter and the `pi` and `opencode` sources, which are WebAssembly components now.
 const ADAPTER_NAMES: &[&str] = &[

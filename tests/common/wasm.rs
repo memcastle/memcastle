@@ -7,9 +7,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The reference source, which also supplies the lockfile every scaffolded project is seeded with.
-fn reference_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("sources/directory")
+/// The synthetic component also supplies the lockfile for scaffolded project builds.
+fn mock_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock-source")
 }
 
 /// Where every project built by a `wasm_*` test builds, so Cargo compiles `wit-bindgen` and friends once for all of
@@ -46,17 +46,16 @@ pub fn share_target(manifest: &str, name: &str) -> String {
         )
 }
 
-/// Give a freshly scaffolded project the reference source's `Cargo.lock`.
+/// Give a freshly scaffolded project the mock source's `Cargo.lock`.
 ///
 /// A scaffold ships none, so its first build updates the crates.io index and resolves 35 packages, holding Cargo's
 /// package-cache lock for the duration; every build in the suite then queues behind it, and on a runner it is also a
-/// network round trip each time. The reference source has the same dependencies, so its lockfile resolves them with
+/// network round trip each time. The mock source has the same dependencies, so its lockfile resolves them with
 /// no network: Cargo only renames the root package in it.
 pub fn seed_lockfile(project: &Path) {
     let lock = project.join("Cargo.lock");
     if !lock.exists() {
-        std::fs::copy(reference_dir().join("Cargo.lock"), lock)
-            .expect("the reference lockfile copies");
+        std::fs::copy(mock_dir().join("Cargo.lock"), lock).expect("the mock lockfile copies");
     }
 }
 
@@ -69,18 +68,16 @@ pub fn share_target_of(dir: &Path, name: &str) {
     seed_lockfile(&project);
 }
 
-/// The reference source `sources/directory`, built as a component, and the manifest text it is installed with.
+/// The synthetic test source, built as a component, and its manifest text.
 ///
 /// It is built in place, with a debug profile and into the shared target directory, and its own `target/` and
-/// `dist/` are left alone: the release build with LTO that `memcastle source build` makes (and that
-/// `mise run sources:check` and CI's per-source job still make) recompiles every dependency with optimisations, and
-/// every test process used to wait for it. What these tests prove, that the host runs a component, does not depend on
-/// the profile.
+/// `dist/` are left alone: a release build with LTO recompiles every dependency with optimisations, and these tests
+/// only need to prove that the host runs a component, regardless of profile.
 ///
 /// Every process that calls this runs `cargo build`, and Cargo's build-directory lock lets one compile while the others
 /// wait and then find nothing left to do.
-pub fn reference_component() -> (Vec<u8>, String) {
-    let dir = reference_dir();
+pub fn mock_component() -> (Vec<u8>, String) {
+    let dir = mock_dir();
     let target = shared_target();
     let status = Command::new("cargo")
         .args(["build", "--target", "wasm32-wasip2", "--target-dir"])
@@ -91,11 +88,11 @@ pub fn reference_component() -> (Vec<u8>, String) {
         .expect("cargo starts");
     assert!(
         status.success(),
-        "the reference source builds; `rustup target add wasm32-wasip2` provides its target"
+        "the mock source builds; `rustup target add wasm32-wasip2` provides its target"
     );
     let component =
-        std::fs::read(target.join("wasm32-wasip2/debug/memcastle_source_directory.wasm"))
-            .expect("the build produced the reference component");
+        std::fs::read(target.join("wasm32-wasip2/debug/memcastle_test_mock_source.wasm"))
+            .expect("the build produced the mock component");
     let manifest = std::fs::read_to_string(dir.join("memcastle-source.toml")).unwrap();
     (component, manifest)
 }

@@ -222,9 +222,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `web/test/` — the dashboard's client, login, route guard, event-stream parser and live loader
     (vitest, no daemon), and the same client, login and event stream
     against a real `memcastle serve` (`web/test/daemon`, bun), see [Web UI](web.md#developing-the-dashboard).
-  - `tests/in_process/native_conformance.rs` and `tests/wasm_conformance.rs` — the same conformance cases run against
-    the built-in `directory` source in the basic suite and the reference WebAssembly source built from
-    `sources/directory/` in the Linux WebAssembly suite.
+  - `tests/in_process/native_conformance.rs` — conformance for Core's built-in `directory` adapter in the basic suite.
+    WebAssembly provider conformance runs in each source's own CI leg, including `sources/directory/`.
   - The Pi history source and lifecycle extension have their own tests and fixtures in
     [`memcastle-pi`](https://github.com/memcastle/memcastle-pi), run against a released or locally built Core binary.
   - The OpenCode history source's fixtures, conformance and installation/mining smoke checks live in
@@ -237,12 +236,13 @@ Every path, environment variable, flag and the precedence between them is in [Co
     source that a registry never installs, updates or replaces, a source registered by GitHub repository (against a
     stand-in for the API, with a digest that does not match and a repository that cannot be read), an unreadable
     registry, and the CLI publishing, signing, searching, installing and updating (in-process and subprocess,
-    WebAssembly suite).
+    WebAssembly suite, using the synthetic Core mock source).
   - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the release script, packaging Core-shipped sources as an
     unpacked bundle and as `<name>-<version>.tar.gz` archives, and a daemon that lists it as installed and enables it
     with no consent (WebAssembly suite, Unix only).
-  - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
-    shared pipeline, and refusing a component altered on disk (in-process, WebAssembly suite).
+  - `tests/wasm_runtime.rs`, `tests/wasm_plugin.rs` — installable mock sources against a real daemon: consent, independent
+    module lifecycles, mining through the shared pipeline, retained data, and refusing a component altered on disk
+    (in-process, WebAssembly suite).
   - `tests/wasm_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
     (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
     unlisted program) and installing through the CLI.
@@ -268,6 +268,20 @@ by path, so the Codecov page shows each area whatever flag covered it.
 Each component reflects the merged execution coverage from every reporting suite.
 Its required status permits the same 0.5% fluctuation as the project status,
 so platform and timing variation does not fail a build.
+
+### Core and provider test boundaries
+
+Generic Core WebAssembly lifecycle and contract tests use `tests/fixtures/mock-source/`, a synthetic WIT component.
+Its two fixed candidates and locator-derived text exercise installation, consent, cursors, mining, registry updates and
+independent plugin modules without testing any provider's discovery rules or calling an external service.
+The mock is a test fixture, not a releasable source: it lives outside `sources/` and is built only by the generic tests.
+`tests/source_isolation.rs` guards against reintroducing a concrete provider fixture into those tests.
+
+Each real WebAssembly source's own `mise run sources:test -- <name>` CI leg runs its conformance fixtures and source-owned
+behavior tests; `sources/directory/` retains the directory conformance cases.
+Core's built-in directory adapter has its separate native conformance test.
+Scaffolding and sandbox tests (`tests/wasm_projects.rs`), OAuth tests (`tests/wasm_oauth.rs`) and the release bundle test
+use purpose-built components because their behavior is what those tests verify.
 
 ### Where the CI time goes
 
@@ -296,11 +310,11 @@ is how many times Cargo has to compile what.
 The helpers in `tests/common/wasm.rs` keep that to one small crate per build:
 
 - Every `wasm_*` test builds into one shared debug target directory, so `wit-bindgen` and `serde_json` compile once.
-- Every scaffolded project is seeded with the reference source's `Cargo.lock`.
+- Every scaffolded project is seeded with the mock source's `Cargo.lock`.
   A scaffold ships none, and without it each build updated the crates.io index and re-resolved 35 packages while holding
   Cargo's package-cache lock, which every other build then waited for.
-- The reference source is built in place, in debug, into that shared directory, so a test never waits for the
-  release build with LTO that `mise run sources:check` and CI's per-source job make.
+- The mock source is built in place, in debug, into that shared directory, so generic tests never need a provider build
+  or wait for the release build with LTO that source-owned CI legs make.
 - A test that drives `memcastle source init` must call `share_target_of` afterwards.
   Without it the project builds in release into a `target/` of its own and recompiles every dependency, which used to be
   the two slowest tests in the suite.

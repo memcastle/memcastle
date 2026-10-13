@@ -3,8 +3,8 @@
 //! MemCastle (docs/adr/040) is installed from the start and is never touched by a registry.
 //!
 //! The registry is a directory on disk (a registry whose location is a path, which is also what offline installation
-//! is), written with the same library calls `memcastle source index` makes. The package is the reference source under
-//! `sources/directory`, re-packaged at the versions and with the permissions each test needs.
+//! is), written with the same library calls `memcastle source index` makes. The package is the synthetic Core fixture,
+//! re-packaged at the versions and with the permissions each test needs.
 
 mod common;
 
@@ -12,26 +12,26 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use common::TestDaemon;
-use common::wasm::reference_component;
+use common::wasm::mock_component;
 use memcastle::config::TrustMode;
 use memcastle::domain::SourceIndex;
 use memcastle::source::{package, publish, signing};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
-const NAME: &str = "directory-wasm";
+const NAME: &str = "mock-wasm";
 const NETWORK: &str = "[permissions]\nnetwork = true\n\n[permissions.filesystem]";
 const LOCATOR: &str = "[permissions.filesystem]";
 
-/// The reference component and manifest, built once per process.
-fn reference() -> &'static (Vec<u8>, String) {
-    static REFERENCE: OnceLock<(Vec<u8>, String)> = OnceLock::new();
-    REFERENCE.get_or_init(reference_component)
+/// The synthetic component and manifest, built once per process.
+fn mock() -> &'static (Vec<u8>, String) {
+    static MOCK: OnceLock<(Vec<u8>, String)> = OnceLock::new();
+    MOCK.get_or_init(mock_component)
 }
 
 /// The package at `version`, asking for the network too when `network`, and requiring MemCastle `memcastle`.
 fn archive(version: &str, network: bool, memcastle: &str) -> Vec<u8> {
-    let (component, manifest) = reference();
+    let (component, manifest) = mock();
     let manifest = manifest
         .replace("version = \"0.1.0\"", &format!("version = \"{version}\""))
         .replace(
@@ -39,13 +39,13 @@ fn archive(version: &str, network: bool, memcastle: &str) -> Vec<u8> {
             &format!("memcastle = \"{memcastle}\""),
         )
         .replace(LOCATOR, if network { NETWORK } else { LOCATOR });
-    package::pack(&manifest, component, &[]).expect("the reference source packs")
+    package::pack(&manifest, component, &[]).expect("the mock source packs")
 }
 
 /// Rejection and preview checks never load the guest. A valid package with a minimal WASM header avoids compiling a
 /// source just to have its digest, manifest or registry location rejected before installation.
 fn preview_archive(version: &str, network: bool, memcastle: &str) -> Vec<u8> {
-    let manifest = include_str!("../sources/directory/memcastle-source.toml")
+    let manifest = include_str!("fixtures/mock-source/memcastle-source.toml")
         .replace("version = \"0.1.0\"", &format!("version = \"{version}\""))
         .replace(
             "memcastle = \">=0.2\"",
@@ -477,7 +477,7 @@ async fn a_package_installed_from_a_file_has_no_upstream_and_is_never_updated() 
 
 /// A bundle the way a release lays it out: `<root>/<NAME>/` holding the manifest and the component, unpacked.
 fn unpacked_bundle(version: &str) -> tempfile::TempDir {
-    let (component, manifest) = reference();
+    let (component, manifest) = mock();
     let bundle = tempfile::tempdir().unwrap();
     let package = bundle.path().join(NAME);
     std::fs::create_dir_all(&package).unwrap();
@@ -733,7 +733,7 @@ fn registry_naming_a_repository(repository: &str) -> tempfile::TempDir {
     let index = json!({
         "format": 1,
         "name": "test",
-        "sources": [{"name": NAME, "description": "wasm directory", "repository": repository}],
+        "sources": [{"name": NAME, "description": "synthetic source", "repository": repository}],
     });
     std::fs::write(
         dir.path().join(memcastle::distribution::INDEX_FILE),

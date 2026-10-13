@@ -3,7 +3,6 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::OnceLock;
 
 use common::{TestDaemon, wait_for_job_status};
@@ -12,35 +11,20 @@ use memcastle::domain::{
     Job, JobStatus, PluginInfo, PluginManifest, PluginModule, PluginModuleKind, sha256_hex,
 };
 use memcastle::plugin::package;
-use memcastle::source::{build::Project, scaffold};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
-fn release(scaffolded: Option<&Path>) -> Vec<u8> {
-    // The directory guest can stand in for either source's install/consent lifecycle. Its identify result hardcodes its
-    // own name, however, so the legacy adoption test needs two named scaffolded guests to exercise retained data.
+fn release() -> Vec<u8> {
+    // The guest selects first or second from the locator, so one build covers both independent source lifecycles.
     static SOURCE: OnceLock<(Vec<u8>, String)> = OnceLock::new();
     let mut files = BTreeMap::new();
     let mut modules = Vec::new();
     for name in ["first", "second"] {
-        let (component, manifest) = if let Some(root) = scaffolded {
-            scaffold::init(root, name, scaffold::Template::Rust).unwrap();
-            common::wasm::share_target_of(root, name);
-            let project = Project::open(&root.join(name)).unwrap();
-            (
-                std::fs::read(project.build().unwrap()).unwrap(),
-                std::fs::read(root.join(name).join("memcastle-source.toml")).unwrap(),
-            )
-        } else {
-            let (component, reference_manifest) =
-                SOURCE.get_or_init(common::wasm::reference_component);
-            (
-                component.clone(),
-                reference_manifest
-                    .replace("name = \"directory-wasm\"", &format!("name = \"{name}\""))
-                    .into_bytes(),
-            )
-        };
+        let (component, mock_manifest) = SOURCE.get_or_init(common::wasm::mock_component);
+        let component = component.clone();
+        let manifest = mock_manifest
+            .replace("name = \"mock-wasm\"", &format!("name = \"{name}\""))
+            .into_bytes();
         modules.push(PluginModule {
             id: name.to_string(),
             kind: PluginModuleKind::Source,
@@ -50,7 +34,7 @@ fn release(scaffolded: Option<&Path>) -> Vec<u8> {
             entry: format!("modules/{name}/source.wasm"),
             sha256: sha256_hex(&component),
             optional: false,
-            contract: Some(if scaffolded.is_some() { "0.4.0" } else { "0.4" }.into()),
+            contract: Some("0.4".into()),
             config_schema: None,
         });
         files.insert(format!("modules/{name}/memcastle-source.toml"), manifest);
@@ -101,7 +85,7 @@ fn release(scaffolded: Option<&Path>) -> Vec<u8> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_uninstall_keeps_live_credentials_until_the_plugin_ledger_is_removed() {
     let credentials = tempfile::tempdir().unwrap();
-    let archive = release(None);
+    let archive = release();
     let daemon = TestDaemon::start_configured(|config| {
         config.credentials.backend = CredentialBackend::File;
         config.credentials.dir = Some(credentials.path().to_path_buf());
@@ -194,8 +178,7 @@ async fn a_failed_uninstall_keeps_live_credentials_until_the_plugin_ledger_is_re
 
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_mined_data() {
-    let project = tempfile::tempdir().unwrap();
-    let archive = release(Some(project.path()));
+    let archive = release();
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview: Value = client
@@ -269,12 +252,7 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
         .await
         .unwrap();
     assert_eq!(still_legacy["origin"], "package");
-    let old_notes = tempfile::tempdir().unwrap();
-    std::fs::write(
-        old_notes.path().join("legacy.txt"),
-        "The legacy avalanche remains in memory.\n",
-    )
-    .unwrap();
+    let old_locator = "first:legacy avalanche";
     client
         .post(format!(
             "{}/api/source-packages/first/enable",
@@ -284,7 +262,7 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
         .await
         .unwrap();
     let earlier: Job = client.post(format!("{}/api/jobs", daemon.base_url))
-        .json(&json!({"type": "mine", "source": "first", "locator": old_notes.path(), "requested_by": "test"}))
+        .json(&json!({"type": "mine", "source": "first", "locator": old_locator, "requested_by": "test"}))
         .send().await.unwrap().json().await.unwrap();
     wait_for_job_status(&client, &daemon.base_url, earlier.id, JobStatus::Completed).await;
     client
@@ -388,15 +366,18 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
         .unwrap();
     assert_eq!(refused.status(), StatusCode::CONFLICT);
 
-    let notes = tempfile::tempdir().unwrap();
-    std::fs::write(
-        notes.path().join("memory.txt"),
-        "The provider keeps an independent cursor.\n",
-    )
-    .unwrap();
-    let submitted: Job = client.post(format!("{}/api/jobs", daemon.base_url))
-        .json(&json!({"type": "mine", "source": "first", "locator": notes.path(), "requested_by": "test"}))
-        .send().await.unwrap().json().await.unwrap();
+    let locator = "first:independent cursor";
+    let submitted: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(
+            &json!({"type": "mine", "source": "first", "locator": locator, "requested_by": "test"}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     wait_for_job_status(
         &client,
         &daemon.base_url,
@@ -501,7 +482,7 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
 
 #[tokio::test(flavor = "multi_thread")]
 async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_the_other_state() {
-    let archive = release(None);
+    let archive = release();
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview: Value = client
@@ -543,12 +524,7 @@ async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_
         .send()
         .await
         .unwrap();
-    let notes = tempfile::tempdir().unwrap();
-    std::fs::write(
-        notes.path().join("retired.txt"),
-        "The quartz horizon survives plugin updates.\n",
-    )
-    .unwrap();
+    let locator = "second:quartz horizon";
     client
         .post(format!(
             "{}/api/source-packages/second/enable",
@@ -558,7 +534,7 @@ async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_
         .await
         .unwrap();
     let submitted: Job = client.post(format!("{}/api/jobs", daemon.base_url))
-        .json(&json!({"type": "mine", "source": "second", "locator": notes.path(), "requested_by": "test"}))
+        .json(&json!({"type": "mine", "source": "second", "locator": locator, "requested_by": "test"}))
         .send().await.unwrap().json().await.unwrap();
     wait_for_job_status(
         &client,
