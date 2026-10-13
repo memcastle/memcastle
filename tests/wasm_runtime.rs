@@ -1,36 +1,27 @@
 //! Installable WebAssembly sources against a real daemon (docs/adr/026): install with consent, the lifecycle, mining
 //! through the same pipeline as a built-in source, and refusing to run what was altered.
 //!
-//! The package is the reference source under `sources/directory`, built and packaged once per test process.
+//! The package is the synthetic Core fixture, built and packaged once per test process.
 
 mod common;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use common::wasm::reference_component;
+use common::wasm::mock_component;
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::domain::{Job, JobStatus};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
-const NAME: &str = "directory-wasm";
+const NAME: &str = "mock-wasm";
 
-/// The reference source's package, built once per process.
+/// The synthetic source's package, built once per process.
 fn archive() -> &'static [u8] {
     static ARCHIVE: OnceLock<Vec<u8>> = OnceLock::new();
     ARCHIVE.get_or_init(|| {
-        // Packed from the debug component `common::wasm` builds, and the manifest as it is in `sources/directory`: the
-        // package a user installs is the same shape, and a release build with LTO would only make every test wait.
-        let (component, manifest) = reference_component();
-        let readme = std::fs::read(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sources/directory/README.md"),
-        )
-        .ok()
-        .map(|bytes| vec![("README.md".to_string(), bytes)])
-        .unwrap_or_default();
-        memcastle::source::package::pack(&manifest, &component, &readme)
-            .expect("the reference source packs")
+        let (component, manifest) = mock_component();
+        memcastle::source::package::pack(&manifest, &component, &[]).expect("the mock source packs")
     })
 }
 
@@ -131,17 +122,17 @@ impl Fixture {
             .unwrap_or(Value::Null)
     }
 
-    async fn mine(&self, tree: &Path) -> reqwest::Response {
+    async fn mine(&self, locator: &str) -> reqwest::Response {
         self.client
             .post(self.url("/api/jobs"))
-            .json(&json!({"type": "mine", "source": NAME, "locator": tree, "requested_by": "test"}))
+            .json(&json!({"type": "mine", "source": NAME, "locator": locator, "requested_by": "test"}))
             .send()
             .await
             .expect("request")
     }
 
-    async fn mined(&self, tree: &Path) -> Job {
-        let response = self.mine(tree).await;
+    async fn mined(&self, locator: &str) -> Job {
+        let response = self.mine(locator).await;
         assert!(
             response.status().is_success(),
             "{}",
@@ -168,21 +159,6 @@ impl Fixture {
             .await
             .unwrap()
     }
-}
-
-fn notes() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("plan.md"),
-        "the wasm source files this sentence about gazebos",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("other.md"),
-        "a second document about lighthouses",
-    )
-    .unwrap();
-    dir
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -223,10 +199,10 @@ async fn a_package_that_asks_for_permissions_is_refused_until_the_exact_permissi
 #[tokio::test(flavor = "multi_thread")]
 async fn an_installed_source_is_mined_only_while_enabled_and_idempotently() {
     let fixture = Fixture::start().await;
-    let tree = notes();
+    let locator = "runtime fixture";
     fixture.install_consented(false).await;
 
-    let before = fixture.mine(tree.path()).await;
+    let before = fixture.mine(locator).await;
     assert_eq!(
         before.status(),
         StatusCode::CONFLICT,
@@ -243,7 +219,7 @@ async fn an_installed_source_is_mined_only_while_enabled_and_idempotently() {
         .unwrap();
     assert_eq!(enabled["state"], "enabled");
 
-    let first = fixture.mined(tree.path()).await;
+    let first = fixture.mined(locator).await;
     assert_eq!(
         first.result.as_ref().unwrap()["created"],
         2,
@@ -254,7 +230,7 @@ async fn an_installed_source_is_mined_only_while_enabled_and_idempotently() {
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0]["source"]["origin"]["source"], NAME);
 
-    let second = fixture.mined(tree.path()).await;
+    let second = fixture.mined(locator).await;
     let summary = second.result.as_ref().unwrap();
     assert_eq!(
         summary["created"], 0,
@@ -265,10 +241,7 @@ async fn an_installed_source_is_mined_only_while_enabled_and_idempotently() {
     fixture
         .post(&format!("/api/source-packages/{NAME}/disable"))
         .await;
-    assert_eq!(
-        fixture.mine(tree.path()).await.status(),
-        StatusCode::CONFLICT
-    );
+    assert_eq!(fixture.mine(locator).await.status(), StatusCode::CONFLICT);
     assert_eq!(fixture.listed(NAME).await["state"], "disabled");
     fixture.daemon.shutdown().await;
 }
@@ -277,9 +250,9 @@ async fn an_installed_source_is_mined_only_while_enabled_and_idempotently() {
 async fn enabling_and_disabling_are_idempotent_and_removal_deletes_the_files_but_not_what_was_mined()
  {
     let fixture = Fixture::start().await;
-    let tree = notes();
+    let locator = "removal fixture";
     fixture.install_consented(true).await;
-    fixture.mined(tree.path()).await;
+    fixture.mined(locator).await;
 
     for _ in 0..2 {
         let state = fixture
@@ -340,7 +313,7 @@ async fn a_built_in_source_cannot_be_disabled_or_removed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_component_altered_after_install_is_unavailable_and_is_never_run() {
     let fixture = Fixture::start().await;
-    let tree = notes();
+    let locator = "tamper fixture";
     fixture.install_consented(true).await;
     assert_eq!(fixture.listed(NAME).await["state"], "enabled");
 
@@ -359,7 +332,7 @@ async fn a_component_altered_after_install_is_unavailable_and_is_never_run() {
             .contains("no longer matches"),
         "{listed}"
     );
-    let mine = fixture.mine(tree.path()).await;
+    let mine = fixture.mine(locator).await;
     assert_eq!(mine.status(), StatusCode::CONFLICT);
     assert_eq!(
         fixture
@@ -382,9 +355,9 @@ async fn a_component_altered_after_install_is_unavailable_and_is_never_run() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unknown_source_and_a_garbage_package_are_refused_with_actionable_errors() {
     let fixture = Fixture::start().await;
-    let tree = notes();
+    let locator = "unknown fixture";
 
-    let unknown = fixture.mine(tree.path()).await;
+    let unknown = fixture.mine(locator).await;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
     let body: Value = unknown.json().await.unwrap();
     assert!(
@@ -408,9 +381,9 @@ async fn an_unknown_source_and_a_garbage_package_are_refused_with_actionable_err
 #[tokio::test(flavor = "multi_thread")]
 async fn a_source_that_has_been_removed_while_a_job_was_queued_fails_the_job_not_the_daemon() {
     let fixture = Fixture::start().await;
-    let tree = notes();
+    let locator = "queued fixture";
     fixture.install_consented(true).await;
-    let job: Job = fixture.mine(tree.path()).await.json().await.unwrap();
+    let job: Job = fixture.mine(locator).await.json().await.unwrap();
     fixture
         .client
         .delete(fixture.url(&format!("/api/source-packages/{NAME}")))
