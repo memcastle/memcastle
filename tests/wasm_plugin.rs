@@ -3,6 +3,7 @@
 mod common;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use common::{TestDaemon, wait_for_job_status};
@@ -11,20 +12,35 @@ use memcastle::domain::{
     Job, JobStatus, PluginInfo, PluginManifest, PluginModule, PluginModuleKind, sha256_hex,
 };
 use memcastle::plugin::package;
+use memcastle::source::{build::Project, scaffold};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
-fn release() -> Vec<u8> {
-    // Plugin ownership is what these tests exercise. Reusing the same runnable directory guest for both names avoids
-    // compiling two scaffolded projects per nextest process while still proving that each source can mine.
+fn release(scaffolded: Option<&Path>) -> Vec<u8> {
+    // The directory guest can stand in for either source's install/consent lifecycle. Its identify result hardcodes its
+    // own name, however, so the legacy adoption test needs two named scaffolded guests to exercise retained data.
     static SOURCE: OnceLock<(Vec<u8>, String)> = OnceLock::new();
-    let (component, reference_manifest) = SOURCE.get_or_init(common::wasm::reference_component);
     let mut files = BTreeMap::new();
     let mut modules = Vec::new();
     for name in ["first", "second"] {
-        let manifest = reference_manifest
-            .replace("name = \"directory-wasm\"", &format!("name = \"{name}\""))
-            .into_bytes();
+        let (component, manifest) = if let Some(root) = scaffolded {
+            scaffold::init(root, name, scaffold::Template::Rust).unwrap();
+            common::wasm::share_target_of(root, name);
+            let project = Project::open(&root.join(name)).unwrap();
+            (
+                std::fs::read(project.build().unwrap()).unwrap(),
+                std::fs::read(root.join(name).join("memcastle-source.toml")).unwrap(),
+            )
+        } else {
+            let (component, reference_manifest) =
+                SOURCE.get_or_init(common::wasm::reference_component);
+            (
+                component.clone(),
+                reference_manifest
+                    .replace("name = \"directory-wasm\"", &format!("name = \"{name}\""))
+                    .into_bytes(),
+            )
+        };
         modules.push(PluginModule {
             id: name.to_string(),
             kind: PluginModuleKind::Source,
@@ -32,13 +48,13 @@ fn release() -> Vec<u8> {
             manifest: format!("modules/{name}/memcastle-source.toml"),
             manifest_sha256: sha256_hex(&manifest),
             entry: format!("modules/{name}/source.wasm"),
-            sha256: sha256_hex(component),
+            sha256: sha256_hex(&component),
             optional: false,
-            contract: Some("0.4".into()),
+            contract: Some(if scaffolded.is_some() { "0.4.0" } else { "0.4" }.into()),
             config_schema: None,
         });
         files.insert(format!("modules/{name}/memcastle-source.toml"), manifest);
-        files.insert(format!("modules/{name}/source.wasm"), component.to_vec());
+        files.insert(format!("modules/{name}/source.wasm"), component);
     }
     let integration = b"format = 1\n[integration]\nid = 'assistant'\nversion = '0.1.0'\ndescription = 'agent-side lifecycle'\n[compatibility]\nmemcastle = '>=0.4'\n[agent]\nkind = 'opencode'\nentry = 'index.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
     let entry = b"export default { id: 'assistant', server: async () => ({}) };\n";
@@ -85,7 +101,7 @@ fn release() -> Vec<u8> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_uninstall_keeps_live_credentials_until_the_plugin_ledger_is_removed() {
     let credentials = tempfile::tempdir().unwrap();
-    let archive = release();
+    let archive = release(None);
     let daemon = TestDaemon::start_configured(|config| {
         config.credentials.backend = CredentialBackend::File;
         config.credentials.dir = Some(credentials.path().to_path_buf());
@@ -178,7 +194,8 @@ async fn a_failed_uninstall_keeps_live_credentials_until_the_plugin_ledger_is_re
 
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_mined_data() {
-    let archive = release();
+    let project = tempfile::tempdir().unwrap();
+    let archive = release(Some(project.path()));
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview: Value = client
@@ -484,7 +501,7 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
 
 #[tokio::test(flavor = "multi_thread")]
 async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_the_other_state() {
-    let archive = release();
+    let archive = release(None);
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview: Value = client
