@@ -3,7 +3,7 @@
 Provider-plugin authoring uses the [three GitTPL repositories](plugins.md) directly.
 The parent template composes commit-pinned source and integration module templates, including an initially empty plugin.
 Each generated provider has its own manifest, tests, packaging script and CI/release workflow;
-the in-tree `plugins/<provider>/` layout uses the same script and separate provider-scoped workflows.
+the in-tree `plugins/<provider>/` layout uses the same script and an all-provider workflow.
 Move that project to a standalone repository without changing the stable plugin and module IDs.
 
 ## Working on a standalone provider
@@ -15,9 +15,9 @@ To test a Core change across repositories, build a Core binary in that checkout 
 `MEMCASTLE_BIN=/absolute/path/to/memcastle python3 scripts/smoke_install.py` in the generated project.
 The smoke test uses a disposable palace and agent directory and validates preview, consent, install and separate module
 activation; it never uses a user's installed plugin or agent configuration.
-Provider CI checks source conformance and archive installation against the successful `main` CI prerelease and any
-explicitly selected plugin-capable stable releases; each matrix leg records its exact Core revision.
-Current-Core plugin-contract CI also composes and installs a generated project against the checkout being changed.
+Standalone provider CI checks source conformance and archive installation against the successful `main` CI prerelease
+and any explicitly selected plugin-capable stable releases; each matrix leg records its exact Core revision.
+Core's provider workflow checks every in-tree provider on each pull request and main push.
 See [Plugin packages](plugins.md#shared-ci-and-development-core) for the release assets, SHA verification, reusable
 workflow inputs and compatibility policy.
 
