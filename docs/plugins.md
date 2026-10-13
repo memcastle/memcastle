@@ -166,7 +166,8 @@ neither normal provider CI nor its release workflow builds unrelated providers o
 
 ### Shared CI and development Core
 
-Every successful Core CI run on `main` that exercises the Core jobs publishes five development binaries to the fixed
+Every successful Core CI run on `main` that passes the basic, slow, WebAssembly and other required Core jobs
+publishes five development binaries to the fixed
 [`development` prerelease](https://github.com/memcastle/memcastle/releases/tag/development).
 The release body contains `Core main SHA: <40-character SHA>`; assets are named
 `memcastle_<SHA>_{linux-amd64,linux-arm64,darwin-amd64,darwin-arm64}` and
@@ -180,20 +181,23 @@ Stable tags, versioning, Homebrew and AUR publication remain independent of this
 Core's publishing job uses the existing GitHub App credentials in its `release` environment;
 binary build jobs need only `contents: read`.
 
-Standalone plugins keep their local `scripts/package.py`, `scripts/check_modules.py`, tests and smoke scripts.
-Their validation workflow calls `memcastle/memcastle/.github/workflows/plugin-validation.yaml@<reviewed Core commit>`;
-the release workflow calls `standalone-plugin-release.yaml` at the same reviewed commit.
-Caller jobs grant `contents: read` for validation and `contents: write` for publication;
-the latter requires a repository setting allowing Actions to create releases.
-For example, a provider workflow can use:
+Standalone plugins own their build, packaging, versioning and release workflow.
+They keep local `scripts/package.py`, `scripts/check_modules.py`, tests and smoke scripts, then upload a built archive
+and source components as an Actions artifact before calling Core's shared validation workflow.
+The shared workflow downloads that artifact; it never builds or packages a plugin.
+Caller jobs grant `contents: read` for validation and `contents: write` only where the provider publishes its release.
+For example, after a provider's `package` job uploads the archive and exposes its relative path:
 
 ```yaml
 permissions:
   contents: read
 jobs:
   validate:
+    needs: package
     uses: memcastle/memcastle/.github/workflows/plugin-validation.yaml@<reviewed Core commit>
     with:
+      artifact-name: plugin-package
+      archive-path: ${{ needs.package.outputs.archive }}
       core-versions: '[]'
       extra-smoke-command: python3 scripts/smoke_adoption.py
 ```
@@ -202,11 +206,11 @@ jobs:
 yielding the required `[main]` matrix.
 Add a version such as `"0.5.0"` only after its released Core binary supports the plugin install contract;
 there is no conditional integration-test skip.
-The workflow's `package-command`, `check-command`, `smoke-command`, `extra-smoke-command`,
-`bun-version` and `fixture-bin` inputs override local defaults where a provider needs custom build/test steps.
-Its `archive` output is the validated `dist/<id>-<version>.tar.gz` filename;
-the release workflow passes the same inputs, requires an `<id>/v<version>` tag on `main`,
-refuses an existing release and uploads only the validated archive.
+The required `artifact-name` and `archive-path` identify the exact uploaded, already-built plugin;
+include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
+The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow provider-owned installation checks and fixtures.
+The provider's release workflow decides when to validate, requires its own reviewed version tag,
+and publishes the archive only after the shared validation succeeds.
 The Core binary action accepts `version: main` or an exact stable tag and returns `binary` and `core_sha` outputs;
 `main` is verified against the SHA-qualified development checksums and stable binaries against their release checksums.
 Each compatibility matrix leg reports its exact Core revision in the job summary.

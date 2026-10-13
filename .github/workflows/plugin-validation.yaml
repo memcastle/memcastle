@@ -1,41 +1,36 @@
-name: Validate standalone plugin
+name: Validate built standalone plugin
 
 on:
   workflow_call:
     inputs:
-      package-command:
+      artifact-name:
+        description: Actions artifact containing the built plugin archive and source components
         type: string
-        required: false
-        default: python3 scripts/package.py
-      check-command:
+        required: true
+      archive-path:
+        description: Path to the single already-built archive, relative to the artifact root
         type: string
-        required: false
-        default: python3 scripts/check_modules.py
+        required: true
       smoke-command:
+        description: Provider-owned installation and activation check
         type: string
         required: false
         default: python3 scripts/smoke_install.py
       extra-smoke-command:
+        description: Optional provider-owned migration check
         type: string
         required: false
         default: ""
-      bun-version:
-        type: string
-        required: false
-        default: "1.4.2"
       fixture-bin:
+        description: Optional fixture commands to prepend to PATH for source conformance
         type: string
         required: false
         default: ""
       core-versions:
-        description: JSON array of additional exact, plugin-capable Core release tags
+        description: JSON array of additional exact plugin-capable Core release tags
         type: string
         required: false
         default: "[]"
-    outputs:
-      archive:
-        description: Validated release archive name under dist/
-        value: ${{ jobs.package.outputs.archive }}
 
 permissions:
   contents: read
@@ -59,62 +54,9 @@ jobs:
               raise ValueError('core-versions must not contain duplicates')
           print('cores=' + json.dumps(['main', *versions]))
           PY
-  package:
-    runs-on: ubuntu-latest
-    outputs:
-      archive: ${{ steps.metadata.outputs.archive }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ inputs.bun-version }}
-      - uses: memcastle/memcastle/.github/actions/core-binary@main
-        id: core
-        with:
-          version: main
-      - name: Package this provider
-        env:
-          COMMAND: ${{ inputs.package-command }}
-        run: bash -e -o pipefail -c "$COMMAND"
-      - name: Check this provider's modules
-        env:
-          COMMAND: ${{ inputs.check-command }}
-        run: bash -e -o pipefail -c "$COMMAND"
-      - name: Check reviewed hashes and source dependency locks
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --exit-code -- plugin.toml || { echo '::error::commit reviewed plugin.toml artifact digests'; exit 1; }
-          for manifest in modules/*/memcastle-source.toml; do
-            if [[ -f "$manifest" ]]; then
-              lock="$(dirname "$manifest")/Cargo.lock"
-              git ls-files --error-unmatch "$lock" >/dev/null || { echo "::error::commit $lock"; exit 1; }
-            fi
-          done
-      - name: Check plugin metadata
-        run: python3 -m unittest discover -s tests
-      - name: Identify validated archive
-        id: metadata
-        shell: bash
-        run: |
-          archive="$(python3 -c 'import tomllib; p=tomllib.load(open("plugin.toml", "rb"))["plugin"]; print("{}-{}.tar.gz".format(p["id"], p["version"]))')"
-          test -s "dist/$archive"
-          echo "archive=$archive" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: plugin-package
-          path: |
-            dist/*.tar.gz
-            modules/*/source.wasm
-            modules/*/dist/**
-          if-no-files-found: error
 
   compatibility:
-    needs: [matrix, package]
+    needs: matrix
     name: Core ${{ matrix.core }}
     runs-on: ubuntu-latest
     strategy:
@@ -125,12 +67,23 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: plugin-package
+          name: ${{ inputs.artifact-name }}
+      - name: Require the provider's built archive
+        env:
+          ARCHIVE: ${{ inputs.archive-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARCHIVE" == dist/* && "$ARCHIVE" != *..* && "$ARCHIVE" == *.tar.gz ]] || {
+            echo '::error::archive-path must name one archive below dist/'
+            exit 1
+          }
+          test -s "$ARCHIVE" || { echo "::error::built archive missing: $ARCHIVE"; exit 1; }
       - uses: memcastle/memcastle/.github/actions/core-binary@main
         id: core
         with:
           version: ${{ matrix.core }}
-      - name: Run provider conformance and integration tests
+      - name: Check source conformance and installation
         env:
           MEMCASTLE_BIN: ${{ steps.core.outputs.binary }}
           FIXTURE_BIN: ${{ inputs.fixture-bin }}
