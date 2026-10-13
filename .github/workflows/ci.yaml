@@ -485,3 +485,19 @@ jobs:
 
       - name: Validate the release setup
         run: gh ship validate
+
+  development:
+    name: 🧪 Publish tested development Core
+    needs: [changes, lint, test, wasm, sources-list, sources, integrations, web, packaging, ship]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.changes.outputs.core == 'true' &&
+      needs.lint.result == 'success' && needs.test.result == 'success' &&
+      needs.wasm.result == 'success' && needs.sources-list.result == 'success' &&
+      needs.sources.result == 'success' && needs.integrations.result == 'success' &&
+      needs.web.result == 'success' && needs.packaging.result == 'success' &&
+      needs.ship.result == 'success'
+    uses: ./.github/workflows/development-release.yaml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit

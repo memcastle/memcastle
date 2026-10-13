@@ -29,6 +29,7 @@ permissions:
 jobs:
   aur:
     name: 📦 memcastle-bin
+    if: github.event_name != 'release' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
 
     # makepkg and namcap only exist on Arch, and a container is cheaper than
@@ -70,6 +71,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # A manual dispatch must satisfy the same stable-only rule as a release event.
+          test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft == false and .isPrerelease == false')" = true
           mkdir -p build assets
           cp packaging/aur/memcastle-bin/PKGBUILD build/PKGBUILD
 

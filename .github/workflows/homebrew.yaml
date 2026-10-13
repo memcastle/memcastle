@@ -26,6 +26,7 @@ permissions:
 jobs:
   homebrew:
     name: 🍺 Formula
+    if: github.event_name != 'release' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
 
     # A dedicated environment: the token that can write to the tap is scoped to
@@ -50,6 +51,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # A manual dispatch must satisfy the same stable-only rule as a release event.
+          test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft == false and .isPrerelease == false')" = true
           mkdir -p build assets
           cp packaging/homebrew/memcastle.rb build/memcastle.rb
 

@@ -1,0 +1,142 @@
+name: Development Core binaries
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUSTFLAGS: -D warnings
+  RUSTUP_TOOLCHAIN: "1.98.1"
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "", smoke: true }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-arm64, cross: true, ext: "", smoke: false }
+          - { target: x86_64-apple-darwin, runner: macos-15, asset: darwin-amd64, cross: false, ext: "", smoke: false }
+          - { target: aarch64-apple-darwin, runner: macos-15, asset: darwin-arm64, cross: false, ext: "", smoke: true }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2022, asset: windows-amd64, cross: false, ext: ".exe", smoke: true }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        if: matrix.cross
+        with:
+          tool: cross@0.2.5
+      - name: Reproducible build paths and date
+        shell: bash
+        run: |
+          native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
+          remap="--remap-path-prefix=$(native "${GITHUB_WORKSPACE}")=/build"
+          remap="${remap} --remap-path-prefix=$(native "${CARGO_HOME:-${HOME}/.cargo}")=/cargo"
+          remap="${remap} --remap-path-prefix=$(native "${RUSTUP_HOME:-${HOME}/.rustup}")=/rustup"
+          remap="${remap} --remap-path-prefix=/project=/build"
+          {
+            echo "RUSTFLAGS=${RUSTFLAGS} ${remap}"
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+          } >> "$GITHUB_ENV"
+      - name: Statically link the Windows C runtime
+        if: endsWith(matrix.target, 'windows-msvc')
+        shell: bash
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Build and smoke-test
+        shell: bash
+        run: |
+          if [[ '${{ matrix.cross }}' == true ]]; then
+            cross build --release --locked --target '${{ matrix.target }}'
+          else
+            cargo build --release --locked --target '${{ matrix.target }}'
+          fi
+          if [[ '${{ matrix.smoke }}' == true ]]; then
+            'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' --version
+          fi
+          mkdir -p dist
+          cp 'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' \
+            'dist/memcastle_${{ inputs.sha }}_${{ matrix.asset }}${{ matrix.ext }}'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: development-${{ matrix.asset }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Update development prerelease
+    needs: build
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: core-development-release
+      cancel-in-progress: false
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/development
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: development-*
+          merge-multiple: true
+          path: dist
+      - name: Publish a complete, current revision
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64.exe; do
+            test -s "dist/memcastle_${SHA}_${target}"
+          done
+          git fetch origin main
+          if [[ "$(git rev-parse origin/main)" != "$SHA" ]]; then
+            echo '::notice::Newer main commit exists; keep the last completed prerelease.'
+            exit 0
+          fi
+          (cd dist && sha256sum -- memcastle_* > "SHA256SUMS_${SHA}")
+          if gh release view development --json isDraft,isPrerelease >/dev/null 2>&1; then
+            test "$(gh release view development --json isPrerelease --jq .isPrerelease)" = true || {
+              echo '::error::development tag belongs to a non-prerelease release'
+              exit 1
+            }
+          else
+            gh release create development --target "$SHA" --title 'Development (main)' \
+              --notes 'Pending development binaries' --draft --prerelease
+          fi
+          gh release upload development dist/* --clobber
+          git fetch origin main
+          if [[ "$(git rev-parse origin/main)" != "$SHA" ]]; then
+            echo '::notice::Newer main commit arrived during upload; keep the last advertised revision.'
+            exit 0
+          fi
+          # A release body is the single authoritative pointer; SHA-qualified assets remain immutable.
+          gh release edit development --title 'Development (main)' \
+            --notes "Core main SHA: ${SHA}" --prerelease --draft=false
