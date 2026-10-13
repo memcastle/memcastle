@@ -32,8 +32,8 @@ Four decisions follow, and each has an alternative that is easier for one force 
   Living in the test tree keeps it out of the binary and out of the release allowlist,
   and being a module of the existing binary adds no second link of the 600 MB server.
   There is no `memcastle eval` command, no MCP tool and no route.
-- **The Linux slow suite runs the small bundled dataset as a regression floor, and report generation is an `#[ignore]`d test
-  behind a `mise` task.**
+- **The Linux slow suite runs the small bundled dataset as a regression floor;
+  report generation is an `#[ignore]`d test behind a `mise` task.**
   `tests/fixtures/retrieval/core.json` (59 drawers, 39 judged queries in five categories) runs in `mise run test:slow` against
   `baseline.json`, and fails when any metric of any configuration falls more than 0.02.
   `eval`, `eval:baseline`, `eval:compare` and `eval:longmemeval` are explicit and are not part of `check` or `ci`.
