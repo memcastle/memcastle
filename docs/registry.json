@@ -15,13 +15,6 @@
       "homepage": "https://memcastle.github.io/mining-sources/#codex",
       "license": "MIT",
       "repository": "memcastle/memcastle"
-    },
-    {
-      "name": "github",
-      "description": "Scoped GitHub repositories, issues, pull requests, comments, reviews and wiki revisions",
-      "homepage": "https://memcastle.github.io/mining-sources/#github",
-      "license": "MIT",
-      "repository": "memcastle/memcastle"
     }
   ]
 }

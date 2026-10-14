@@ -103,11 +103,6 @@ path = "sources/chatgpt/core-tests.rs"
 required-features = ["provider-tests"]
 
 [[test]]
-name = "source_github"
-path = "sources/github/core-tests.rs"
-required-features = ["provider-tests"]
-
-[[test]]
 name = "persistence"
 required-features = ["slow-tests"]
 

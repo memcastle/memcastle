@@ -40,9 +40,9 @@ fn default_bundle() -> tempfile::TempDir {
     out
 }
 
-/// Check release contents in the same test process that enables them, so packaging four components is done once.
+/// Check release contents in the same test process that enables them, so packaging two components is done once.
 fn assert_release_contents(out: &Path) {
-    for name in ["codex", "chatgpt", "github"] {
+    for name in ["codex", "chatgpt"] {
         let package = out.join("sources").join(name);
         assert!(package.join("memcastle-source.toml").is_file(), "{name}");
         assert!(package.join("source.wasm").is_file(), "{name}");
@@ -63,6 +63,15 @@ fn assert_release_contents(out: &Path) {
             "the checksum file is shipped with each archive"
         );
     }
+    // GitHub is distributed by its own plugin; a stale source archive here would advertise a second owner.
+    assert!(!out.join("sources/github").exists());
+    assert!(!out.join("archives").read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("github-")
+    }));
     // The registry is a file in the documentation that names this repository, so a release builds no index.
     assert!(!out.join("memcastle-index.json").exists());
 }
@@ -92,7 +101,7 @@ async fn the_bundled_sources_are_installed_from_the_start_and_only_need_enabling
         .json()
         .await
         .unwrap();
-    for name in ["codex", "chatgpt", "github"] {
+    for name in ["codex", "chatgpt"] {
         let source = listed["adapters"]
             .as_array()
             .unwrap()

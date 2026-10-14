@@ -234,8 +234,10 @@ Every path, environment variable, flag and the precedence between them is in [Co
     [`memcastle-pi`](https://github.com/memcastle/memcastle-pi), run against a released or locally built Core binary.
   - The OpenCode history source's fixtures, conformance and installation/mining smoke checks live in
     [`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode).
-  - `sources/{claude,chatgpt,github}/core-tests.rs` — source-owned behavior beyond conformance, run in each source's
-    Linux CI leg; Codex's behavior is covered by its conformance fixture.
+  - The GitHub repository source's fixtures, conformance and installation/mining smoke checks live in
+    [`memcastle-github`](https://github.com/memcastle/memcastle-github).
+  - `sources/chatgpt/core-tests.rs` — source-owned behavior beyond conformance, run in its Linux CI leg;
+    Codex's behavior is covered by its conformance fixture.
   - `tests/wasm_registry.rs` — registries against a real daemon (a directory registry written with the same calls
     `source index` makes): search, install by name with consent, an archive that is not the one published, a package that
     is not the one the index says, version choice, the trust policy, update with and without new permissions, a bundled

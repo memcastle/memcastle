@@ -18,8 +18,8 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package unpacked beside the binary (`codex`, `chatgpt`, `github`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
-| Provider plugin | A separately released multi-module archive (for example, `memcastle-pi`). | `memcastle plugin install <archive>`; enable each source separately. |
+| Bundled | An ordinary package unpacked beside the binary (`codex`, `chatgpt`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
+| Provider plugin | A separately released archive (for example, `memcastle-pi` or `memcastle-github`). | `memcastle plugin install <id>`; enable each source separately. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
 
@@ -226,7 +226,7 @@ on disk after install is never run.
 
 ## Bundled sources
 
-Releases ship `codex`, `chatgpt` and `github` unpacked,
+Releases ship `codex` and `chatgpt` unpacked,
 one directory each (`<name>/memcastle-source.toml`,
 `<name>/source.wasm`), under
 `share/memcastle/sources/`:
@@ -255,15 +255,15 @@ and it does not constrain the runtime: any directory under `sources/` could be a
 The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
 installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
 and [Agent integrations](integrations.md)).
-The Claude Code, Pi and OpenCode sources live in external `memcastle-anthropic`, `memcastle-pi` and
-`memcastle-opencode` plugins; a source is separate from an agent integration.
+The Claude Code, Pi, OpenCode and GitHub sources live in external `memcastle-anthropic`, `memcastle-pi`,
+`memcastle-opencode` and `memcastle-github` plugins; a source is separate from an agent integration.
 
 ## The official registry
 
 The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/memcastle/memcastle/blob/main/docs/registry.json),
 published at `https://memcastle.github.io/registry.json` from the root of the documentation site's `gh-pages` branch.
 It lists no versions: it names the GitHub repository that publishes each legacy source archive, and the daemon reads
-its releases. Claude Code, Pi and OpenCode are in the separate [`plugins.json`](plugins.md) catalogue.
+its releases. Claude Code, Pi, OpenCode and GitHub are in the separate [`plugins.json`](plugins.md) catalogue.
 Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
 any documentation change, and publishing a new version is a release of the source's own repository: no new release of
 MemCastle and no change to the registry.
