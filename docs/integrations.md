@@ -7,10 +7,9 @@ It decides *when* to call MemCastle and does nothing else; every call goes to th
 What each integration must do is the [Integration contract](integration-contract.md).
 This page is about getting one onto your machine.
 
-MemCastle ships the **Codex** integration; Pi, OpenCode and Claude Code are standalone provider plugins.
-The **Pi** integration comes from the independently released [memcastle-pi provider plugin](integrations-pi.md).
-`memcastle integration` installs any of them locally, after its plugin is available.
-Core's integrations are part of its release; neither they nor an installed provider plugin need an npm download on the
+Pi, OpenCode, Claude Code and Codex integrations are independently distributed provider plugins.
+`memcastle integration` installs any of them locally, after its provider plugin is available.
+An installed provider plugin needs no npm download on the
 user's machine.
 `plugin install` only makes it selectable; `integration install <module-id>` still copies and registers the selected
 agent-side files locally, and `integration remove` undoes that registration without uninstalling its parent plugin.
@@ -56,7 +55,7 @@ flowchart TB
 | `pi` (external plugin) | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.4 and later | [Pi](integrations-pi.md) |
 | `opencode` (external plugin) | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.4 and later | [OpenCode](integrations-opencode.md) |
 | `claude-code` (external plugin) | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.4 and later | [Claude Code](integrations-claude-code.md) |
-| `codex` | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | 0.2 and later | [Codex](integrations-codex.md) |
+| `codex` (external plugin) | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | 0.4 and later | [Codex](integrations-codex.md) |
 
 `memcastle integration list` shows installed plugin integrations alongside those Core ships, with their own version ranges.
 
@@ -64,13 +63,12 @@ flowchart TB
 
 - The agent is installed and its command (`pi`, `opencode`, `claude`, `codex`) is on your `PATH`.
   The installer runs it to read its version and, for Pi, to register the integration with it.
-- The MemCastle you run ships an integration, or you have installed its provider plugin (see
-  [Where integrations come from](#where-integrations-come-from)).
-  A standalone binary downloaded on its own ships none, and says so.
+- Install the integration's provider plugin first (see [Where integrations come from](#where-integrations-come-from)).
+  Core ships no agent-specific integration assets.
 - The agent and MemCastle versions are inside the ranges the integration declares.
   The installer refuses otherwise, before it writes anything, and tells you which version it found.
 
-You do not need bun, node or npm: shipped integrations already contain their runtime or declarative assets.
+You do not need bun, node or npm: plugin integrations already contain their runtime or declarative assets.
 The daemon does not have to be running to install one; it has to be running when the agent uses it.
 
 ## Install
@@ -79,6 +77,7 @@ The daemon does not have to be running to install one; it has to be running when
 memcastle integration list
 memcastle plugin install anthropic
 memcastle integration install claude-code
+# For Codex, first install memcastle-openai (see the Codex guide), then:
 memcastle integration install codex
 # For Pi, first install its provider archive (see the Pi guide), then:
 memcastle integration install pi
@@ -141,7 +140,8 @@ Everything else in the agent's configuration is left exactly as it was:
 ## Configure
 
 Pi and OpenCode read their settings from the environment (and OpenCode also reads plugin options).
-Codex uses its bundled MCP declaration at `http://127.0.0.1:8420/mcp` and reads a token from `MEMCASTLE_AUTH_TOKEN`.
+Codex uses the `memcastle-openai` plugin's MCP declaration at `http://127.0.0.1:8420/mcp` and reads a token from
+`MEMCASTLE_AUTH_TOKEN`.
 None of these integrations stores a token in files that `install` writes.
 The variables are listed in each guide: [Pi](integrations-pi.md#configuration),
 [OpenCode](integrations-opencode.md#configuration), and [Codex](integrations-codex.md).
@@ -177,15 +177,13 @@ Removing something that is not installed succeeds and says so.
 
 ## Where integrations come from
 
-Integrations and shared skills live under one **assets root**, in the same layout wherever the root is,
-in a package and in a checkout alike:
+Core's shared skills live under one **assets root**, in the same layout in a package and a checkout.
+Installed provider plugins supply their own integration assets separately:
 
 ```text
 <assets root>/
 ├── integrations/
-│   └── codex/
-│       ├── memcastle-integration.toml
-│       └── dist/
+│   └── (no Core-shipped agent integration)
 ├── skills/                        (the shared skills, referenced by name)
 │   └── <name>/SKILL.md
 └── sources/                       (the bundled mining sources, see below)
@@ -197,42 +195,32 @@ The assets root is the one [runtime assets](configuration.md#runtime-assets) dir
    An explicit choice never falls through: a directory that does not exist is an error.
 2. The package's `share/memcastle` next to the executable (`/usr/bin/memcastle` finds `/usr/share/memcastle`), then
    `/usr/local/share/memcastle` and `/usr/share/memcastle`.
-3. Nothing: a standalone binary has no integrations to install.
+3. Nothing: a standalone binary still finds integrations in installed provider plugins.
 
 Any of the MemCastle release packages carry the assets root: the tarballs, the `.deb` and `.rpm`, the AUR package and the
 Homebrew formula (see [Installation](installation.md)).
-The standalone tarball `memcastle_<version>_integrations.tar.gz` holds just the `integrations/` and `skills/` trees.
+The standalone tarball `memcastle_<version>_integrations.tar.gz` holds the empty `integrations/` tree and shared `skills/`.
 
 `memcastle integration list` prints the assets root it used and how it was chosen, so you can see which of the two you
 are looking at.
 
 ### Developing MemCastle
 
-The same commands work from a checkout of the repository, with no packaging step and without touching an installed
-MemCastle:
+To develop an integration, build the archive from its provider checkout and install that plugin into a disposable palace.
+Core's checkout still holds the shared skills and source-packaging assets:
 
 ```sh
-mise run integrations:build                                  # prepare the Core-shipped declarative assets in dist/
-memcastle integration list --assets-dir "$PWD"               # the checkout is the assets root
-memcastle integration install codex --assets-dir "$PWD"
+mise run integrations:package  # package the shared skills
+memcastle integration list --assets-dir "$PWD"
 ```
 
-The checkout already has the layout above (`integrations/<id>/`, `skills/`), and `integrations:build` creates the `dist/`
-directories for Core-shipped integrations.
-Installing from a checkout goes through exactly the code a package install does, so what you test is what ships.
-Because a development build never changes the integration's version, the installer compares file contents as well:
-rebuild, run `memcastle integration update codex --assets-dir "$PWD"`, and the new bundle replaces the old one.
 `MEMCASTLE_ASSETS_DIR` does the same as the flag for a whole shell session.
-In this repository `mise.toml` sets it to the checkout for you: with mise active (`mise run`, `mise cli`, or an activated
-shell), any `memcastle integration ...` run from the project directory, even an installed `memcastle`, reads the
-checkout's bundles and not the package's, so the flag is not needed.
-Run the command from another directory to use the installed assets, and see
+In this repository `mise.toml` sets it to the Core checkout during development.
+Run the command from another directory to use installed assets, and see
 [Development](development.md#running-the-daemon-locally) for what else it sets.
-`mise run integrations:check` unsets it, so the checks never depend on it.
+`mise run integrations:check` unsets it and checks that Core packages no agent integration.
 
-`mise run integrations:package` lays out the tree a release carries in `target/bundled-integrations`,
-for installing the packaged layout with `--assets-dir target/bundled-integrations`.
-`mise run integrations:check` bundles the integrations and installs them from both layouts as part of the checks.
+`mise run integrations:package` lays out the shared skills under `target/bundled-integrations` for a release.
 
 The bundled mining sources use the same root: with `--assets-dir` pointing at a root whose `sources/` holds a
 `source.wasm` and a `memcastle-source.toml` in each directory, the daemon offers those as the

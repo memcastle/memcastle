@@ -1,20 +1,5 @@
 {
   "format": 1,
   "name": "MemCastle official sources",
-  "sources": [
-    {
-      "name": "chatgpt",
-      "description": "ChatGPT conversation history from an official export or an experimental web session",
-      "homepage": "https://memcastle.github.io/mining-sources/#chatgpt",
-      "license": "MIT",
-      "repository": "memcastle/memcastle"
-    },
-    {
-      "name": "codex",
-      "description": "Codex coding-agent rollout history (JSONL files under ~/.codex/sessions), one document per rollout",
-      "homepage": "https://memcastle.github.io/mining-sources/#codex",
-      "license": "MIT",
-      "repository": "memcastle/memcastle"
-    }
-  ]
+  "sources": []
 }

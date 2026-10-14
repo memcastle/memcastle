@@ -43,42 +43,35 @@ does not classify.
 
 ## Layout
 
-```text
-integrations/
-  codex/         Codex local-marketplace plugin with native MCP and commands
-```
-
-The Core-shipped integrations use their agents' declarative assets; `mise run integrations:check` tests their package
-layout and local installation without building an agent client.
-The Pi, OpenCode and Claude Code integrations and their client tests ship from the standalone
-[`memcastle-pi`](https://github.com/memcastle/memcastle-pi) and
-[`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode) repositories, and
-[`memcastle-anthropic`](https://github.com/memcastle/memcastle-anthropic), respectively.
+Core ships no agent-specific integration assets.
+The Pi, OpenCode, Claude Code and Codex integrations and their client tests ship from the standalone
+[`memcastle-pi`](https://github.com/memcastle/memcastle-pi),
+[`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode),
+[`memcastle-anthropic`](https://github.com/memcastle/memcastle-anthropic) and
+[`memcastle-openai`](https://github.com/memcastle/memcastle-openai) repositories, respectively.
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
-manager across them. Each plugin releases independently of the Core-shipped integrations.
+manager across them. Each plugin releases independently of Core and the other providers.
 
 ## Install and distribution
 
 Users install an integration with `memcastle integration install <agent>`; see
 [Agent integrations](../docs/integrations.md).
-Each integration here carries a `memcastle-integration.toml` (id, version, the MemCastle and agent versions it supports,
-the files to install), and `mise run integrations:build` bundles its sources into `dist/` (not committed).
-Releases ship those bundles under `share/memcastle/integrations/`, with no npm package: a bundle has its dependencies
-inlined, and the agents' own SDKs stay external.
-The same command installs from this checkout with `--assets-dir "$PWD"`, so what you test is what ships
+Each external integration carries a `memcastle-integration.toml` (id, version, supported versions and files to install).
+Core retains the local installer and shared skills, but packages no agent-specific integration assets.
+Install a provider plugin before asking `memcastle integration install` to register its agent module
 ([ADR-034](../docs/adr/034-agent-integration-distribution.md)).
 
 ## Skills
 
-An integration never keeps its own copy of agent instructions: it loads them from [`skills/`](../skills/README.md),
-which is also installable on its own (see [Agent skills](../docs/skills.md)).
+Shared instructions live in [`skills/`](../skills/README.md) and can be installed on their own
+(see [Agent skills](../docs/skills.md)).
 An integration's `memcastle-integration.toml` names the skills it exposes, a `[[skills]]` entry each: the shared ones by
 name, and one that only this integration needs as `local = true` from its own `skills/` directory.
 `memcastle integration install` copies them into the installed copy, so no separate skill installation follows.
-What stays here is the lifecycle: when to load a skill, when to call MemCastle, and loading none into a session whose
-memory mode is off.
+The provider integration owns the lifecycle: when to load a skill, when to call MemCastle, and loading none into a
+session whose memory mode is off.
 
 ## Per-ecosystem findings
 

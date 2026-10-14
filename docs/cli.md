@@ -471,11 +471,13 @@ compatibility before any code becomes available.
 A local archive or already-built project is read by the CLI for a preview, then sent to that same daemon for validation.
 Each source module that asks for permissions needs its own reviewed consent digest; `--yes` explicitly approves the
 displayed permissions, while a non-interactive install without `--consent MODULE=DIGEST` is refused.
-Installing a plugin never enables its sources or installs its integrations.
+Installing a plugin never enables a new source or installs its integrations.
 `source enable` and `integration install` are separate module lifecycle operations.
 `update` preserves each source's state and its existing permissions agreement, asking again only for changed grants.
 If a source ID has mined data from a removed legacy package, `plugin install` refuses to attach it silently;
 repeat with `--adopt-source SOURCE` after reviewing the source identity and its existing history.
+If the source was bundled by an older Core, first upgrade Core, run `source remove SOURCE` to clear its former package
+row, then install with `--adopt-source SOURCE` and enable it again; removing the row also clears its credential.
 `--yes` approves permissions, but never substitutes for this explicit adoption.
 `uninstall` refuses configured miners, active sources or jobs, installed integrations and dependent plugins,
 and preserves everything already mined.
@@ -709,10 +711,10 @@ memcastle integration update <AGENT> [--assets-dir <DIR>]
 memcastle integration remove <AGENT>
 ```
 
-Install, update and remove integrations for coding agents: Core ships `codex`;
-`pi`, `opencode` and `claude-code` are available after installing their external
-[`memcastle-pi`](integrations-pi.md), [`memcastle-opencode`](integrations-opencode.md) and
-[`memcastle-anthropic`](integrations-claude-code.md) plugins.
+Install, update and remove integrations for coding agents after installing their provider plugins:
+[`memcastle-pi`](integrations-pi.md) for `pi`, [`memcastle-opencode`](integrations-opencode.md) for `opencode`,
+[`memcastle-anthropic`](integrations-claude-code.md) for `claude-code`, and
+[`memcastle-openai`](integrations-codex.md) for `codex`.
 [Integrations](integrations.md) is the guide; this is the reference.
 
 All four are **local**: they read files and run the agent's own command, need no daemon, no palace and no network, and are

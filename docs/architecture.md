@@ -121,6 +121,8 @@ flowchart LR
 ```
 
 `registry.json` continues to serve legacy single-source packages; it is never interpreted as a plugin catalogue.
+For example, `memcastle-openai` supplies the separate `codex` and `chatgpt` source modules plus a `codex` agent integration.
+The shared OpenAI-compatible embeddings HTTP protocol stays in Core and needs no OpenAI product plugin.
 
 ## Change notices: a bus, not a database feature
 

@@ -112,8 +112,8 @@ The history is the value.
 - [ADR-033](033-source-distribution.md) — sources are distributed as versioned packages through static JSON registry
   indexes (a URL, a `file://` URL or a directory, so offline needs no separate mechanism), pinned by SHA-256 and optionally
   signed with ed25519 under a `mining.trust` policy; bundled, registry and local sources share one lifecycle, `update`
-  never widens a source's permissions without consent; Core bundles `codex` and `chatgpt` as ordinary
-  packages while Claude Code, Pi, OpenCode and GitHub ship as provider plugins
+  never widens a source's permissions without consent; Core currently bundles no sources, while Claude Code, Pi,
+  OpenCode, GitHub, Codex and ChatGPT ship as provider plugins
   (completes ADR-026)
 - [ADR-034](034-agent-integration-distribution.md) — integrations ship with MemCastle as bundles (no npm package, no
   `bun install`) under the one assets root beside `sources/` and `skills/`, a checkout being a valid root;
@@ -178,7 +178,7 @@ The history is the value.
   MCP session is built on Pi's own `@earendil-works/pi-mcp` client library (bundled) instead of the MCP SDK
   (amends ADR-022 for Pi)
 - [ADR-045](045-codex-history-is-an-installed-webassembly-source.md) — Codex rollout history is an installed WebAssembly
-  source built from `sources/codex/`, with read-only access only to the dated rollout directory and no Codex-specific
+  source now built in `memcastle-openai`, with read-only access only to the dated rollout directory and no Codex-specific
   code in the daemon core
 - [ADR-046](046-fact-lifecycle-and-contradictions.md) — graph assertions keep auditable confirmation, contradiction and
   supersession links; unresolved conflicts remain visible and explicit corrections retain their evidence

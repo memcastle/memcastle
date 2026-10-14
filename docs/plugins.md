@@ -44,8 +44,8 @@ Two modules of the same type cannot share an ID, and their artifact paths must r
 The parent may also declare `shared_config_schema` and `[authentication]` with a public `kind` and a credential reference;
 no login token or client secret is written into the manifest.
 The OpenCode plugin likewise declares an `opencode` source and an `opencode` integration under one plugin.
-The reviewed [`plugins.json`](plugins.json) catalogue lists the standalone `memcastle-pi`, `memcastle-opencode` and
-`memcastle-anthropic`
+The reviewed [`plugins.json`](plugins.json) catalogue lists `memcastle-pi`, `memcastle-opencode`,
+`memcastle-anthropic` and `memcastle-openai`
 repositories; until a provider publishes a release, build its archive locally before installing it.
 Source modules retain their `memcastle-source.toml` and `source.wasm` contract;
 integration modules retain their `memcastle-integration.toml` and agent assets.
@@ -56,12 +56,12 @@ Its manifest and entry bytes must match their declared hashes.
 The archive is limited to 1024 canonical-path regular files, 64 MiB compressed and 256 MiB expanded;
 symlinks, aliases, undeclared files and path escapes are refused before a generation is published.
 Source and integration module identities and versions must match their own manifests.
-For example, one OpenAI plugin can list separate `chatgpt` and `codex` source IDs,
-plus an agent integration: those source IDs remain distinct miner kinds with separate cursors.
+The `memcastle-openai` plugin lists separate `chatgpt` and `codex` source IDs,
+plus the `codex` agent integration: those source IDs remain distinct miner kinds with separate cursors.
 Jira and Confluence likewise remain separate source modules even if one Atlassian plugin shares API-client code.
 `shared_config_schema` and `[authentication]` describe provider-wide configuration and a public credential reference;
 each module's own permissions and each miner's scope remain separate.
-`memcastle plugin install` makes source modules available but leaves each one installed and inactive.
+`memcastle plugin install` makes source modules available but leaves each new one installed and inactive.
 `memcastle source enable/disable` controls its mining availability independently of other modules.
 `memcastle integration install/remove` copies and registers an integration from an installed plugin's local files;
 it never fetches a standalone module or needs a daemon to reach its agent.
@@ -74,6 +74,8 @@ it can still use MCP/HTTP, but updating it from that plugin requires reinstallin
 A plugin update cannot replace the bytes of an already installed version or downgrade a configured release;
 publish a new plugin version, keeping stable module IDs and independent module versions.
 A mined legacy source requires an explicit `--adopt-source <id>` when moving into a plugin.
+After a Core release stops bundling a source, remove its old package row explicitly before installing a plugin
+with that source ID; the mined data remains available for `--adopt-source`.
 Uninstall keeps a source-ID ownership record so a different plugin cannot later inherit retained cursors or drawers.
 The plugin record, source records and module-ID claims change together in one database transaction;
 two plugins cannot claim the same live source, integration or embedding-provider ID after concurrent previews.

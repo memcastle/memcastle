@@ -6,6 +6,12 @@ they keep their component digest, activation state, credentials and mining curso
 Installing a plugin never silently takes ownership of an existing legacy source with the same ID.
 If a legacy source was removed after mining, `plugin install --adopt-source <id>` is the explicit handoff of its
 preserved cursor and drawers to the plugin supplying that same source kind.
+When a Core release stops bundling a source, its stored enabled-state row remains.
+After upgrading Core, remove the old source package row with `memcastle source remove codex` or
+`memcastle source remove chatgpt` before installing the OpenAI plugin.
+This clears the source's enabled state and credential, but not its miner, mined documents or cursor.
+Review the new permissions, install with `--adopt-source` for each source with mined history, enable it again and sign
+ChatGPT in again before web mining.
 Mined drawers and source cursors live in separate tables and survive plugin updates and uninstall.
 
 MemCastle keeps its data in a versioned shape.

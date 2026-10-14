@@ -318,41 +318,22 @@ cargo test --test integration_bundle -- --ignored
 """
 
 [tasks."integrations:build"]
-description = "Prepare the declarative integrations under integrations/<id>/dist for development"
-# After this, `memcastle integration install codex --assets-dir "$PWD"` installs the checkout assets.
-# Include dot-directories explicitly: the plugin manifests are hidden, and a plain glob can omit them.
+description = "Prepare any Core-shipped declarative integrations for development"
 sources = [
   "packaging/integrations/build.sh",
-  "integrations/codex/plugin/**",
-  "integrations/codex/plugin/.agents/**",
-]
-outputs = [
-  "integrations/codex/dist/plugin.json",
-  "integrations/codex/dist/mcp.json",
-  "integrations/codex/dist/.agents/plugins/marketplace.json",
 ]
 run = "packaging/integrations/build.sh"
 
 [tasks."integrations:package"]
 description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
 # The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
-# (`memcastle integration install codex --assets-dir target/bundled-integrations`).
+# (currently only the shared skills; provider plugins own the agent assets).
 sources = [
   "packaging/integrations/build.sh",
-  "integrations/codex/plugin/**",
-  "integrations/codex/plugin/.agents/**",
-  "integrations/codex/memcastle-integration.toml",
-  "integrations/codex/skills/**",
   "skills/*/**",
 ]
-# The package script also refreshes the checkout's dist trees; their absence must rebuild the package.
+# Rebuild when a shared skill or the package tree is absent.
 outputs = [
-  "integrations/codex/dist/plugin.json",
-  "integrations/codex/dist/mcp.json",
-  "integrations/codex/dist/.agents/plugins/marketplace.json",
-  "target/bundled-integrations/integrations/codex/memcastle-integration.toml",
-  "target/bundled-integrations/integrations/codex/dist/.agents/plugins/marketplace.json",
-  "target/bundled-integrations/integrations/codex/dist/mcp.json",
   "target/bundled-integrations/skills/checkpoint-instructions/SKILL.md",
   "target/bundled-integrations/skills/diary/SKILL.md",
   "target/bundled-integrations/skills/memcastle-setup/SKILL.md",
