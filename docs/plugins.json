@@ -28,6 +28,14 @@
         { "id": "opencode", "type": "source" },
         { "id": "opencode", "type": "integration" }
       ]
+    },
+    {
+      "id": "github",
+      "description": "Scoped GitHub repositories, issues, pull requests and wiki history",
+      "repository": "memcastle/memcastle-github",
+      "modules": [
+        { "id": "github", "type": "source" }
+      ]
     }
   ]
 }

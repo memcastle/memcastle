@@ -171,15 +171,15 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `claude` | external `memcastle-anthropic` plugin | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
 | `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
-| `github` | bundled package, `sources/github/` | selected repositories, issues, PRs and wiki revisions | API updates / Git history | yes | optional `GH_TOKEN` or `GITHUB_TOKEN` |
+| `github` | external `memcastle-github` plugin | selected repositories, issues, PRs and wiki revisions | API updates / Git history | yes | optional `GH_TOKEN` or `GITHUB_TOKEN` |
 
 Only `directory` is compiled into MemCastle.
 `pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github` are [WebAssembly sources](writing-sources.md).
-The in-tree ones are built from their directories in the repository and shipped alongside each release
+The bundled ones are built from their directories in the repository and shipped alongside each release
 (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start.
 `memcastle source enable <name>` is all one needs for a bundled source, with no registry and no network.
-Install the external Pi, OpenCode or Anthropic plugin before enabling its source.
+Install the external Pi, OpenCode, Anthropic or GitHub plugin before enabling its source.
 No Pi, OpenCode, Claude Code, Codex, ChatGPT or GitHub acquisition code is part of the core.
 They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
@@ -499,7 +499,14 @@ limits.
 
 ### `github`
 
-The `github` source is shipped with releases, but must be enabled explicitly with `memcastle source enable github`.
+Install the `memcastle-github` plugin with `memcastle plugin install github`, then enable its source explicitly with
+`memcastle source enable github`.
+To upgrade an enabled bundled `github` source, first upgrade Core so it no longer ships that bundle, check whether the
+source was enabled, and run `memcastle source remove github --yes` to remove its old source-package record.
+Removal preserves mined history and cursors; the plugin installer refuses the old record until it is removed.
+Install with `memcastle plugin install github --adopt-source github` if the old source mined data, review the new
+permissions, and re-enable it if it was enabled before the upgrade.
+The adoption flag explicitly authorizes reuse of existing `github` data; it is unnecessary if the source never mined.
 It mines only repositories selected by the required `include` option, with `exclude` taking precedence.
 An exact `owner/repo` names one repository; `org/*` enumerates repositories owned by that organization, and
 `owner/repo-*` selects a subset of an owner's repositories.
@@ -521,7 +528,7 @@ rate limits; no token belongs in the miner options or `memcastle.toml`.
 Public repositories can be read without a token.
 The manifest grants the two variable names and the three programs, not a general filesystem or WASI network grant.
 For an opt-in [poll or schedule trigger](triggers.md), point it at a GitHub miner; the trigger only requests a normal run.
-See the [GitHub source README](https://github.com/memcastle/memcastle/tree/main/sources/github) for full scope examples
+See the [GitHub source README](https://github.com/memcastle/memcastle-github/tree/main/modules/github) for full scope examples
 and acquisition limits.
 
 ## Writing a source

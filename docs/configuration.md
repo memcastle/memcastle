@@ -747,7 +747,8 @@ Likewise REST callers must replace `scope` and `config` with `options`, and `uns
   approval whenever its value changes.
   `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
   `chatgpt` declares a web-only `projects` filter in addition to `mode` and `account` options.
-  `github` requires `include` repository patterns; `exclude` and separate wiki patterns can narrow them further.
+  The external `memcastle-github` plugin's source requires `include` repository patterns; `exclude` and separate wiki
+  patterns can narrow them further.
 
 ### Claude Code history miner
 
@@ -796,7 +797,7 @@ Changing or removing an option that broadens project selection still follows the
 
 ### GitHub repository and wiki miners
 
-The bundled GitHub source requires an explicit repository `include` pattern.
+The `memcastle-github` plugin's source requires an explicit repository `include` pattern.
 `org/*` selects repositories owned by an organization; an `exclude` pattern overrides inclusion.
 The wiki can be selected independently within those repositories with `wiki_include` and `wiki_exclude`.
 
