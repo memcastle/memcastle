@@ -61,7 +61,7 @@ plus the `codex` agent integration: those source IDs remain distinct miner kinds
 Jira and Confluence likewise remain separate source modules even if one Atlassian plugin shares API-client code.
 `shared_config_schema` and `[authentication]` describe provider-wide configuration and a public credential reference;
 each module's own permissions and each miner's scope remain separate.
-`memcastle plugin install` makes new source modules available but leaves each one installed and inactive.
+`memcastle plugin install` makes source modules available but leaves each new one installed and inactive.
 `memcastle source enable/disable` controls its mining availability independently of other modules.
 `memcastle integration install/remove` copies and registers an integration from an installed plugin's local files;
 it never fetches a standalone module or needs a daemon to reach its agent.
@@ -74,8 +74,8 @@ it can still use MCP/HTTP, but updating it from that plugin requires reinstallin
 A plugin update cannot replace the bytes of an already installed version or downgrade a configured release;
 publish a new plugin version, keeping stable module IDs and independent module versions.
 A mined legacy source requires an explicit `--adopt-source <id>` when moving into a plugin.
-An orphaned bundled-source row may also transfer after Core stops shipping its bundle;
-its enabled state, credentials and mining history survive, while a still-shipped bundle cannot be claimed.
+After a Core release stops bundling a source, remove its old package row explicitly before installing a plugin
+with that source ID; the mined data remains available for `--adopt-source`.
 Uninstall keeps a source-ID ownership record so a different plugin cannot later inherit retained cursors or drawers.
 The plugin record, source records and module-ID claims change together in one database transaction;
 two plugins cannot claim the same live source, integration or embedding-provider ID after concurrent previews.

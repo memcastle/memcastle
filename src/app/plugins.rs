@@ -720,7 +720,6 @@ impl AppServices {
             updated_at: now,
         };
         let mut sources = Vec::new();
-        let mut orphaned_bundles = Vec::new();
         for module in package
             .manifest
             .modules
@@ -732,11 +731,6 @@ impl AppServices {
             let manifest =
                 crate::source::manifest::parse(text, &crate::mining::registry::BUILTIN_NAMES)?;
             let old = self.store.get_source_package(&module.id).await?;
-            if old.as_ref().is_some_and(|source| {
-                source.origin == SourceOrigin::Bundled && !self.is_bundled(&module.id)
-            }) {
-                orphaned_bundles.push(module.id.clone());
-            }
             sources.push(SourcePackageRecord {
                 name: module.id.clone(),
                 state: old
@@ -765,13 +759,7 @@ impl AppServices {
         };
         if let Err(error) = self
             .store
-            .publish_plugin_with_sources(
-                &record,
-                &sources,
-                &orphaned_bundles,
-                &retired_sources,
-                &retired_modules,
-            )
+            .publish_plugin_with_sources(&record, &sources, &retired_sources, &retired_modules)
             .await
         {
             restore_current(&root, id, parked.as_deref());
@@ -1057,23 +1045,7 @@ impl AppServices {
             }
             match module.kind {
                 PluginModuleKind::Source => {
-                    if self.is_bundled(&module.id) {
-                        return Err(Error::PluginBlocked {
-                            name: name.clone(),
-                            reason: format!(
-                                "source `{}` still ships with this Core; upgrade Core before installing the plugin",
-                                module.id
-                            ),
-                        });
-                    }
-                    let existing = self.store.get_source_package(&module.id).await?;
-                    // A removed Core bundle leaves its enabled-state row behind. Explicit adoption may replace
-                    // that row without erasing its credential or cursor, but a still-shipped bundle must not be claimed.
-                    let orphaned_bundle = existing
-                        .as_ref()
-                        .is_some_and(|record| record.origin == SourceOrigin::Bundled);
-                    if existing.is_some()
-                        && !orphaned_bundle
+                    if self.store.get_source_package(&module.id).await?.is_some()
                         && !installed.iter().any(|owner| {
                             owner.id == *name
                                 && owner.manifest.modules.iter().any(|previous| {

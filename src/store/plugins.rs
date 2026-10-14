@@ -103,7 +103,6 @@ impl SurrealStore {
         &self,
         plugin: &PluginRecord,
         sources: &[SourcePackageRecord],
-        adopt_bundled: &[String],
         retired_sources: &[String],
         retired_modules: &[String],
     ) -> Result<()> {
@@ -119,9 +118,7 @@ impl SurrealStore {
             // Preflight can race another daemon. The ownership guard belongs inside the publication transaction,
             // before any module or plugin row is overwritten, so only one publisher can claim a source ID.
             sql.push_str(&format!(" LET $owner{index} = (SELECT plugin FROM plugin_source_owner WHERE id = type::record('plugin_source_owner', $source{index}_name)); IF array::len($owner{index}) > 0 && $owner{index}[0].plugin != $plugin_id {{ THROW 'plugin source ownership conflict'; }};"));
-            // A removed bundle's row can transfer atomically, but only when the application proved this
-            // daemon no longer ships it. A legacy package and another plugin remain unclaimable.
-            sql.push_str(&format!(" LET $existing{index} = (SELECT plugin, state, origin FROM source_package WHERE id = type::record('source_package', $source{index}_name)); IF array::len($existing{index}) > 0 && $existing{index}[0].plugin != $plugin_id && !($adopt_bundled{index} && $existing{index}[0].origin = 'bundled') {{ THROW 'plugin source package conflict'; }};"));
+            sql.push_str(&format!(" LET $existing{index} = (SELECT plugin, state FROM source_package WHERE id = type::record('source_package', $source{index}_name)); IF array::len($existing{index}) > 0 && $existing{index}[0].plugin != $plugin_id {{ THROW 'plugin source package conflict'; }};"));
             // Source enable/disable is a separate administrative operation; a concurrent plugin update must not
             // restore the state it read during preflight over a more recent decision in this same palace.
             sql.push_str(&format!(" LET $state{index} = IF array::len($existing{index}) > 0 {{ $existing{index}[0].state }} ELSE {{ $source{index}_state }};"));
@@ -156,10 +153,6 @@ impl SurrealStore {
         for (index, source) in sources.iter().enumerate() {
             query = query
                 .bind((format!("source{index}_name"), source.name.clone()))
-                .bind((
-                    format!("adopt_bundled{index}"),
-                    adopt_bundled.contains(&source.name),
-                ))
                 .bind((
                     format!("source{index}_state"),
                     super::bindable(&source.state)?,
@@ -349,7 +342,7 @@ mod tests {
         }
         };
         store
-            .publish_plugin_with_sources(&plugin, &[source("one"), source("two")], &[], &[], &[])
+            .publish_plugin_with_sources(&plugin, &[source("one"), source("two")], &[], &[])
             .await
             .unwrap();
         assert_eq!(store.list_plugins().await.unwrap().len(), 1);
@@ -362,7 +355,7 @@ mod tests {
         activated.state = SourcePackageState::Enabled;
         store.save_source_package(&activated).await.unwrap();
         store
-            .publish_plugin_with_sources(&plugin, &[source("one")], &[], &["two".to_string()], &[])
+            .publish_plugin_with_sources(&plugin, &[source("one")], &["two".to_string()], &[])
             .await
             .unwrap();
         assert!(store.get_source_package("two").await.unwrap().is_none());
@@ -437,12 +430,12 @@ mod tests {
             generation: Some(first.generation.clone()),
         };
         store
-            .publish_plugin_with_sources(&first, &[source.clone()], &[], &[], &[])
+            .publish_plugin_with_sources(&first, &[source.clone()], &[], &[])
             .await
             .unwrap();
         source.plugin = Some(second.id.clone());
         let error = store
-            .publish_plugin_with_sources(&second, &[source], &[], &[], &[])
+            .publish_plugin_with_sources(&second, &[source], &[], &[])
             .await
             .unwrap_err();
         assert!(matches!(error, Error::PluginBlocked { .. }), "{error}");
@@ -485,7 +478,7 @@ mod tests {
         takeover.origin = SourceOrigin::Plugin;
         assert!(matches!(
             store
-                .publish_plugin_with_sources(&second, &[takeover], &[], &[], &[])
+                .publish_plugin_with_sources(&second, &[takeover], &[], &[])
                 .await,
             Err(Error::PluginBlocked { .. })
         ));
@@ -498,31 +491,6 @@ mod tests {
                 .origin,
             SourceOrigin::Package
         );
-        // A removed Core bundle can be taken over only when the caller explicitly identified its name;
-        // the transaction retains the old enabled state even if it changes during plugin preflight.
-        let mut bundled = legacy.clone();
-        bundled.name = "bundled".into();
-        bundled.manifest.source.name = "bundled".into();
-        bundled.origin = SourceOrigin::Bundled;
-        bundled.state = SourcePackageState::Enabled;
-        store.save_source_package(&bundled).await.unwrap();
-        let mut adopted = bundled.clone();
-        adopted.plugin = Some(second.id.clone());
-        adopted.origin = SourceOrigin::Plugin;
-        adopted.state = SourcePackageState::Installed;
-        assert!(matches!(
-            store
-                .publish_plugin_with_sources(&second, &[adopted.clone()], &[], &[], &[])
-                .await,
-            Err(Error::PluginBlocked { .. })
-        ));
-        store
-            .publish_plugin_with_sources(&second, &[adopted], &["bundled".into()], &[], &[])
-            .await
-            .unwrap();
-        let saved = store.get_source_package("bundled").await.unwrap().unwrap();
-        assert_eq!(saved.state, SourcePackageState::Enabled);
-        assert_eq!(saved.plugin.as_deref(), Some("second"));
     }
 
     #[tokio::test]
@@ -569,11 +537,11 @@ mod tests {
         second.id = "second".into();
         second.manifest.plugin.id = "second".into();
         store
-            .publish_plugin_with_sources(&first, &[], &[], &[], &[])
+            .publish_plugin_with_sources(&first, &[], &[], &[])
             .await
             .unwrap();
         let error = store
-            .publish_plugin_with_sources(&second, &[], &[], &[], &[])
+            .publish_plugin_with_sources(&second, &[], &[], &[])
             .await
             .unwrap_err();
         assert!(matches!(error, Error::PluginBlocked { .. }), "{error:?}");
@@ -583,7 +551,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .publish_plugin_with_sources(&second, &[], &[], &[], &[])
+            .publish_plugin_with_sources(&second, &[], &[], &[])
             .await
             .unwrap();
         assert!(store.get_plugin("second").await.unwrap().is_some());

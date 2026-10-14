@@ -433,6 +433,8 @@ memcastle source enable codex
 memcastle mine codex
 ```
 
+After upgrading from a Core release that bundled `codex`, run `memcastle source remove codex` before plugin installation
+to clear the old enabled-state row; this does not erase mined history or miner definitions.
 If the preview reports historic mined `codex` data, pass `--adopt-source codex` after reviewing it.
 Keep the same locator and miner configuration so the existing cursor and documents remain associated with the source.
 
@@ -460,6 +462,9 @@ memcastle source enable chatgpt
 memcastle mine chatgpt /path/to/chatgpt-export.zip
 ```
 
+After upgrading from a Core release that bundled `chatgpt`, run `memcastle source remove chatgpt` before installing the
+plugin. This keeps mined history and cursors but removes the old enabled state and OAuth credential;
+sign in again with `memcastle source auth chatgpt` before web mining.
 Add `--adopt-source chatgpt` to the plugin install command if the preview reports previously mined ChatGPT data;
 keep the export locator, account label and project filters unchanged to continue from its existing identity.
 

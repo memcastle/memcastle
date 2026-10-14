@@ -471,12 +471,13 @@ compatibility before any code becomes available.
 A local archive or already-built project is read by the CLI for a preview, then sent to that same daemon for validation.
 Each source module that asks for permissions needs its own reviewed consent digest; `--yes` explicitly approves the
 displayed permissions, while a non-interactive install without `--consent MODULE=DIGEST` is refused.
-Installing a plugin never enables a new source or installs its integrations;
-adopting an already enabled source preserves that user's existing choice.
+Installing a plugin never enables a new source or installs its integrations.
 `source enable` and `integration install` are separate module lifecycle operations.
 `update` preserves each source's state and its existing permissions agreement, asking again only for changed grants.
 If a source ID has mined data from a removed legacy package, `plugin install` refuses to attach it silently;
 repeat with `--adopt-source SOURCE` after reviewing the source identity and its existing history.
+If the source was bundled by an older Core, first upgrade Core, run `source remove SOURCE` to clear its former package
+row, then install with `--adopt-source SOURCE` and enable it again; removing the row also clears its credential.
 `--yes` approves permissions, but never substitutes for this explicit adoption.
 `uninstall` refuses configured miners, active sources or jobs, installed integrations and dependent plugins,
 and preserves everything already mined.
