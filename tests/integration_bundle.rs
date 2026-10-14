@@ -49,7 +49,11 @@ fn the_core_package_holds_shared_skills_but_no_agent_specific_integrations() {
     );
     for skill in skills {
         assert!(
-            package.join("skills").join(&skill).join("SKILL.md").is_file(),
+            package
+                .join("skills")
+                .join(&skill)
+                .join("SKILL.md")
+                .is_file(),
             "{skill}"
         );
     }

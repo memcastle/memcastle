@@ -3,9 +3,7 @@
 #
 # Usage: packaging/integrations/build.sh [out-dir]
 #
-# Always: copies each declarative integration's agent assets into `integrations/<id>/dist/`.
-# No package manager is needed on the user's machine (docs/adr/034); a development checkout can be installed from
-# these same `dist/` directories with `memcastle integration install <id> --assets-dir <checkout>`.
+# Always: prepares any declarative integrations still shipped by Core; provider-owned agents now arrive as plugins.
 #
 # With <out-dir>: also writes the tree an OS package installs under `share/memcastle/` -
 #   <out-dir>/integrations/<id>/{memcastle-integration.toml,dist/,skills/ (only if the integration has its own)}
@@ -13,7 +11,7 @@
 # and checks that nothing which must not ship came along. One script for 📦 Publish Release and for
 # `mise run integrations:package`, so what a release bundles is what a developer can build and test.
 #
-# The remaining integrations use their agents' declarative plugin assets, without a JavaScript build.
+# Core still packages the shared skills that plugins may reference; no agent-specific assets are bundled.
 set -euo pipefail
 
 if [ "$#" -gt 1 ]; then
