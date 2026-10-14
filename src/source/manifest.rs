@@ -489,21 +489,16 @@ read = ["locator"]
     }
 
     #[test]
-    fn the_reference_sources_declare_the_triggers_their_documentation_promises() {
+    fn the_directory_source_declares_the_triggers_its_documentation_promises() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sources");
-        for (name, expected) in [
-            ("directory", vec!["schedule", "poll", "webhook", "watch"]),
-            ("claude", vec!["schedule", "poll", "watch"]),
-        ] {
-            let text = std::fs::read_to_string(root.join(name).join("memcastle-source.toml"))
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
-            let manifest = parse(&text, &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
-            let kinds: Vec<_> = manifest
-                .trigger_specs()
-                .iter()
-                .map(|t| t.kind.as_str())
-                .collect();
-            assert_eq!(kinds, expected, "{name}");
-        }
+        let text = std::fs::read_to_string(root.join("directory/memcastle-source.toml"))
+            .expect("the reference directory source exists");
+        let manifest = parse(&text, &[]).expect("the directory manifest parses");
+        let kinds: Vec<_> = manifest
+            .trigger_specs()
+            .iter()
+            .map(|trigger| trigger.kind.as_str())
+            .collect();
+        assert_eq!(kinds, ["schedule", "poll", "webhook", "watch"]);
     }
 }

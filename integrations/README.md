@@ -45,15 +45,15 @@ does not classify.
 
 ```text
 integrations/
-  claude-code/   Claude Code local-marketplace plugin with native MCP and commands
   codex/         Codex local-marketplace plugin with native MCP and commands
 ```
 
 The Core-shipped integrations use their agents' declarative assets; `mise run integrations:check` tests their package
 layout and local installation without building an agent client.
-The Pi and OpenCode integrations and their client tests ship from the standalone
+The Pi, OpenCode and Claude Code integrations and their client tests ship from the standalone
 [`memcastle-pi`](https://github.com/memcastle/memcastle-pi) and
-[`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode) repositories.
+[`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode) repositories, and
+[`memcastle-anthropic`](https://github.com/memcastle/memcastle-anthropic), respectively.
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
@@ -85,7 +85,7 @@ memory mode is off.
 - [`memcastle-opencode` research](https://github.com/memcastle/memcastle-opencode/blob/main/modules/opencode/docs/research.md)
   maps OpenCode's plugin hooks, MCP client and skills onto
   MemCastle operations, and records where OpenCode has no clean equivalent.
-- [`claude-code/docs/research.md`](claude-code/docs/research.md) records Claude Code's supported declarative plugin API
+- [`memcastle-anthropic` research](https://github.com/memcastle/memcastle-anthropic/blob/main/modules/claude-code/docs/research.md) records Claude Code's supported declarative plugin API
   and the lifecycle gaps that it cannot safely emulate.
 
 ## Non-goals
@@ -107,5 +107,5 @@ The Pi extension has its own client tests in [`memcastle-pi`](https://github.com
 Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.
-The Claude Code package is shipped through its local marketplace mechanism with native HTTP MCP, shared skills, prompt
+The independently released Claude Code package uses its local marketplace with native HTTP MCP, shared skills, prompt
 hooks, and explicit commands; its README documents the unsupported automatic lifecycle work as gaps.

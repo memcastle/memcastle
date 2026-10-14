@@ -274,7 +274,7 @@ src/
 │               the registry that names them, `bundled`, which reads the sources unpacked beside the binary, and the
 │               WebAssembly host that runs installed sources (`wasm/`)
 ├── integration/ agent integrations: manifest, discovery under the assets root, install/update/remove with a receipt, and
-│               the Pi and OpenCode adapters (no store, no jobs, no network, no daemon)
+│               the Pi, OpenCode and Claude Code agent adapters (no store, no jobs, no network, no daemon)
 ├── plugin/      versioned parent manifest, multi-module archive validation and local signing (no store, jobs or network)
 ├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner
 │               (no store, no jobs, no network)
@@ -300,11 +300,12 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
-sources/        official and reference WebAssembly sources (`directory`, `claude`, ...), one package per directory, built and
+sources/        official and reference WebAssembly sources (`directory`, `codex`, ...), one package per directory, built and
                 tested but not compiled into MemCastle; bundled sources ship with releases (`packaging/sources/build.sh`)
-integrations/   Core-shipped per-agent lifecycle adapters (Claude Code, Codex), over MCP and HTTP only;
+integrations/   Core-shipped per-agent lifecycle assets (Codex), over MCP and HTTP only;
                 each carries a `memcastle-integration.toml` and is bundled into `dist/` for `memcastle integration install`.
-                Pi and OpenCode source/integration pairs live in standalone `memcastle-pi` and `memcastle-opencode` plugins.
+                Pi, OpenCode and Claude Code source/integration modules live in standalone `memcastle-pi`,
+                `memcastle-opencode` and `memcastle-anthropic` plugins.
 web/            the web UI: a Vue 3 and OpenVue application, a client of the REST API, built into `web/dist/` and
                 served under `/ui` from the assets root when `web.enable` is set (docs/web.md)
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the

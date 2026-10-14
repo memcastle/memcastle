@@ -319,21 +319,14 @@ cargo test --test integration_bundle -- --ignored
 
 [tasks."integrations:build"]
 description = "Prepare the declarative integrations under integrations/<id>/dist for development"
-# After this, `memcastle integration install claude-code --assets-dir "$PWD"` installs the checkout assets.
+# After this, `memcastle integration install codex --assets-dir "$PWD"` installs the checkout assets.
 # Include dot-directories explicitly: the plugin manifests are hidden, and a plain glob can omit them.
 sources = [
   "packaging/integrations/build.sh",
-  "integrations/claude-code/plugin/**",
-  "integrations/claude-code/plugin/.claude-plugin/**",
-  "integrations/claude-code/plugin/.mcp.json",
   "integrations/codex/plugin/**",
   "integrations/codex/plugin/.agents/**",
 ]
 outputs = [
-  "integrations/claude-code/dist/.claude-plugin/plugin.json",
-  "integrations/claude-code/dist/.claude-plugin/marketplace.json",
-  "integrations/claude-code/dist/.mcp.json",
-  "integrations/claude-code/dist/hooks/hooks.json",
   "integrations/codex/dist/plugin.json",
   "integrations/codex/dist/mcp.json",
   "integrations/codex/dist/.agents/plugins/marketplace.json",
@@ -343,32 +336,20 @@ run = "packaging/integrations/build.sh"
 [tasks."integrations:package"]
 description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
 # The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
-# (`memcastle integration install claude-code --assets-dir target/bundled-integrations`).
+# (`memcastle integration install codex --assets-dir target/bundled-integrations`).
 sources = [
   "packaging/integrations/build.sh",
-  "integrations/claude-code/plugin/**",
-  "integrations/claude-code/plugin/.claude-plugin/**",
-  "integrations/claude-code/plugin/.mcp.json",
   "integrations/codex/plugin/**",
   "integrations/codex/plugin/.agents/**",
-  "integrations/claude-code/memcastle-integration.toml",
   "integrations/codex/memcastle-integration.toml",
-  "integrations/claude-code/skills/**",
   "integrations/codex/skills/**",
   "skills/*/**",
 ]
 # The package script also refreshes the checkout's dist trees; their absence must rebuild the package.
 outputs = [
-  "integrations/claude-code/dist/.claude-plugin/plugin.json",
-  "integrations/claude-code/dist/.claude-plugin/marketplace.json",
-  "integrations/claude-code/dist/.mcp.json",
-  "integrations/claude-code/dist/hooks/hooks.json",
   "integrations/codex/dist/plugin.json",
   "integrations/codex/dist/mcp.json",
   "integrations/codex/dist/.agents/plugins/marketplace.json",
-  "target/bundled-integrations/integrations/claude-code/memcastle-integration.toml",
-  "target/bundled-integrations/integrations/claude-code/dist/.mcp.json",
-  "target/bundled-integrations/integrations/claude-code/dist/.claude-plugin/marketplace.json",
   "target/bundled-integrations/integrations/codex/memcastle-integration.toml",
   "target/bundled-integrations/integrations/codex/dist/.agents/plugins/marketplace.json",
   "target/bundled-integrations/integrations/codex/dist/mcp.json",

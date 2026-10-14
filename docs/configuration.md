@@ -669,7 +669,7 @@ This is the one root for everything a package ships, in the same layout wherever
 | Under the root | What | Read by |
 |---|---|---|
 | `sources/<name>/` | the bundled mining sources, unpacked: a `memcastle-source.toml` and a `source.wasm` each | the daemon, which lists them as installed and runs them in place (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
-| `integrations/<id>/` | the Pi, OpenCode, Claude Code and Codex integrations: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)) |
+| `integrations/<id>/` | Core's Codex integration: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)); external provider modules live in plugin installations |
 | `skills/` | the shared agent skills | `memcastle integration`, which copies the ones an integration's manifest names into its installed copy |
 | `web/dist/` | the built [web UI](web.md) | the daemon, under `/ui`, when `web.enable` is set |
 
@@ -751,7 +751,7 @@ Likewise REST callers must replace `scope` and `config` with `options`, and `uns
 
 ### Claude Code history miner
 
-The bundled `claude` source reads only session transcripts under `~/.claude/projects`.
+The externally installed `claude` source reads only session transcripts under `~/.claude/projects`.
 Define a miner explicitly; no Claude Code client or source installation creates one:
 
 ```toml

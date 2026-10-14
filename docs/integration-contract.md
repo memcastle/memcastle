@@ -15,7 +15,7 @@ flowchart LR
     subgraph client["One per agent: lifecycle"]
         pi["memcastle-pi/modules/pi"]
         oc["memcastle-opencode/modules/opencode"]
-        cc["integrations/claude-code"]
+        cc["memcastle-anthropic/modules/claude-code"]
     end
     skills["skills/: reusable agent instructions"]
     surface["MCP tools and REST API"]

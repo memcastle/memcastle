@@ -294,7 +294,7 @@ jobs:
       # (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each file
       # where a package manager would, and the daemon finds the bundle beside
       # the binary, and so does
-      # `memcastle integration install claude-code`.
+      # `memcastle integration install codex`.
       #
       # Every flag that follows exists so the same inputs give the same bytes:
       # a fixed order, the commit time for every mtime, no owner, and `gzip -n`

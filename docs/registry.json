@@ -10,13 +10,6 @@
       "repository": "memcastle/memcastle"
     },
     {
-      "name": "claude",
-      "description": "Claude Code session history (JSONL transcripts under ~/.claude/projects), one document per session",
-      "homepage": "https://memcastle.github.io/mining-sources/#claude",
-      "license": "MIT",
-      "repository": "memcastle/memcastle"
-    },
-    {
       "name": "codex",
       "description": "Codex coding-agent rollout history (JSONL files under ~/.codex/sessions), one document per rollout",
       "homepage": "https://memcastle.github.io/mining-sources/#codex",

@@ -7,10 +7,10 @@ It decides *when* to call MemCastle and does nothing else; every call goes to th
 What each integration must do is the [Integration contract](integration-contract.md).
 This page is about getting one onto your machine.
 
-MemCastle ships integrations for **Claude Code** and **Codex**; Pi and OpenCode are standalone provider plugins.
+MemCastle ships the **Codex** integration; Pi, OpenCode and Claude Code are standalone provider plugins.
 The **Pi** integration comes from the independently released [memcastle-pi provider plugin](integrations-pi.md).
-`memcastle integration` installs either locally, after its plugin is available.
-Core's integrations are part of its release; neither they nor an installed Pi plugin need an npm download on the
+`memcastle integration` installs any of them locally, after its plugin is available.
+Core's integrations are part of its release; neither they nor an installed provider plugin need an npm download on the
 user's machine.
 `plugin install` only makes it selectable; `integration install <module-id>` still copies and registers the selected
 agent-side files locally, and `integration remove` undoes that registration without uninstalling its parent plugin.
@@ -55,7 +55,7 @@ flowchart TB
 |---|---|---|---|---|
 | `pi` (external plugin) | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.4 and later | [Pi](integrations-pi.md) |
 | `opencode` (external plugin) | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.4 and later | [OpenCode](integrations-opencode.md) |
-| `claude-code` | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.2 and later | [Claude Code](integrations-claude-code.md) |
+| `claude-code` (external plugin) | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.4 and later | [Claude Code](integrations-claude-code.md) |
 | `codex` | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | 0.2 and later | [Codex](integrations-codex.md) |
 
 `memcastle integration list` shows installed plugin integrations alongside those Core ships, with their own version ranges.
@@ -77,6 +77,7 @@ The daemon does not have to be running to install one; it has to be running when
 
 ```sh
 memcastle integration list
+memcastle plugin install anthropic
 memcastle integration install claude-code
 memcastle integration install codex
 # For Pi, first install its provider archive (see the Pi guide), then:
@@ -182,9 +183,6 @@ in a package and in a checkout alike:
 ```text
 <assets root>/
 ├── integrations/
-│   ├── claude-code/
-│   │   ├── memcastle-integration.toml
-│   │   └── dist/
 │   └── codex/
 │       ├── memcastle-integration.toml
 │       └── dist/
@@ -216,14 +214,14 @@ MemCastle:
 ```sh
 mise run integrations:build                                  # prepare the Core-shipped declarative assets in dist/
 memcastle integration list --assets-dir "$PWD"               # the checkout is the assets root
-memcastle integration install claude-code --assets-dir "$PWD"
+memcastle integration install codex --assets-dir "$PWD"
 ```
 
 The checkout already has the layout above (`integrations/<id>/`, `skills/`), and `integrations:build` creates the `dist/`
 directories for Core-shipped integrations.
 Installing from a checkout goes through exactly the code a package install does, so what you test is what ships.
 Because a development build never changes the integration's version, the installer compares file contents as well:
-rebuild, run `memcastle integration update claude-code --assets-dir "$PWD"`, and the new bundle replaces the old one.
+rebuild, run `memcastle integration update codex --assets-dir "$PWD"`, and the new bundle replaces the old one.
 `MEMCASTLE_ASSETS_DIR` does the same as the flag for a whole shell session.
 In this repository `mise.toml` sets it to the checkout for you: with mise active (`mise run`, `mise cli`, or an activated
 shell), any `memcastle integration ...` run from the project directory, even an installed `memcastle`, reads the

@@ -69,6 +69,7 @@ See OpenCode's [MCP servers documentation](https://opencode.ai/docs/mcp-servers/
 The lifecycle plugin is the preferred setup:
 
 ```sh
+memcastle plugin install anthropic
 memcastle integration install claude-code
 ```
 

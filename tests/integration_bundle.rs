@@ -63,11 +63,8 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     let package = package();
 
     assert_eq!(names(&package), ["integrations", "skills"]);
-    assert_eq!(
-        names(&package.join("integrations")),
-        ["claude-code", "codex"]
-    );
-    for id in ["claude-code", "codex"] {
+    assert_eq!(names(&package.join("integrations")), ["codex"]);
+    for id in ["codex"] {
         let dir = package.join("integrations").join(id);
         // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
         let own: Vec<String> = names(&dir)
@@ -145,13 +142,11 @@ fn lifecycle_from(assets: &Path) {
     let machine = Machine::new();
     let flag = assets.to_str().unwrap();
 
-    for id in ["claude-code", "codex"] {
-        machine
-            .memcastle()
-            .args(["integration", "install", id, "--assets-dir", flag])
-            .assert()
-            .success();
-    }
+    machine
+        .memcastle()
+        .args(["integration", "install", "codex", "--assets-dir", flag])
+        .assert()
+        .success();
 
     let listed = machine
         .memcastle()
@@ -164,7 +159,7 @@ fn lifecycle_from(assets: &Path) {
     }
 
     // Whatever layout `assets` is, each integration exposes exactly the skills its own manifest names.
-    for id in ["claude-code", "codex"] {
+    for id in ["codex"] {
         let text =
             std::fs::read_to_string(assets.join("integrations").join(id).join(MANIFEST_FILE))
                 .unwrap();
@@ -195,23 +190,28 @@ fn lifecycle_from(assets: &Path) {
     assert!(machine.pi_packages().is_empty());
     // Installing the remaining agents never writes an OpenCode plugin shim.
     assert!(!machine.plugin_file().exists());
-    assert_eq!(machine.claude_plugins(), ["memcastle@memcastle-local"]);
+    assert!(machine.claude_plugins().is_empty());
     assert_eq!(machine.codex_plugins(), ["memcastle@memcastle-local"]);
 
-    for id in ["claude-code", "codex"] {
-        let again = machine
-            .memcastle()
-            .args(["integration", "install", id, "--json", "--assets-dir", flag])
-            .output()
-            .unwrap();
-        let outcome: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
-        assert_eq!(outcome["action"], "unchanged", "{id}: {outcome}");
-        machine
-            .memcastle()
-            .args(["integration", "remove", id])
-            .assert()
-            .success();
-    }
+    let again = machine
+        .memcastle()
+        .args([
+            "integration",
+            "install",
+            "codex",
+            "--json",
+            "--assets-dir",
+            flag,
+        ])
+        .output()
+        .unwrap();
+    let outcome: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(outcome["action"], "unchanged", "codex: {outcome}");
+    machine
+        .memcastle()
+        .args(["integration", "remove", "codex"])
+        .assert()
+        .success();
     assert!(
         machine.pi_packages().is_empty()
             && machine.claude_plugins().is_empty()
