@@ -43,7 +43,7 @@ mise run sources:test -- directory   # the same for one source, which is what ea
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
-mise run integrations:check # typecheck and test each package under integrations/, and install the bundles (needs bun)
+mise run integrations:check # test the Core-shipped integration and install its bundle
 mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
 mise run integrations:package # lay out what a release ships in target/bundled-integrations
 mise run web:check  # typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node)
@@ -236,8 +236,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     [`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode).
   - The GitHub repository source's fixtures, conformance and installation/mining smoke checks live in
     [`memcastle-github`](https://github.com/memcastle/memcastle-github).
-  - `sources/chatgpt/core-tests.rs` — source-owned behavior beyond conformance, run in its Linux CI leg;
-    Codex's behavior is covered by its conformance fixture.
+  - The Codex and ChatGPT modules' fixtures, conformance and independent plugin-install/adoption smokes live in
+    [`memcastle-openai`](https://github.com/memcastle/memcastle-openai).
   - `tests/wasm_registry.rs` — registries against a real daemon (a directory registry written with the same calls
     `source index` makes): search, install by name with consent, an archive that is not the one published, a package that
     is not the one the index says, version choice, the trust policy, update with and without new permissions, a bundled

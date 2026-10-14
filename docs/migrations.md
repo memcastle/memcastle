@@ -6,6 +6,10 @@ they keep their component digest, activation state, credentials and mining curso
 Installing a plugin never silently takes ownership of an existing legacy source with the same ID.
 If a legacy source was removed after mining, `plugin install --adopt-source <id>` is the explicit handoff of its
 preserved cursor and drawers to the plugin supplying that same source kind.
+When a Core release stops bundling a source, its stored enabled-state row remains.
+After that bundle is absent, a plugin may adopt the source with reviewed permissions and explicit `--adopt-source`
+for mined history; the row changes owner atomically without deleting its activation state, credential or cursors.
+A source that the running Core still bundles cannot be claimed by a plugin.
 Mined drawers and source cursors live in separate tables and survive plugin updates and uninstall.
 
 MemCastle keeps its data in a versioned shape.

@@ -21,6 +21,16 @@
       ]
     },
     {
+      "id": "openai",
+      "description": "Codex and ChatGPT history with Codex agent integration",
+      "repository": "memcastle/memcastle-openai",
+      "modules": [
+        { "id": "codex", "type": "source" },
+        { "id": "chatgpt", "type": "source" },
+        { "id": "codex", "type": "integration" }
+      ]
+    },
+    {
       "id": "opencode",
       "description": "OpenCode coding-agent history and lifecycle integration",
       "repository": "memcastle/memcastle-opencode",

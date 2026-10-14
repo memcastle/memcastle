@@ -300,12 +300,12 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
-sources/        official and reference WebAssembly sources (`directory`, `codex`, ...), one package per directory, built and
+sources/        official and reference WebAssembly sources (`directory`, `github`, ...), one package per directory, built and
                 tested but not compiled into MemCastle; bundled sources ship with releases (`packaging/sources/build.sh`)
-integrations/   Core-shipped per-agent lifecycle assets (Codex), over MCP and HTTP only;
-                each carries a `memcastle-integration.toml` and is bundled into `dist/` for `memcastle integration install`.
+integrations/   Agent integration documentation; Core ships no agent-specific integration assets.
                 Pi, OpenCode and Claude Code source/integration modules live in standalone `memcastle-pi`,
-                `memcastle-opencode` and `memcastle-anthropic` plugins.
+                `memcastle-opencode` and `memcastle-anthropic` plugins; Codex's integration and history and ChatGPT
+                history live in standalone `memcastle-openai`.
 web/            the web UI: a Vue 3 and OpenVue application, a client of the REST API, built into `web/dist/` and
                 served under `/ui` from the assets root when `web.enable` is set (docs/web.md)
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the

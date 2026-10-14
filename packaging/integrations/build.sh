@@ -24,14 +24,9 @@ out="${1:-}"
 
 # Which integrations ship is a packaging decision and does not constrain the runtime (docs/adr/034): any directory
 # under `integrations/` with a `memcastle-integration.toml` and a `dist/` could be added here.
-BUNDLED=(codex)
+BUNDLED=()
 
 cd "$(dirname "$0")/../.."
-# Codex loads declarative marketplace assets itself, so no JavaScript runtime is bundled.
-rm -rf integrations/codex/dist
-mkdir -p integrations/codex/dist
-cp -R integrations/codex/plugin/. integrations/codex/dist/
-
 if [ -z "${out}" ]; then
   exit 0
 fi

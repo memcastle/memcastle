@@ -169,17 +169,14 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `pi` | external `memcastle-pi` plugin | Pi coding-agent session history | modification time | yes | no |
 | `opencode` | external `memcastle-opencode` plugin | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 | `claude` | external `memcastle-anthropic` plugin | Claude Code session history | modification time | yes | no |
-| `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
-| `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
 | `github` | external `memcastle-github` plugin | selected repositories, issues, PRs and wiki revisions | API updates / Git history | yes | optional `GH_TOKEN` or `GITHUB_TOKEN` |
+| `codex` | external `memcastle-openai` plugin | Codex rollout history | modification time | yes | no |
+| `chatgpt` | external `memcastle-openai` plugin | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
 
 Only `directory` is compiled into MemCastle.
 `pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github` are [WebAssembly sources](writing-sources.md).
-The bundled ones are built from their directories in the repository and shipped alongside each release
-(release archives and the `.deb` and `.rpm` carry them, unpacked, under
-`share/memcastle/sources/`), so they are installed from the start.
-`memcastle source enable <name>` is all one needs for a bundled source, with no registry and no network.
-Install the external Pi, OpenCode, Anthropic or GitHub plugin before enabling its source.
+The `sources/` directory contains a reference WebAssembly implementation; Core currently bundles no WebAssembly sources.
+Install the external Pi, OpenCode, Anthropic, GitHub or OpenAI plugin before enabling its source.
 No Pi, OpenCode, Claude Code, Codex, ChatGPT or GitHub acquisition code is part of the core.
 They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
@@ -425,12 +422,19 @@ The [Codex](https://developers.openai.com/codex) history source reads the dated 
 It is separate from the Codex integration: this source acquires old and inactive transcripts, while the integration only
 decides when a live Codex session uses MCP.
 
-It ships with MemCastle and is installed already:
+The [`memcastle-openai`](https://github.com/memcastle/memcastle-openai) plugin supplies this source and the separate
+Codex integration.
+Build its archive from the provider checkout until a release is available, then review its two source consent digests:
 
 ```sh
+memcastle plugin install /path/to/openai-0.1.0.tar.gz \
+  --consent codex=CODEX_DIGEST --consent chatgpt=CHATGPT_DIGEST
 memcastle source enable codex
 memcastle mine codex
 ```
+
+If the preview reports historic mined `codex` data, pass `--adopt-source codex` after reviewing it.
+Keep the same locator and miner configuration so the existing cursor and documents remain associated with the source.
 
 The source reads only files named `rollout-*.jsonl` at the documented date depth, never `history.jsonl` or another file
 under `~/.codex`.
@@ -448,12 +452,16 @@ does not understand.
 
 ChatGPT conversation history is imported from an official export ZIP with a top-level `conversations.json`.
 A standalone `conversations.json` extracted from it is accepted too.
-The source ships disabled like the other bundled packages; enable it, then provide the path on the **daemon's** machine:
+Install the `memcastle-openai` archive as above, then enable the source and provide the export path on the
+**daemon's** machine:
 
 ```sh
 memcastle source enable chatgpt
 memcastle mine chatgpt /path/to/chatgpt-export.zip
 ```
+
+Add `--adopt-source chatgpt` to the plugin install command if the preview reports previously mined ChatGPT data;
+keep the export locator, account label and project filters unchanged to continue from its existing identity.
 
 The export path is the source's identity.
 Replacing the file at that path with a newer export and mining again revisits each conversation without duplicating
@@ -494,7 +502,7 @@ environment; no session value belongs in a mine option or config setting.
 It revisits conversations on every run and fails on incomplete message pages rather than filing a partial transcript.
 This backend is tested against synthetic replies, not yet against a fresh live session; endpoints, login requirements and
 pagination may change.
-See [the source README](https://github.com/memcastle/memcastle/tree/main/sources/chatgpt) for its session setup and
+See [the source README](https://github.com/memcastle/memcastle-openai/tree/main/modules/chatgpt) for its session setup and
 limits.
 
 ### `github`

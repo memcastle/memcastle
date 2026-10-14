@@ -363,18 +363,15 @@ Publishing one, finding one by name, updating it, signing it and trusting a publ
 `sources/directory/` is the built-in `directory` source as a Rust component, and is the worked example to read.
 The Pi coding agent's session-history source now lives in
 [`memcastle-pi`](https://github.com/memcastle/memcastle-pi) and retains its original `pi` ID.
-`sources/chatgpt/` imports ChatGPT export ZIPs or standalone JSON, with an experimental private-web backend described in
-[ChatGPT](mining-sources.md#chatgpt).
+The [`memcastle-openai`](https://github.com/memcastle/memcastle-openai) plugin owns the `codex` and `chatgpt` sources,
+including ChatGPT export ZIP and experimental web imports ([ChatGPT](mining-sources.md#chatgpt)).
 The OpenCode coding agent's session-history source lives in
 [`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode); it wraps `run-process` and is tested against a
 stand-in for the agent's CLI ([OpenCode](mining-sources.md#opencode)).
 The GitHub repository source lives in [`memcastle-github`](https://github.com/memcastle/memcastle-github) and retains
 its original `github` ID.
-The sources that ship with MemCastle's releases (`codex` and `chatgpt`)
-are built from here.
-They are bundled without being compiled into the binary.
-They use exactly the package contract a user installs; a release carries them unpacked, so they are installed from the
-start, and `memcastle source enable <name>` turns one on.
+Core currently bundles no WebAssembly sources; `sources/directory/` remains as the reference implementation of the
+same package contract that provider plugins use.
 
 ## Testing your source in CI
 

@@ -669,13 +669,11 @@ This is the one root for everything a package ships, in the same layout wherever
 | Under the root | What | Read by |
 |---|---|---|
 | `sources/<name>/` | the bundled mining sources, unpacked: a `memcastle-source.toml` and a `source.wasm` each | the daemon, which lists them as installed and runs them in place (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
-| `integrations/<id>/` | Core's Codex integration: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)); external provider modules live in plugin installations |
 | `skills/` | the shared agent skills | `memcastle integration`, which copies the ones an integration's manifest names into its installed copy |
 | `web/dist/` | the built [web UI](web.md) | the daemon, under `/ui`, when `web.enable` is set |
 
 A standalone binary has none (the dashboard is not built into it, so with `web.enable` it answers a page that says the
-files are missing), so you only need the setting to point at a package unpacked somewhere else, or at a
-checkout of the repository to install the integrations as built there.
+files are missing), so point the setting at a package or checkout only when it supplies assets you need.
 The bundled sources are taken from `<root>/sources` when a directory in it holds a `memcastle-source.toml` and a
 `source.wasm`, and `mining.bundled_dir` outranks that.
 A root with no such package, like a checkout (whose `sources/` holds projects, with their component under `dist/`),
@@ -772,7 +770,7 @@ Use a separate miner or run `memcastle mine claude --full` when a restored trans
 
 ### ChatGPT project miner
 
-The bundled `chatgpt` source can select projects on its experimental web backend using miner options.
+The external `chatgpt` source can select projects on its experimental web backend using miner options.
 Sign the source in with `memcastle source auth chatgpt` on the daemon's machine before running web miners.
 This source's desktop-compatible OAuth bearer was verified to read history without cookies using a browser-style
 User-Agent; the old manually supplied web session remains a fallback ([ChatGPT](mining-sources.md#chatgpt)).

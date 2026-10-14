@@ -18,7 +18,6 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package unpacked beside the binary (`codex`, `chatgpt`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
 | Provider plugin | A separately released archive (for example, `memcastle-pi` or `memcastle-github`). | `memcastle plugin install <id>`; enable each source separately. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
@@ -176,7 +175,7 @@ asks for: you agree to the permissions of what was actually fetched.
 
 **Updating** installs the newest version from the index a registry source was installed from.
 A source you installed from a file has no upstream and is left alone, and a bundled source is updated with MemCastle:
-`update` leaves it out, and `update codex` says so (`memcastle::source::bundled`).
+`update` leaves it out, and `update github` says so (`memcastle::source::bundled`).
 An update keeps the source's state.
 The consent you gave is to a set of permissions, not to a version, so an update that asks for the same permissions needs
 no new agreement, and one that asks for anything else is not installed until you agree to exactly those: the command says
@@ -226,27 +225,10 @@ on disk after install is never run.
 
 ## Bundled sources
 
-Releases ship `codex` and `chatgpt` unpacked,
-one directory each (`<name>/memcastle-source.toml`,
-`<name>/source.wasm`), under
-`share/memcastle/sources/`:
-in the release tarballs, as `/usr/share/memcastle/sources/` in the `.deb`, `.rpm` and AUR package, and under the formula's
-`share/memcastle/sources/` with Homebrew.
-The release also publishes them alone as `memcastle_<version>_sources.tar.gz`, which is what the AUR and Homebrew recipes
-fetch, since they install the raw binary asset and not a tarball.
-The daemon finds them beside the binary (the same search as other [runtime assets](configuration.md#runtime-assets)),
-or in `mining.bundled_dir`.
-
-They are installed from the start, and run from where the release put them:
-`memcastle source list` shows bundled sources as `bundled` and `installed`; enable a bundled source by its own name.
-The Claude Code history source is distributed instead through the `anthropic` plugin.
-Enabling is the consent: a bundled source is as trusted as the MemCastle that carries it, so it is not asked to be
-agreed to as an installed package is, and `memcastle source show codex` prints what it may read and run.
-They are not linked into the binary, and they cannot be installed again, updated or removed;
-only whether one is enabled is yours, and it survives an upgrade, which brings the new version of the source with it.
-A package file you install under the same name (`memcastle source install ./codex`) is read instead, and removing it brings
-the bundled one back.
-A standalone binary or a checkout carries none: install the official ones from the registry below.
+Core currently ships no bundled WebAssembly sources; `share/memcastle/sources/` is empty.
+The runtime can still load a bundle supplied through `mining.bundled_dir`, and its sources appear as `bundled` and
+`installed` until enabled by the user. The release packaging script writes the empty directory to prevent older source
+archives from remaining in an upgraded installation.
 
 The set is a line in `packaging/sources/build.sh`, which a release and `mise run sources:package` both run,
 and it does not constrain the runtime: any directory under `sources/` could be added.
@@ -255,8 +237,9 @@ and it does not constrain the runtime: any directory under `sources/` could be a
 The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
 installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
 and [Agent integrations](integrations.md)).
-The Claude Code, Pi, OpenCode and GitHub sources live in external `memcastle-anthropic`, `memcastle-pi`,
-`memcastle-opencode` and `memcastle-github` plugins; a source is separate from an agent integration.
+Claude Code, Pi, OpenCode, GitHub, Codex and ChatGPT sources live in the external `memcastle-anthropic`,
+`memcastle-pi`, `memcastle-opencode`, `memcastle-github` and `memcastle-openai` plugins;
+a source is separate from an agent integration.
 
 ## The official registry
 
