@@ -79,7 +79,7 @@ repository = "https://example.org/my-notes.git"  # optional: where the code is
 
 [compatibility]
 contract = "0.4"             # the WIT contract version it was built against
-memcastle = ">=0.2.0, <0.3.0"  # the MemCastle versions it runs on
+memcastle = ">=0.4.0, <0.5.0"  # this release line; change it when targeting another release
 
 [capabilities]               # the same three as a built-in adapter; all default to false
 incremental = true
