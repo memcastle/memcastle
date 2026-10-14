@@ -545,8 +545,9 @@ take and what is installed already, bundled sources included; a registry that ca
 hide the others.
 `install` takes a package file, a source project directory (it is built and packaged first), or a name,
 optionally pinned as `name@1.2.0`, resolved from the configured registries in order.
-A name the release already ships (such as `claude`) is installed from the start: `install` refuses it with
+If a release bundles a source, it is installed from the start: `install` refuses it with
 `memcastle::source::bundled`, and `memcastle source enable <NAME>` is what it needs.
+Core currently bundles none; for Claude Code install the Anthropic plugin before enabling `claude`.
 Write `./name` for a path that looks like a name.
 `--registry` consults only that location (a URL, or an absolute path) instead of the usual ones, and the trust policy
 still applies to what it serves.

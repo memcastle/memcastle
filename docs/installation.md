@@ -34,16 +34,13 @@ The daemon looks for assets in a fixed order: a directory you name with `--asset
 `share/memcastle`, then what is built in.
 See [Runtime assets](configuration.md#runtime-assets) for the rule, and
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) for why.
-One package asset is the set of sources that ship with MemCastle, under `share/memcastle/sources/`
-(see [Publishing and installing sources](publishing-sources.md#bundled-sources)): the release tarballs, the `.deb` and
-`.rpm`, the AUR package and the Homebrew formula carry them, unpacked and installed from the start, and a standalone binary
-does not, so it installs a source from a file or from the official registry instead.
-The other package assets are the agent integrations and the skills they expose, under `share/memcastle/integrations/` and
-`share/memcastle/skills/`.
+Core's packaged `share/memcastle/sources/` and `share/memcastle/integrations/` are empty:
+sources and agent integrations come from separately installed [provider plugins](plugins.md).
+Package assets include the shared skills under `share/memcastle/skills/`.
+The standalone binary has no accompanying asset directory; install a provider plugin or supply assets separately.
 `memcastle plugin install anthropic` makes the Claude Code integration available;
 `memcastle integration install claude-code` copies it to your home and registers it with the agent
 (see [Agent integrations](integrations.md)).
-Core release packages carry the Codex integration and shared skills, while provider plugins are installed separately.
 The last package asset is the [web UI](web.md), under `share/memcastle/web/dist/`, which the daemon serves only when
 you set `web.enable`.
 
@@ -55,9 +52,8 @@ you set `web.enable`.
 brew install noirbizarre/homebrew-tap/memcastle
 ```
 
-The formula ships macOS builds only (Apple silicon and Intel), the sources bundled with MemCastle under its
-`share/memcastle/sources/`, and the Codex integration under
-`share/memcastle/integrations/`; the Claude Code integration is independently released as the Anthropic plugin.
+The formula ships macOS builds only (Apple silicon and Intel), shared skills and the web UI.
+Core's source and agent-integration directories are empty; install a provider plugin for Codex or Claude Code.
 Install the [OpenCode provider plugin](integrations-opencode.md#install-update-remove) separately.
 On Linux, use one of the other methods, including under Linuxbrew.
 
@@ -70,8 +66,8 @@ paru -S memcastle-bin   # or your AUR helper of choice
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
 a systemd user unit, `/usr/lib/systemd/user/memcastle.service`,
 the bash, zsh and fish completion scripts,
-the sources bundled with MemCastle under `/usr/share/memcastle/sources/`,
-and the agent integrations and skills under `/usr/share/memcastle/integrations/` and `/usr/share/memcastle/skills/`.
+empty source and agent-integration directories under `/usr/share/memcastle/`,
+and the shared skills under `/usr/share/memcastle/skills/`.
 
 The package owns only those files and its licence under `/usr`.
 Your configuration (`~/.config/memcastle`), palace (`~/.local/share/memcastle`) and state (`~/.local/state/memcastle`)
@@ -106,9 +102,9 @@ sudo dnf install ./memcastle_<version>_linux-amd64.rpm
 ```
 
 They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`,
-the bash, zsh and fish completion scripts, `/usr/share/doc/memcastle/`, the bundled sources under
-`/usr/share/memcastle/sources/` and the agent integrations and skills under `/usr/share/memcastle/integrations/` and
-`/usr/share/memcastle/skills/`, and nothing under your XDG directories,
+the bash, zsh and fish completion scripts, `/usr/share/doc/memcastle/`, empty source and integration directories
+under `/usr/share/memcastle/`, the shared skills under `/usr/share/memcastle/skills/`,
+and nothing under your XDG directories,
 so removing the package leaves your configuration and palace alone.
 The unit is used as on Arch: `systemctl --user start memcastle`, as described in [Arch Linux](#arch-linux-aur).
 The package does not enable or start it.
@@ -156,8 +152,8 @@ Unpack it at a prefix to install it in the same places a package would:
 sudo tar -xzf memcastle_*_linux-amd64.tar.gz --strip-components=1 -C /usr/local
 ```
 
-The tarball carries the bundled sources, the agent integrations, the skills and the web UI under
-`share/memcastle/`, which are package assets.
+The tarball carries shared skills and the web UI under `share/memcastle/`;
+its source and agent-integration directories are empty, and provider plugins are installed separately.
 Do not unpack it at `~/.local`: that would put the package's assets inside your data directory,
 which MemCastle ignores as an asset location on purpose.
 Use `/usr/local`, or a directory of your own together with `--assets-dir`.
