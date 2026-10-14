@@ -1,10 +1,10 @@
 # Agent integrations
 
-An integration is the glue that makes a coding agent use MemCastle on its own:
-it loads the wake-up context when a session starts, reminds the model to search before it answers,
-and writes checkpoints as the conversation goes.
+An integration is the glue that helps a coding agent use MemCastle at the lifecycle points the agent exposes.
+Pi and OpenCode can load wake-up context and write automatic checkpoints;
+Claude Code and Codex have [documented gaps](integration-contract.md#documenting-a-gap) and manual fallbacks.
 It decides *when* to call MemCastle and does nothing else; every call goes to the daemon over MCP and HTTP.
-What each integration must do is the [Integration contract](integration-contract.md).
+The [Integration contract](integration-contract.md) specifies full lifecycle conformance.
 This page is about getting one onto your machine.
 
 Pi, OpenCode, Claude Code and Codex integrations are independently distributed provider plugins.

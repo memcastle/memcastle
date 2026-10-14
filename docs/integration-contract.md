@@ -1,7 +1,11 @@
 # Integration contract
 
-An integration is the glue that makes one agent (Pi, OpenCode, or Claude Code) use MemCastle at the right moments.
-This page is the contract every integration satisfies, and the checklist for writing a new one.
+An integration is the glue that makes one agent use MemCastle at the right moments.
+This page is the full lifecycle contract for clients with the required hooks, such as Pi and OpenCode,
+and the checklist for writing a new full lifecycle integration.
+Claude Code and Codex also have integrations, but their unsupported lifecycle hooks are documented in their
+[Claude Code](integrations-claude-code.md) and [Codex](integrations-codex.md) guides;
+they do not claim full conformance to the matrix below.
 It exists so that a capability is implemented once, in MemCastle, and each client is then validated against the same
 expectations instead of rediscovering the architecture.
 
@@ -49,7 +53,8 @@ If a client has no hook for something, the gap is documented, not faked (see [Do
 Each row is one capability.
 The first column is a stable id, and `tests/fixtures/integration/capabilities.json` lists the same ids,
 so the daemon test fails if this table and the fixtures disagree.
-A gap is allowed only where the last column says so, and then it must be documented.
+A full lifecycle integration may have a gap only where the last column says so, and then it must be documented.
+The fixtures prove the daemon's operations, not that every agent exposes every lifecycle hook.
 
 | Capability | MemCastle operation | Client responsibility | Gap allowed |
 | --- | --- | --- | --- |
@@ -346,16 +351,17 @@ only after a repair was applied.
 ## Documenting a gap
 
 A client may lack the lifecycle point a capability needs, and the rule is to say so, never to fake it.
-Each integration's README records every gap in the same three lines:
+Each integration's guide records every gap by explaining:
 
 - **Missing**: the lifecycle point or mechanism the client does not expose.
 - **Fallback**: what the user can do instead, such as a manual command.
 - **Effect**: what the user loses compared with a client that has it.
 
-Only the capabilities marked as allowing a gap may have one.
+Only the capabilities marked as allowing a gap may have one in a fully conforming lifecycle integration.
 A gap in `session-mode`, `wake-up`, `recall`, `checkpoint`, `persistent-session`, `skills`, `project-context` or
 `failure-reporting` means
-the integration does not conform yet.
+the integration does not meet the full lifecycle contract yet.
+Claude Code and Codex document their unavailable hooks and manual fallbacks rather than claiming to meet this contract.
 
 Tool names can differ by client without being a gap.
 OpenCode's native MCP client prefixes each tool with the server name, so the tools appear there as `memcastle_memcastle_search`;
