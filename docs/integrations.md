@@ -296,7 +296,7 @@ Adding an agent is a new adapter and a new `kind`; the manifest format does not 
   The wake-up, search-before-answer and checkpoint instructions are the [skills](skills.md) of the release.
   An integration names the ones it exposes, and they are installed inside its copy, so they are the ones written for this
   MemCastle version and no separate skill installation is needed.
-  Both shipped integrations expose all five, and the agent lists them itself.
+  The Pi and OpenCode provider integrations expose all five, and their agents list them themselves.
 - **Mining sources.**
   `memcastle-pi` and `memcastle-opencode` have WebAssembly source modules that mine agent session history
   ([Mining sources](mining-sources.md)).
