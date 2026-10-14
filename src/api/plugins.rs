@@ -21,13 +21,13 @@ pub(super) struct SearchQuery {
 pub(super) async fn search(
     State(state): State<ApiState>,
     ApiQuery(query): ApiQuery<SearchQuery>,
-) -> impl IntoResponse {
-    Json(
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
         state
             .app
             .search_plugins(&query.q, query.registry.as_deref())
-            .await,
-    )
+            .await?,
+    ))
 }
 
 #[derive(Deserialize)]

@@ -465,6 +465,8 @@ memcastle plugin sign <ARCHIVE> --key <KEYFILE>
 ```
 
 `--adopt-source SOURCE` is accepted by every `plugin install` form shown above.
+`plugin search --registry LOCATION` searches only that catalogue and reports an error if it cannot be read;
+without `--registry`, an unavailable catalogue is a warning so the others can still be searched.
 
 The daemon resolves a named plugin from `plugins.registries` and checks its archive digest, module inventory and
 compatibility before any code becomes available.

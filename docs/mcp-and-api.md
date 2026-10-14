@@ -232,7 +232,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/plugins` | Install or update an entire validated plugin archive without activating its modules. | archive bytes (at most 64 MiB); `X-MemCastle-Consents` JSON map of source IDs to reviewed permission digests; `X-MemCastle-Adopt-Sources` JSON list of explicitly adopted legacy source IDs |
 | `GET /api/plugins/{id}` | Show one installed plugin, including its module inventory. | none |
 | `DELETE /api/plugins/{id}` | Uninstall a plugin only after its sources, integrations, miners, jobs and dependents are no longer active. Mined data stays. | none |
-| `GET /api/plugin-registry/search` | Search the configured plugin catalogues without installing code. | query string: `q` |
+| `GET /api/plugin-registry/search` | Search plugin catalogues without installing code; `registry` selects only one and an unreadable selection returns an error, while failures among configured catalogues are warnings. | query string: `q`, `registry?` |
 | `GET /api/plugin-registry/plugins/{id}` | Fetch and verify a release, returning module-specific permission digests without installing it. | query string: `version?`, `registry?` |
 | `POST /api/plugin-registry/install` | Fetch, verify and install the selected plugin; modules remain inactive. | JSON body: `id`, `version?`, `registry?`, `consents?` (module ID to digest), `adopt_sources?` (explicit legacy IDs), `archive_digest?` (from preview) |
 | `POST /api/plugins/preview` | Validate a plugin `.tar.gz` and show per-source consent digests and legacy source IDs needing explicit adoption, without installing it. | archive bytes (at most 64 MiB) |
