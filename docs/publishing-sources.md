@@ -18,7 +18,7 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package unpacked beside the binary (`claude`, `codex`, `chatgpt`, `github`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
+| Bundled | An ordinary package unpacked beside the binary (`codex`, `chatgpt`, `github`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
 | Provider plugin | A separately released multi-module archive (for example, `memcastle-pi`). | `memcastle plugin install <archive>`; enable each source separately. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
@@ -159,10 +159,10 @@ registries = ["https://example.org/memcastle/memcastle-index.json"]
 ## Installing, searching and updating
 
 ```sh
-memcastle source search claude                  # what the registries offer
-memcastle source install claude                 # newest version that runs here, after you agree to its permissions
-memcastle source install claude@1.1.0 --enable
-memcastle source install ./claude-1.2.0.tar.gz  # a file: no registry involved
+memcastle source search codex                   # what the default registry offers
+memcastle source install codex                  # newest version that runs here, after you agree to its permissions
+memcastle source install codex@1.1.0 --enable   # if that version is published
+memcastle source install ./example-1.2.0.tar.gz # a file: no registry involved
 memcastle source install ./my-source            # a project directory: built, packaged, then installed
 memcastle source update --check                 # which installed sources have a newer version
 memcastle source update                         # update them
@@ -176,7 +176,7 @@ asks for: you agree to the permissions of what was actually fetched.
 
 **Updating** installs the newest version from the index a registry source was installed from.
 A source you installed from a file has no upstream and is left alone, and a bundled source is updated with MemCastle:
-`update` leaves it out, and `update pi` says so (`memcastle::source::bundled`).
+`update` leaves it out, and `update codex` says so (`memcastle::source::bundled`).
 An update keeps the source's state.
 The consent you gave is to a set of permissions, not to a version, so an update that asks for the same permissions needs
 no new agreement, and one that asks for anything else is not installed until you agree to exactly those: the command says
@@ -186,8 +186,8 @@ A source cannot widen its own reach by being updated.
 **Offline.** A registry that is a directory needs no network, and a package file installs with none either:
 
 ```sh
-memcastle source install ./claude-1.2.0.tar.gz --yes
-memcastle source install claude --registry /mnt/usb/sources
+memcastle source install ./example-1.2.0.tar.gz --yes
+memcastle source install codex --registry /mnt/usb/sources
 ```
 
 **Removing** a source deletes its files and its record; what it mined stays in the palace.
@@ -226,7 +226,7 @@ on disk after install is never run.
 
 ## Bundled sources
 
-Releases ship `claude`, `codex`, `chatgpt` and `github` unpacked,
+Releases ship `codex`, `chatgpt` and `github` unpacked,
 one directory each (`<name>/memcastle-source.toml`,
 `<name>/source.wasm`), under
 `share/memcastle/sources/`:
@@ -238,12 +238,13 @@ The daemon finds them beside the binary (the same search as other [runtime asset
 or in `mining.bundled_dir`.
 
 They are installed from the start, and run from where the release put them:
-`memcastle source list` shows them as `bundled` and `installed`, and `memcastle source enable claude` is all they need.
+`memcastle source list` shows bundled sources as `bundled` and `installed`; enable a bundled source by its own name.
+The Claude Code history source is distributed instead through the `anthropic` plugin.
 Enabling is the consent: a bundled source is as trusted as the MemCastle that carries it, so it is not asked to be
-agreed to as an installed package is, and `memcastle source show claude` prints what it may read and run.
+agreed to as an installed package is, and `memcastle source show codex` prints what it may read and run.
 They are not linked into the binary, and they cannot be installed again, updated or removed;
 only whether one is enabled is yours, and it survives an upgrade, which brings the new version of the source with it.
-A package file you install under the same name (`memcastle source install ./claude`) is read instead, and removing it brings
+A package file you install under the same name (`memcastle source install ./codex`) is read instead, and removing it brings
 the bundled one back.
 A standalone binary or a checkout carries none: install the official ones from the registry below.
 
@@ -254,24 +255,23 @@ and it does not constrain the runtime: any directory under `sources/` could be a
 The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
 installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
 and [Agent integrations](integrations.md)).
-The `claude` source here mines agent session history; it is not an integration that runs
-inside an agent.
-The Pi and OpenCode sources live in the external `memcastle-pi` and `memcastle-opencode` plugins.
+The Claude Code, Pi and OpenCode sources live in external `memcastle-anthropic`, `memcastle-pi` and
+`memcastle-opencode` plugins; a source is separate from an agent integration.
 
 ## The official registry
 
 The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/memcastle/memcastle/blob/main/docs/registry.json),
 published at `https://memcastle.github.io/registry.json` from the root of the documentation site's `gh-pages` branch.
 It lists no versions: it names the GitHub repository that publishes each legacy source archive, and the daemon reads
-its releases. Pi and OpenCode are in the separate [`plugins.json`](plugins.md) catalogue.
+its releases. Claude Code, Pi and OpenCode are in the separate [`plugins.json`](plugins.md) catalogue.
 Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
 any documentation change, and publishing a new version is a release of the source's own repository: no new release of
 MemCastle and no change to the registry.
 It is the default value of `mining.registries`, so on any installation:
 
 ```sh
-memcastle source search          # lists claude and the other Core-shipped sources
-memcastle source install claude  # on a build with no bundle: after you agree to its permissions
+memcastle source search          # lists the Core-shipped sources
+memcastle source install codex   # on a build with no bundle: after you agree to its permissions
 ```
 
 Nothing is fetched until you run one of those commands, and a package from it is checked against its SHA-256 and your

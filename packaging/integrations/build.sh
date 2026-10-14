@@ -24,14 +24,9 @@ out="${1:-}"
 
 # Which integrations ship is a packaging decision and does not constrain the runtime (docs/adr/034): any directory
 # under `integrations/` with a `memcastle-integration.toml` and a `dist/` could be added here.
-BUNDLED=(claude-code codex)
+BUNDLED=(codex)
 
 cd "$(dirname "$0")/../.."
-# Claude Code loads declarative plugin assets itself, so no JavaScript runtime is bundled.
-rm -rf integrations/claude-code/dist
-mkdir -p integrations/claude-code/dist
-cp -R integrations/claude-code/plugin/. integrations/claude-code/dist/
-
 # Codex loads declarative marketplace assets itself, so no JavaScript runtime is bundled.
 rm -rf integrations/codex/dist
 mkdir -p integrations/codex/dist

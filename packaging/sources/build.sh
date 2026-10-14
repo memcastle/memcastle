@@ -28,7 +28,7 @@ out="$2"
 
 # Which sources ship is a packaging decision and does not constrain the runtime (docs/adr/033): any directory under
 # `sources/` could be added here. `directory` is the worked example of the built-in source and is not bundled.
-BUNDLED=(claude codex chatgpt github)
+BUNDLED=(codex chatgpt github)
 
 cd "$(dirname "$0")/../.."
 mkdir -p "${out}"

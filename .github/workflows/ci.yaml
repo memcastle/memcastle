@@ -393,8 +393,8 @@ jobs:
           printf '\0asm' > bundle/demo/source.wasm
           # Likewise for the integrations (packaging/integrations/build.sh builds the real ones, which
           # tests/integration_bundle.rs checks): the layout is what the packages must carry.
-          mkdir -p integrations-bundle/integrations/claude-code integrations-bundle/skills/wake-up
-          echo 'format = 1' > integrations-bundle/integrations/claude-code/memcastle-integration.toml
+          mkdir -p integrations-bundle/integrations/codex integrations-bundle/skills/wake-up
+          echo 'format = 1' > integrations-bundle/integrations/codex/memcastle-integration.toml
           echo '# wake' > integrations-bundle/skills/wake-up/SKILL.md
           # And for the dashboard (packaging/web/build.sh builds the real one, which tests/web_bundle.rs checks).
           mkdir -p web-bundle/web/dist/assets
@@ -416,7 +416,7 @@ jobs:
                         usr/share/zsh/site-functions/_memcastle \
                         usr/share/fish/vendor_completions.d/memcastle.fish \
                         usr/share/memcastle/sources/demo/source.wasm \
-                        usr/share/memcastle/integrations/claude-code/memcastle-integration.toml \
+                        usr/share/memcastle/integrations/codex/memcastle-integration.toml \
                         usr/share/memcastle/skills/wake-up/SKILL.md \
                         usr/share/memcastle/web/dist/index.html; do
               grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }

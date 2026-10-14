@@ -168,7 +168,7 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `directory` | built in | the text files under a directory | modification time | no | no |
 | `pi` | external `memcastle-pi` plugin | Pi coding-agent session history | modification time | yes | no |
 | `opencode` | external `memcastle-opencode` plugin | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
-| `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
+| `claude` | external `memcastle-anthropic` plugin | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
 | `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
 | `github` | bundled package, `sources/github/` | selected repositories, issues, PRs and wiki revisions | API updates / Git history | yes | optional `GH_TOKEN` or `GITHUB_TOKEN` |
@@ -179,7 +179,7 @@ The in-tree ones are built from their directories in the repository and shipped 
 (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start.
 `memcastle source enable <name>` is all one needs for a bundled source, with no registry and no network.
-Install the external Pi or OpenCode plugin before enabling its source.
+Install the external Pi, OpenCode or Anthropic plugin before enabling its source.
 No Pi, OpenCode, Claude Code, Codex, ChatGPT or GitHub acquisition code is part of the core.
 They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
@@ -271,18 +271,23 @@ It works on sessions of any age and with no Claude Code process running.
 It is history mining only: it does not read Claude Code settings, credentials, prompt history or debug logs, and it is not
 the live Claude Code MCP client.
 
-It ships with your MemCastle and is installed already:
+Install the independently released Anthropic plugin, then enable the source:
 
 ```sh
+memcastle plugin install anthropic
 memcastle source enable claude
 memcastle mine claude
 ```
 
-A checkout has no unpacked bundle, so install from the official registry or the project directory:
+A previously mined `claude` source retains its cursor and drawers after removing its old package record.
+After moving off the old Core bundle, preview the Anthropic archive and use `memcastle plugin install` with
+`--adopt-source claude` and the requested consent digest before enabling it again.
+The source identity and the `since`/`dir` option names are unchanged.
+For local plugin development, install the built archive rather than a Core source directory:
 
 ```sh
-memcastle source install claude --enable
-# or: memcastle source install sources/claude --enable
+memcastle plugin install /path/to/memcastle-anthropic/dist/anthropic-0.1.0.tar.gz
+memcastle source enable claude
 ```
 
 It asks for read-only access to the locator and `~/.claude/projects`, and `HOME` only to find the latter when no locator

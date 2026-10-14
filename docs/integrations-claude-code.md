@@ -1,7 +1,9 @@
 # Claude Code integration
 
-`memcastle integration install claude-code` installs the shipped Claude Code plugin through a uniquely named local
-marketplace.
+Install the [standalone Anthropic plugin](plugins.md) with `memcastle plugin install anthropic` first.
+Then `memcastle integration install claude-code` registers its agent module through the existing `memcastle-local`
+marketplace. Existing agent installations retain the same plugin ID `memcastle@memcastle-local`;
+use `memcastle integration update claude-code` to refresh them from the external release.
 It uses Claude Code's plugin and native HTTP MCP mechanisms, not direct edits to Claude settings.
 
 The plugin exposes the shared MemCastle skills, native MCP tools, session-start and prompt reminders, and

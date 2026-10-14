@@ -42,7 +42,7 @@ fn default_bundle() -> tempfile::TempDir {
 
 /// Check release contents in the same test process that enables them, so packaging four components is done once.
 fn assert_release_contents(out: &Path) {
-    for name in ["claude", "codex", "chatgpt", "github"] {
+    for name in ["codex", "chatgpt", "github"] {
         let package = out.join("sources").join(name);
         assert!(package.join("memcastle-source.toml").is_file(), "{name}");
         assert!(package.join("source.wasm").is_file(), "{name}");
@@ -92,7 +92,7 @@ async fn the_bundled_sources_are_installed_from_the_start_and_only_need_enabling
         .json()
         .await
         .unwrap();
-    for name in ["claude", "codex", "chatgpt", "github"] {
+    for name in ["codex", "chatgpt", "github"] {
         let source = listed["adapters"]
             .as_array()
             .unwrap()
@@ -142,7 +142,7 @@ async fn the_bundled_sources_are_installed_from_the_start_and_only_need_enabling
 
     // Turning one off is the user's, and sticks.
     let disabled: Value = client
-        .post(url("/api/source-packages/claude/disable"))
+        .post(url("/api/source-packages/codex/disable"))
         .send()
         .await
         .unwrap()

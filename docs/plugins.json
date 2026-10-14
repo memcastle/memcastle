@@ -3,6 +3,15 @@
   "name": "MemCastle plugins",
   "plugins": [
     {
+      "id": "anthropic",
+      "description": "Claude Code session history and lifecycle integration",
+      "repository": "memcastle/memcastle-anthropic",
+      "modules": [
+        { "id": "claude", "type": "source" },
+        { "id": "claude-code", "type": "integration" }
+      ]
+    },
+    {
       "id": "pi",
       "description": "Pi coding-agent history and lifecycle integration",
       "repository": "memcastle/memcastle-pi",

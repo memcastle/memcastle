@@ -709,9 +709,10 @@ memcastle integration update <AGENT> [--assets-dir <DIR>]
 memcastle integration remove <AGENT>
 ```
 
-Install, update and remove integrations for coding agents: Core ships `claude-code` and `codex`;
-`pi` and `opencode` are available after installing their external
-[`memcastle-pi`](integrations-pi.md) and [`memcastle-opencode`](integrations-opencode.md) plugins.
+Install, update and remove integrations for coding agents: Core ships `codex`;
+`pi`, `opencode` and `claude-code` are available after installing their external
+[`memcastle-pi`](integrations-pi.md), [`memcastle-opencode`](integrations-opencode.md) and
+[`memcastle-anthropic`](integrations-claude-code.md) plugins.
 [Integrations](integrations.md) is the guide; this is the reference.
 
 All four are **local**: they read files and run the agent's own command, need no daemon, no palace and no network, and are

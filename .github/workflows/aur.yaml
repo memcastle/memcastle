@@ -145,10 +145,10 @@ jobs:
           pacman -U --noconfirm ./*.pkg.tar.zst
           memcastle --version
           # The bundled sources must land where the daemon looks for them, unpacked, one directory each.
-          test -f /usr/share/memcastle/sources/claude/source.wasm
-          test -f /usr/share/memcastle/sources/claude/memcastle-source.toml
+          test -f /usr/share/memcastle/sources/codex/source.wasm
+          test -f /usr/share/memcastle/sources/codex/memcastle-source.toml
           # The integrations must land there too, and be found from the binary's own prefix with no flag.
-          test -f /usr/share/memcastle/integrations/claude-code/memcastle-integration.toml
+          test -f /usr/share/memcastle/integrations/codex/memcastle-integration.toml
           test -f /usr/share/memcastle/skills/wake-up/SKILL.md
           # And the dashboard, at the path a checkout has too.
           test -f /usr/share/memcastle/web/dist/index.html

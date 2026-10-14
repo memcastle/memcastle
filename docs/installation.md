@@ -40,9 +40,10 @@ One package asset is the set of sources that ship with MemCastle, under `share/m
 does not, so it installs a source from a file or from the official registry instead.
 The other package assets are the agent integrations and the skills they expose, under `share/memcastle/integrations/` and
 `share/memcastle/skills/`.
-`memcastle integration install claude-code` copies one to your home and registers it with the agent
+`memcastle plugin install anthropic` makes the Claude Code integration available;
+`memcastle integration install claude-code` copies it to your home and registers it with the agent
 (see [Agent integrations](integrations.md)).
-The same release packages carry them, and a standalone binary does not.
+Core release packages carry the Codex integration and shared skills, while provider plugins are installed separately.
 The last package asset is the [web UI](web.md), under `share/memcastle/web/dist/`, which the daemon serves only when
 you set `web.enable`.
 
@@ -55,8 +56,8 @@ brew install noirbizarre/homebrew-tap/memcastle
 ```
 
 The formula ships macOS builds only (Apple silicon and Intel), the sources bundled with MemCastle under its
-`share/memcastle/sources/`, so `memcastle source enable claude` works with no registry, and the agent integrations under
-`share/memcastle/integrations/`, so `memcastle integration install claude-code` works without any other download.
+`share/memcastle/sources/`, and the Codex integration under
+`share/memcastle/integrations/`; the Claude Code integration is independently released as the Anthropic plugin.
 Install the [OpenCode provider plugin](integrations-opencode.md#install-update-remove) separately.
 On Linux, use one of the other methods, including under Linuxbrew.
 
@@ -69,8 +70,7 @@ paru -S memcastle-bin   # or your AUR helper of choice
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
 a systemd user unit, `/usr/lib/systemd/user/memcastle.service`,
 the bash, zsh and fish completion scripts,
-the sources bundled with MemCastle under `/usr/share/memcastle/sources/`, so `memcastle source enable claude` works
-with no registry,
+the sources bundled with MemCastle under `/usr/share/memcastle/sources/`,
 and the agent integrations and skills under `/usr/share/memcastle/integrations/` and `/usr/share/memcastle/skills/`.
 
 The package owns only those files and its licence under `/usr`.

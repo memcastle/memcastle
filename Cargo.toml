@@ -98,11 +98,6 @@ slow-tests = []
 provider-tests = []
 
 [[test]]
-name = "source_claude"
-path = "sources/claude/core-tests.rs"
-required-features = ["provider-tests"]
-
-[[test]]
 name = "source_chatgpt"
 path = "sources/chatgpt/core-tests.rs"
 required-features = ["provider-tests"]

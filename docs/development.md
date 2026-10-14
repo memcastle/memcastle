@@ -91,7 +91,7 @@ They apply to `mise run`, to `mise cli` and to any shell with [mise activated](h
 once you are in the project directory, so `mise cli serve` already serves the dashboard from `web/dist` (after
 `mise run web:build`) and finds the integrations and sources of the checkout, with no flag.
 Because the variables follow the shell, **any `memcastle` you run from the project directory uses them, including an
-installed one**: `memcastle integration install claude-code` there installs the assets prepared in the checkout
+installed one**: `memcastle integration install codex` there installs the assets prepared in the checkout
 (`mise run integrations:build`) and not the package's.
 Run it from another directory, or `env -u MEMCASTLE_ASSETS_DIR memcastle ...`, to use the installed assets.
 A flag still wins over the variable (`--assets-dir`), and your own `mise.local.toml` can override or drop either.
