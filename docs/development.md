@@ -245,9 +245,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     stand-in for the API, with a digest that does not match and a repository that cannot be read), an unreadable
     registry, and the CLI publishing, signing, searching, installing and updating (in-process and subprocess,
     WebAssembly suite, using the synthetic Core mock source).
-  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the release script, packaging Core-shipped sources as an
-    unpacked bundle and as `<name>-<version>.tar.gz` archives, and a daemon that lists it as installed and enables it
-    with no consent (WebAssembly suite, Unix only).
+  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh` removes stale bundled components and archives from the
+    now-empty Core source package tree (WebAssembly suite, Unix only).
   - `tests/wasm_runtime.rs`, `tests/wasm_plugin.rs` — installable mock sources against a real daemon: consent, independent
     module lifecycles, mining through the shared pipeline, retained data, and refusing a component altered on disk
     (in-process, WebAssembly suite).

@@ -29,7 +29,12 @@ fn the_release_script_removes_stale_bundled_sources_and_archives() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(
-        out.path().join("sources").read_dir().unwrap().next().is_none(),
+        out.path()
+            .join("sources")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_none(),
         "provider-owned components must not ship with Core"
     );
     assert!(

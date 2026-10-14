@@ -173,8 +173,8 @@ An invariant nothing checks is a comment, and it will be violated.
     skips them, and the bundle is read from disk and nothing else) and by
     `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
     trusted key signed, an update never widens permissions silently, a registry never installs, updates or replaces a
-    bundled source), `tests/wasm_bundle.rs` (the release script's bundle is listed as installed and enabled without
-    consent) and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
+    bundled source), `tests/wasm_bundle.rs` (the release script removes stale sources from Core's empty bundle)
+    and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
     kept anywhere but the credential store).
 
 11. **The web UI is a client of the REST API and nothing else, and it is opt-in** —
