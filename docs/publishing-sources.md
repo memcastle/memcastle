@@ -158,9 +158,9 @@ registries = ["https://example.org/memcastle/memcastle-index.json"]
 ## Installing, searching and updating
 
 ```sh
-memcastle source search codex                   # what the default registry offers
-memcastle source install codex                  # newest version that runs here, after you agree to its permissions
-memcastle source install codex@1.1.0 --enable   # if that version is published
+memcastle source search my-notes                # example source in a configured legacy registry
+memcastle source install my-notes               # newest compatible version, after reviewing permissions
+memcastle source install my-notes@1.1.0 --enable # if that version is published
 memcastle source install ./example-1.2.0.tar.gz # a file: no registry involved
 memcastle source install ./my-source            # a project directory: built, packaged, then installed
 memcastle source update --check                 # which installed sources have a newer version
@@ -243,23 +243,27 @@ a source is separate from an agent integration.
 
 ## The official registry
 
-The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/memcastle/memcastle/blob/main/docs/registry.json),
+The official legacy source registry is a static file in this repository,
+[`docs/registry.json`](https://github.com/memcastle/memcastle/blob/main/docs/registry.json),
 published at `https://memcastle.github.io/registry.json` from the root of the documentation site's `gh-pages` branch.
 It lists no versions: it names the GitHub repository that publishes each legacy source archive, and the daemon reads
 its releases. Claude Code, Pi, OpenCode and GitHub are in the separate [`plugins.json`](plugins.md) catalogue.
 Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
 any documentation change, and publishing a new version is a release of the source's own repository: no new release of
 MemCastle and no change to the registry.
-It is the default value of `mining.registries`, so on any installation:
+It is the default value of `mining.registries`, but currently lists no sources.
+Codex is distributed in the separate OpenAI plugin, not in this legacy registry:
 
 ```sh
-memcastle source search          # lists the Core-shipped sources
-memcastle source install codex   # on a build with no bundle: after you agree to its permissions
+memcastle plugin install /path/to/openai-0.1.0.tar.gz \
+  --consent codex=CODEX_DIGEST --consent chatgpt=CHATGPT_DIGEST
+memcastle source enable codex
 ```
 
-Nothing is fetched until you run one of those commands, and a package from it is checked against its SHA-256 and your
-`mining.trust` policy like any other registry's.
-The official packages are not signed yet, so `trust = "required"` refuses them.
+See [Codex mining](mining-sources.md#codex) for the plugin's release and consent details.
+
+Nothing is fetched from a legacy registry until you run `source search`, `source install` or `source update` against it.
+A package from one is checked against its SHA-256 and your `mining.trust` policy like any other registry's.
 Set `mining.registries` to use other registries instead of it, or to `[]` to use none.
 For the 0.4.0-to-0.4.1 move from the old Pages URL, see [Upgrading MemCastle](migrations.md#the-041-registry-move).
 

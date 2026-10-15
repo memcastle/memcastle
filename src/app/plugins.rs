@@ -780,7 +780,11 @@ impl AppServices {
         Ok(record)
     }
     /// Search explicitly configured plugin registries without installing anything.
-    pub async fn search_plugins(&self, query: &str, only: Option<&str>) -> PluginSearch {
+    ///
+    /// # Errors
+    ///
+    /// The chosen catalogue could not be read; failures among configured catalogues remain warnings.
+    pub async fn search_plugins(&self, query: &str, only: Option<&str>) -> Result<PluginSearch> {
         let mut plugins = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut warnings = Vec::new();
@@ -807,10 +811,11 @@ impl AppServices {
                         }
                     }
                 }
+                Err(error) if only.is_some() => return Err(error),
                 Err(error) => warnings.push(format!("{location}: {error}")),
             }
         }
-        PluginSearch { plugins, warnings }
+        Ok(PluginSearch { plugins, warnings })
     }
     /// List installed plugin packages, distinct from the enabled source list.
     ///

@@ -106,7 +106,7 @@ A client with a MemCastle integration loads the skills for you.
 An integration names the skills it exposes in its manifest, and the shared ones are referenced by name:
 under [`integrations/`](https://github.com/memcastle/memcastle/tree/main/integrations) none carries its own copy of the
 text.
-Both shipped integrations expose all five, in every memory mode but `off`, which exposes none.
+The Pi and OpenCode provider integrations expose all five, in every memory mode but `off`, which exposes none.
 Pi lists them through its own skill discovery, so each has a `/skill:<name>` command, and appends
 `search-before-answer` to the system prompt on every turn.
 OpenCode lists the skills through its own `skill` tool, from `skills/` where they are, and re-states

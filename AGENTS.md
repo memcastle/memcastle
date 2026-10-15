@@ -103,7 +103,8 @@ An invariant nothing checks is a comment, and it will be violated.
    and by `tests/auth_lifecycle.rs` (no token in the log or any file).
 8. **An integration is lifecycle glue over MCP and HTTP, and nothing else** —
    everything under `integrations/` decides *when* to call MemCastle and never reaches storage, the job code or the
-   database admin endpoint, and every integration satisfies the same conformance matrix
+   database admin endpoint; full lifecycle integrations satisfy the same conformance matrix, while limited clients
+   document unsupported lifecycle hooks and manual fallbacks
    (`docs/integration-contract.md`, `docs/adr/019-shared-integration-contract.md`).
    Client lifecycle logic does not move into MemCastle to make two clients look alike.
    Enforced by the prek `integrations-http-only` hook: it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a

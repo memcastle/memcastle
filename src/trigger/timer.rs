@@ -52,12 +52,9 @@ pub(super) async fn run<H: Host>(
     let mut due = match state.as_ref().and_then(|s| s.next_due) {
         Some(due) => due,
         None => {
-            let due = next_due(
-                every,
-                at,
-                state.as_ref().and_then(|s| s.last_fired_at),
-                Utc::now(),
-            );
+            // A missing due time means this timetable was switched off, even when an older run is retained for display.
+            // A normal restart keeps next_due, so only a fresh activation starts a fresh wait.
+            let due = next_due(every, at, None, Utc::now());
             host.note(&name, Note::NextDue(Some(due))).await;
             due
         }
@@ -159,6 +156,37 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         assert!(host.fires().is_empty(), "enabling never fires on the spot");
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
+
+    #[tokio::test]
+    async fn a_reenabled_timer_waits_again_even_if_its_last_run_is_overdue() {
+        let host = FakeHost::default();
+        let mut state = TriggerState::new("t");
+        state.last_fired_at = Some(Utc::now() - Span::days(3));
+        host.set_state(state);
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn(run(
+            host.clone(),
+            "t".to_string(),
+            TriggerMechanism::Schedule,
+            timetable(Duration::from_secs(3600), None),
+            cancel.clone(),
+        ));
+
+        eventually("the new wait to be noted", || {
+            host.noted(
+                "t",
+                |n| matches!(n, Note::NextDue(Some(due)) if *due > Utc::now()),
+            )
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            host.fires().is_empty(),
+            "a previous firing cannot make re-enabling fire early"
+        );
         cancel.cancel();
         task.await.expect("stops when cancelled");
     }

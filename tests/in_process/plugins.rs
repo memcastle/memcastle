@@ -12,6 +12,41 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 
 #[tokio::test]
+async fn an_unreadable_selected_plugin_catalogue_fails_but_other_configured_catalogues_remain_searchable()
+ {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing").display().to_string();
+    let catalogue = format!("{}/docs", env!("CARGO_MANIFEST_DIR"));
+    let selected = missing.clone();
+    let daemon = TestDaemon::start_configured(move |config| {
+        config.plugins.registries = vec![selected, catalogue];
+    })
+    .await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{}/api/plugin-registry/search", daemon.base_url))
+        .query(&[("registry", &missing)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let error: Value = response.json().await.unwrap();
+    assert_eq!(error["code"], "memcastle::plugin::registry_unavailable");
+
+    let response = client
+        .get(format!("{}/api/plugin-registry/search", daemon.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let search: Value = response.json().await.unwrap();
+    assert!(!search["plugins"].as_array().unwrap().is_empty());
+    assert_eq!(search["warnings"].as_array().unwrap().len(), 1);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn previewing_an_empty_plugin_does_not_install_it_or_change_sources() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();

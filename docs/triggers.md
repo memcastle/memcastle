@@ -144,11 +144,16 @@ Reaching it from the internet is yours to arrange, and these are the prerequisit
 5. **The sender's configuration**: the URL `https://<your host>/hooks/<trigger name>`, and the same secret.
 
 ```sh
-export HOOK_SECRET="$(openssl rand -hex 32)"           # in the daemon's environment
+mkdir -p "$HOME/.config/memcastle"
+umask 077
+openssl rand -hex 32 > "$HOME/.config/memcastle/hook-secret"
 memcastle trigger set notes-hook --miner notes --type webhook \
-    --credential-env HOOK_SECRET --setting delivery_header=x-github-delivery
+    --credential-file "$HOME/.config/memcastle/hook-secret" --setting delivery_header=x-github-delivery
 memcastle trigger enable notes-hook                    # refused, with the missing setup, until all of it holds
 ```
+
+If you use `--credential-env HOOK_SECRET` instead, set the variable in the **daemon's** environment before starting it;
+exporting it in a CLI terminal after the daemon starts cannot make the secret available to that running process.
 
 A delivery is `POST /hooks/<trigger name>` and proves itself in one of two ways:
 

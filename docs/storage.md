@@ -103,7 +103,8 @@ The two drawers record each other (`superseded_by` and `supersedes`), which is w
 
 ### Limits
 
-- Read commands return 10 results by default (20 for the diary, 50 for `drawer list`) and never more than 200.
+- Bounded memory reads return 10 results by default (20 for the diary, 50 for `drawer list`) and cap a page at 200.
+  Job listing is different: without a `kind` or `limit`, `GET /api/jobs` returns every job.
 - A `wake-up` returns at most 10 highlights and 8192 bytes unless told otherwise.
 
 ### What mining reads

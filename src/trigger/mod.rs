@@ -251,10 +251,16 @@ impl<H: Host> Supervisor<H> {
                 continue;
             };
             let crashed = task.handle.is_finished();
+            let plan_changed = wanted
+                .get(name.as_str())
+                .is_some_and(|(_, plan)| *plan != task.plan);
             stop_task(task).await;
             if !wanted.contains_key(name.as_str()) {
                 // Switched off, removed or no longer runnable: the user's decision, so what it was waiting for no longer
                 // applies and enabling it again waits a whole interval instead of firing at once.
+                self.host.note(&name, Note::NextDue(None)).await;
+            } else if plan_changed {
+                // The old timetable belongs to the old interval; a changed plan must start its own wait.
                 self.host.note(&name, Note::NextDue(None)).await;
             } else if crashed {
                 warn!(trigger = %name, "a trigger task ended unexpectedly; starting it again");
@@ -527,6 +533,47 @@ mod tests {
             host.noted("p", |n| matches!(n, Note::NextDue(None)))
         })
         .await;
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test]
+    async fn changing_a_poll_interval_replaces_its_old_due_time() {
+        let host = FakeHost::default();
+        host.set_desired(Desired {
+            triggers: vec![poll("2h")],
+            listener: None,
+        });
+        let (runtime, cancel, handle) = supervise(&host);
+        eventually("the original wait", || {
+            host.noted("p", |n| matches!(n, Note::NextDue(Some(_))))
+        })
+        .await;
+        let original = host
+            .notes()
+            .into_iter()
+            .find_map(|(_, note)| match note {
+                Note::NextDue(Some(due)) => Some(due),
+                _ => None,
+            })
+            .expect("original due time");
+
+        host.set_desired(Desired {
+            triggers: vec![poll("1h")],
+            listener: None,
+        });
+        runtime.wake();
+        eventually("the new wait", || {
+            host.notes()
+                .iter()
+                .filter(|(_, note)| matches!(note, Note::NextDue(Some(_))))
+                .count()
+                == 2
+        })
+        .await;
+        let state = host.state("p").await.expect("remembered timetable");
+        let replacement = state.next_due.expect("new due time");
+        assert!(replacement > Utc::now() && replacement < original);
+        assert!(host.fires().is_empty());
         stop(cancel, handle).await;
     }
 
