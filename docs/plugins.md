@@ -138,19 +138,17 @@ Update the child template and its tests first, advance both pins together with t
 provider authors review `git tpl diff --json` before `git tpl merge --json` to adopt the new scaffold.
 Changing a template does not change an existing plugin until its owner explicitly updates and merges its rendered ref.
 
-An in-tree provider project may live under `plugins/<provider>/` and publish its own `<id>-<version>.tar.gz` release
-without changing Core's version.
-The checked-in `plugins/example` project is an in-tree contract fixture run by Core's provider workflow;
+The checked-in `plugins/example` project is a packaging-tooling fixture run by Core CI;
 standalone providers use the workflows produced by the pinned parent template rather than copied example workflows.
-While several providers share the Core repository, each uses its own `plugin/<provider>/v<version>` tag;
+A standalone provider publishes its own versioned artifact;
 its reviewed catalogue entry lists the artifact URL and digest explicitly.
 A direct GitHub repository URL is for a standalone repository whose releases publish exactly one plugin ID;
-the Core monorepo's mixed releases must be discovered through `plugins.json`.
+Core's releases are not provider releases; discover providers through `plugins.json`.
 GitHub's release-asset SHA-256 protects a direct download's integrity; it is not an ed25519 publisher signature.
 With `plugins.trust = "required"`, use a signed catalogue entry instead of an unsigned direct release.
 The signature attests the digest using a configured trusted public key; neither a matching digest nor inclusion in the
 curated catalogue independently proves that the publisher is trusted.
-Provider release workflows validate the selected manifest, locked source dependencies, conformance and exact artifact
+Standalone provider release workflows validate the manifest, locked source dependencies, conformance and exact artifact
 before publishing a versioned tag; standalone tags must point to reviewed commits on `main`.
 Moving the same project into a standalone repository keeps `plugin.id` and module IDs stable;
 update `plugin.repository` and the discovery catalogue through review before releasing from the new repository.
@@ -183,7 +181,7 @@ tested Core `main` prerelease.
 Callers may additionally name plugin-capable release trees such as `0.5` (the latest published patch), or an exact
 stable version; each gets the same required integration checks.
 Stable Core 0.4.1 does not support plugin installation, so it cannot be added to this matrix.
-Core's provider workflow builds and tests every in-tree provider on each pull request and main push.
+Core CI builds and tests the `plugins/example` tooling fixture on each pull request and main push.
 For cross-repository development, put a Core binary from its worktree on PATH and run the same smoke check;
 standalone provider CI and its release workflow build neither unrelated providers nor Core from source.
 

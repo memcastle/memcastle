@@ -13,7 +13,7 @@ A source here is built with `memcastle source build` and tested with `memcastle 
 `mise run sources:check` builds and tests them all, and `mise run sources:test -- <name>` one.
 A source that wraps a program ships a stand-in for it in `fixtures/bin/`, which the two tasks put first
 on the `PATH`; run `memcastle source test` by hand with the same prefix.
-CI runs one job per directory here, found automatically, so a new source needs no workflow change.
+Core CI explicitly tests `directory`; adding another reference source to CI requires a workflow matrix entry.
 They are not compiled into MemCastle, and a source that ships with MemCastle's releases uses exactly the same package
 contract as one a user installs.
 `packaging/sources/build.sh` writes an empty bundle until Core ships another source;
