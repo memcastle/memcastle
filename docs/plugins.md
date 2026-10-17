@@ -151,8 +151,8 @@ update `plugin.repository` and the discovery catalogue through review before rel
 
 ## Standalone development and compatibility
 
-A provider repository has one `plugin.toml`, independent `modules/<id>/` implementations and fixtures, local packaging
-and tests under `scripts/` and `tests/`, and its own validation and release workflows in `.github/workflows/`.
+A provider repository has an immutable `plugin.toml` descriptor, a reviewed `manifest.toml` release manifest,
+independent `modules/<id>/` implementations and fixtures, and its own CI and release workflows.
 The parent manifest's `memcastle` semver range must match the source and integration manifests' Core requirements;
 source `contract` must also match its module manifest's versioned WIT contract.
 Module IDs stay stable across repository moves; module versions and the parent release version are separate.
@@ -164,13 +164,14 @@ For a newly generated checkout, build modules using its `ci.yaml` steps and run 
 commit source `Cargo.lock` files and the regenerated `manifest.toml`; packaging does not change `plugin.toml`.
 The new `memcastle plugin inspect plugin.toml --json`, `memcastle plugin package plugin.toml`, and
 `memcastle plugin test dist/ID-VERSION.tar.gz` authoring commands are provider-independent.
-`plugin package` generates the archive checksum file from already-built modules and refuses unsafe/unlisted files;
+`plugin package` regenerates the complete archive manifest and external archive checksum from built modules,
+refusing unsafe or unlisted files;
 it does not build source components or agent bundles. `plugin test` uses a disposable palace and does not register
 agent integrations; provider-specific agent and adoption tests remain in the standalone repository.
 Existing providers can keep their own authoring scripts until they migrate their CI and packaging to these commands.
-Set `MEMCASTLE_BIN` to a Core binary with plugin support and run `python3 scripts/smoke_install.py` to preview and install
-the archive into a disposable palace, check installed-but-disabled sources, enable them and register integrations with an
-isolated test agent. The script does not use the user's palace or agent files.
+Existing providers may still use `MEMCASTLE_BIN=/path/to/memcastle python3 scripts/smoke_install.py` until migrated;
+that script tests additional agent registration using isolated configuration. Generic `plugin test` checks source
+activation without changing the user's palace or agent configuration.
 The shared plugin validation workflow always tests source conformance and archive installation/activation against the
 tested Core `main` prerelease.
 Callers may additionally name exact plugin-capable stable versions; each gets the same required integration checks.
