@@ -352,9 +352,9 @@ impl AppServices {
 
     /// Update `name`, or every source that has an update, to the newest version its origin offers.
     ///
-    /// A new version that asks for permissions the installed one did not is not installed without `consent`: it comes
-    /// back as [`UpdateStatus::NeedsConsent`] with the digest to agree to, so a source cannot widen its own reach by
-    /// being updated. An update that asks for the same permissions needs nothing, since they were agreed to already.
+    /// Any change to the permission set, including removing a permission, requires `consent`: the update comes back as
+    /// [`UpdateStatus::NeedsConsent`] with the digest of the exact new set. An update that asks for the same permissions
+    /// needs nothing, since they were agreed to already.
     ///
     /// # Errors
     ///

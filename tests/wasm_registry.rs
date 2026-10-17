@@ -406,8 +406,7 @@ async fn an_unsigned_package_installs_when_trust_is_optional_and_a_forged_signat
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_update_keeps_the_state_needs_no_consent_for_the_same_permissions_and_asks_for_new_ones()
-{
+async fn an_update_keeps_the_state_and_needs_consent_for_every_permission_change() {
     let registry = Registry::new();
     registry.publish(&archive("0.1.0", false, ">=0.2"));
     let fixture = Fixture::start(vec![registry.label()]).await;
@@ -461,6 +460,22 @@ async fn an_update_keeps_the_state_needs_no_consent_for_the_same_permissions_and
         .await;
     assert_eq!(outcomes[0]["status"], "updated", "{outcomes}");
     assert_eq!(fixture.listed().await["version"], "0.2.0");
+
+    // Consent is to the exact permission set, so dropping network also calls for agreement to the new digest.
+    registry.publish(&archive("0.2.1", false, ">=0.2"));
+    let (_, outcomes) = fixture
+        .post("/api/source-registry/update", json!({"name": NAME}))
+        .await;
+    assert_eq!(outcomes[0]["status"], "needs_consent", "{outcomes}");
+    assert_eq!(fixture.listed().await["version"], "0.2.0");
+    let (_, outcomes) = fixture
+        .post(
+            "/api/source-registry/update",
+            json!({"name": NAME, "consent": outcomes[0]["digest"]}),
+        )
+        .await;
+    assert_eq!(outcomes[0]["status"], "updated", "{outcomes}");
+    assert_eq!(fixture.listed().await["version"], "0.2.1");
 
     let (_, current) = fixture
         .post("/api/source-registry/update", json!({"name": NAME}))
