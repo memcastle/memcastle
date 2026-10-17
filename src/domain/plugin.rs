@@ -30,6 +30,9 @@ pub struct PluginManifest {
     /// Independently selectable capabilities; an empty plugin is valid.
     #[serde(default)]
     pub modules: Vec<PluginModule>,
+    /// Extra support files or directories explicitly selected by the local descriptor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<String>,
     /// SHA-256 of each archive artifact; absent only in an unbuilt project descriptor.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub checksums: BTreeMap<String, String>,
@@ -217,6 +220,7 @@ mod tests {
             authentication: None,
             modules: Vec::new(),
             checksums: BTreeMap::new(),
+            artifacts: Vec::new(),
         }
     }
 

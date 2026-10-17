@@ -60,10 +60,11 @@ pub fn inspect_manifest(path: &Path) -> Result<PluginManifest> {
     } else {
         descriptor.clone()
     };
-    if release.plugin.version.is_empty() {
-        return Err(invalid("manifest.toml must declare a release version"));
-    }
-    descriptor.plugin.version = release.plugin.version;
+    descriptor.plugin.version = if release.plugin.version.is_empty() {
+        super::version::infer(root, &descriptor.plugin.id)?
+    } else {
+        release.plugin.version
+    };
     for module in &mut descriptor.modules {
         if let Some(released) = release
             .modules
@@ -82,6 +83,19 @@ pub fn inspect_manifest(path: &Path) -> Result<PluginManifest> {
 ///
 /// Rejects unsafe paths and missing/invalid artifacts.
 pub fn package_manifest(path: &Path, output: Option<&Path>) -> Result<PackagedPlugin> {
+    package_manifest_with_version(path, output, None)
+}
+
+/// Package a plugin with an explicit version instead of inferring its Git revision.
+///
+/// # Errors
+///
+/// Rejects unsafe manifests, missing artifacts and invalid release versions.
+pub fn package_manifest_with_version(
+    path: &Path,
+    output: Option<&Path>,
+    version: Option<&str>,
+) -> Result<PackagedPlugin> {
     if path.file_name() != Some(std::ffi::OsStr::new(MANIFEST_FILE)) {
         return Err(invalid("the root manifest must be named plugin.toml"));
     }
@@ -90,16 +104,14 @@ pub fn package_manifest(path: &Path, output: Option<&Path>) -> Result<PackagedPl
     if std::fs::symlink_metadata(&release_path).is_ok_and(|meta| meta.file_type().is_symlink()) {
         return Err(invalid("manifest.toml must not be a symlink"));
     }
-    let plugin = inspect_manifest(path)?;
-    let bytes = pack_project(root)?;
+    let bytes =
+        pack_project_with_manifest(root, &read_project_file(root, MANIFEST_FILE)?, version)?;
     let release = unpack(&bytes)?;
-    std::fs::write(&release_path, &release.files[RELEASE_FILE])
-        .map_err(|e| Error::io(release_path.display().to_string(), e))?;
     let destination = output.map_or_else(
         || {
             root.join("dist").join(format!(
                 "{}-{}.tar.gz",
-                plugin.plugin.id, plugin.plugin.version
+                release.manifest.plugin.id, release.manifest.plugin.version
             ))
         },
         Path::to_path_buf,
@@ -143,6 +155,10 @@ fn invalid(message: impl Into<String>) -> Error {
 ///
 /// [`Error::PluginPackageInvalid`] if the input is incomplete or the archive cannot be written.
 pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
+    pack_with_version(files, None)
+}
+
+fn pack_with_version(files: &BTreeMap<String, Vec<u8>>, version: Option<&str>) -> Result<Vec<u8>> {
     let mut all = files.clone();
     let descriptor_bytes = all
         .remove(MANIFEST_FILE)
@@ -157,10 +173,10 @@ pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
     } else {
         descriptor.clone()
     };
-    if seed.plugin.version.is_empty() {
-        return Err(invalid("manifest.toml must declare a release version"));
+    descriptor.plugin.version = version.unwrap_or(&seed.plugin.version).to_string();
+    if descriptor.plugin.version.is_empty() {
+        return Err(invalid("supply --version or package a tagged Git checkout"));
     }
-    descriptor.plugin.version = seed.plugin.version;
     for module in &mut descriptor.modules {
         module.version = match module.kind {
             PluginModuleKind::Source => {
@@ -244,10 +260,14 @@ pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
 /// Refuses symlinks, missing artifacts and oversized projects; ignores build outputs not declared by the manifest.
 pub fn pack_project(root: &Path) -> Result<Vec<u8>> {
     let manifest = read_project_file(root, MANIFEST_FILE)?;
-    pack_project_with_manifest(root, &manifest)
+    pack_project_with_manifest(root, &manifest, None)
 }
 
-fn pack_project_with_manifest(root: &Path, manifest: &[u8]) -> Result<Vec<u8>> {
+fn pack_project_with_manifest(
+    root: &Path,
+    manifest: &[u8],
+    version: Option<&str>,
+) -> Result<Vec<u8>> {
     let mut files = BTreeMap::new();
     let text = std::str::from_utf8(manifest).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
     let plugin = manifest::parse_descriptor(text)?;
@@ -287,7 +307,18 @@ fn pack_project_with_manifest(root: &Path, manifest: &[u8]) -> Result<Vec<u8>> {
             }
         }
     }
-    pack(&files)
+    for path in &plugin.artifacts {
+        collect_project_files(root, path, &mut files)?;
+    }
+    let version = if version.is_some()
+        || !plugin.plugin.version.is_empty()
+        || files.contains_key(RELEASE_FILE)
+    {
+        version.map(str::to_owned)
+    } else {
+        Some(super::version::infer(root, &plugin.plugin.id)?)
+    };
+    pack_with_version(&files, version.as_deref())
 }
 
 fn checked_project_path(root: &Path, name: &str) -> Result<PathBuf> {
@@ -517,8 +548,24 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
             }
         }
     }
-    if let Some(path) = files.keys().find(|path| !allowed.contains(path.as_str())) {
-        return Err(invalid(format!("unlisted plugin file `{path}`")));
+    for path in files.keys() {
+        if !allowed.contains(path.as_str())
+            && !root.artifacts.iter().any(|artifact| {
+                path.as_str() == artifact || path.starts_with(&format!("{artifact}/"))
+            })
+        {
+            return Err(invalid(format!("unlisted plugin file `{path}`")));
+        }
+    }
+    for artifact in &root.artifacts {
+        if !files
+            .keys()
+            .any(|name| name == artifact || name.starts_with(&format!("{artifact}/")))
+        {
+            return Err(invalid(format!(
+                "missing declared plugin artifact `{artifact}`"
+            )));
+        }
     }
     Ok(PluginPackage {
         manifest: root,
@@ -601,6 +648,7 @@ mod tests {
             authentication: None,
             modules,
             checksums: BTreeMap::new(),
+            artifacts: Vec::new(),
         };
         let mut files = BTreeMap::from([(
             MANIFEST_FILE.to_string(),
@@ -692,6 +740,7 @@ mod tests {
             std::fs::read(root.path().join(MANIFEST_FILE)).unwrap(),
             manifest.as_bytes()
         );
+        assert!(!root.path().join(RELEASE_FILE).exists());
         let expected = format!("{}  example-0.1.0.tar.gz\n", first.sha256);
         assert_eq!(std::fs::read_to_string(&first.checksum).unwrap(), expected);
         let again = package_manifest(&root.path().join(MANIFEST_FILE), None).unwrap();
@@ -700,6 +749,73 @@ mod tests {
             std::fs::read(root.path().join(MANIFEST_FILE)).unwrap(),
             manifest.as_bytes()
         );
+    }
+
+    #[test]
+    fn explicit_version_and_shared_support_assets_need_no_local_release_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        let mut files = fixture();
+        let mut descriptor =
+            manifest::parse_descriptor(std::str::from_utf8(&files[MANIFEST_FILE]).unwrap())
+                .unwrap();
+        descriptor.plugin.version.clear();
+        descriptor.artifacts = vec!["shared/config.json".into(), "modules/one/docs".into()];
+        files.insert(
+            MANIFEST_FILE.into(),
+            toml::to_string(&descriptor).unwrap().into_bytes(),
+        );
+        files.insert("shared/config.json".into(), b"{}".to_vec());
+        files.insert("modules/one/docs/guide.md".into(), b"guide".to_vec());
+        for (name, bytes) in &files {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let first =
+            package_manifest_with_version(&root.path().join(MANIFEST_FILE), None, Some("0.2.0"))
+                .unwrap();
+        let archive = std::fs::read(first.archive).unwrap();
+        let package = unpack(&archive).unwrap();
+        assert_eq!(package.manifest.plugin.version, "0.2.0");
+        assert!(package.files.contains_key("shared/config.json"));
+        assert!(package.files.contains_key("modules/one/docs/guide.md"));
+        assert!(!package.files.contains_key(MANIFEST_FILE));
+        assert!(!root.path().join(RELEASE_FILE).exists());
+        assert_eq!(
+            std::fs::read_to_string(root.path().join(MANIFEST_FILE)).unwrap(),
+            String::from_utf8(files[MANIFEST_FILE].clone()).unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn declared_support_assets_never_follow_a_symbolic_link() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("outside.txt");
+        std::fs::write(&outside, "untouched").unwrap();
+        let files = fixture();
+        let mut descriptor =
+            manifest::parse_descriptor(std::str::from_utf8(&files[MANIFEST_FILE]).unwrap())
+                .unwrap();
+        descriptor.artifacts = vec!["support/link.txt".into()];
+        for (name, bytes) in files {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        std::fs::write(
+            root.path().join(MANIFEST_FILE),
+            toml::to_string(&descriptor).unwrap(),
+        )
+        .unwrap();
+        std::fs::create_dir(root.path().join("support")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.path().join("support/link.txt")).unwrap();
+        let error =
+            package_manifest_with_version(&root.path().join(MANIFEST_FILE), None, Some("0.2.0"))
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("symbolic link"), "{error}");
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "untouched");
     }
 
     #[cfg(unix)]

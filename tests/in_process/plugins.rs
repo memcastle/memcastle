@@ -66,6 +66,7 @@ async fn previewing_an_empty_plugin_does_not_install_it_or_change_sources() {
         authentication: None,
         modules: Vec::new(),
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     let files = BTreeMap::from([(
         "plugin.toml".to_string(),
@@ -200,6 +201,7 @@ async fn a_local_plugin_catalogue_discovers_and_installs_a_verified_package() {
         authentication: None,
         modules: Vec::new(),
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     let archive = package::pack(&BTreeMap::from([(
         "plugin.toml".into(),
@@ -310,6 +312,7 @@ async fn plugin_installation_exposes_an_integration_in_the_local_catalog() {
             config_schema: None,
         }],
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     let archive = package::pack(&BTreeMap::from([
         (
@@ -405,6 +408,7 @@ async fn a_direct_github_repository_resolves_its_plugin_id_from_a_verified_relea
         authentication: None,
         modules: Vec::new(),
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     let archive = package::pack(&BTreeMap::from([(
         "plugin.toml".to_string(),
@@ -544,6 +548,7 @@ async fn only_a_required_dependency_prevents_removing_its_provider() {
             authentication: None,
             modules: Vec::new(),
             checksums: BTreeMap::new(),
+            artifacts: Vec::new(),
         };
         let bytes = package::pack(&BTreeMap::from([(
             "plugin.toml".into(),
@@ -592,6 +597,7 @@ async fn only_a_required_dependency_prevents_removing_its_provider() {
         authentication: None,
         modules: Vec::new(),
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     let bytes = package::pack(&BTreeMap::from([(
         "plugin.toml".into(),
@@ -660,6 +666,7 @@ async fn restart_rebuilds_the_local_module_pointer_from_the_durable_plugin_recor
             authentication: None,
             modules: Vec::new(),
             checksums: BTreeMap::new(),
+            artifacts: Vec::new(),
         })
         .unwrap()
         .into_bytes(),
@@ -772,6 +779,7 @@ async fn a_plugin_with_a_component_that_cannot_load_leaves_no_module_or_package_
             config_schema: None,
         }],
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     let archive = package::pack(&BTreeMap::from([
         (

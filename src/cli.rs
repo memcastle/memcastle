@@ -385,11 +385,19 @@ pub enum SourceCommand {
 #[derive(Debug, Subcommand)]
 pub enum PluginCommand {
     /// Inspect a local plugin's typed module inventory without a daemon.
-    Inspect { manifest: PathBuf },
-    /// Package prebuilt modules from their root manifest, updating reviewed digests.
-    Package {
-        /// Root `plugin.toml` manifest.
+    Inspect {
+        /// Root descriptor (defaults to ./plugin.toml).
+        #[arg(default_value = "plugin.toml")]
         manifest: PathBuf,
+    },
+    /// Package prebuilt modules and generate release metadata inside the archive.
+    Package {
+        /// Root descriptor (defaults to ./plugin.toml).
+        #[arg(default_value = "plugin.toml")]
+        manifest: PathBuf,
+        /// Override the version inferred from the plugin's Git release tags.
+        #[arg(long)]
+        version: Option<String>,
         /// Destination archive (defaults to dist/ID-VERSION.tar.gz).
         #[arg(long)]
         output: Option<PathBuf>,

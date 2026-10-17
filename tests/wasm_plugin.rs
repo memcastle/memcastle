@@ -76,6 +76,7 @@ fn release() -> Vec<u8> {
         authentication: None,
         modules,
         checksums: BTreeMap::new(),
+        artifacts: Vec::new(),
     };
     files.insert(
         "plugin.toml".into(),

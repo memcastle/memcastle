@@ -24,7 +24,7 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("plugin.toml"), EMPTY_PLUGIN).unwrap();
     std::fs::write(root.path().join("manifest.toml"), RELEASE_SEED).unwrap();
-    let inspected = command(root.path(), &["inspect", "plugin.toml"]);
+    let inspected = command(root.path(), &["inspect"]);
     assert!(
         inspected.status.success(),
         "{}",
@@ -35,7 +35,7 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
     assert_eq!(manifest["plugin"]["version"], "0.1.0");
     assert_eq!(manifest["modules"].as_array().unwrap().len(), 0);
 
-    let first = command(root.path(), &["package", "plugin.toml"]);
+    let first = command(root.path(), &["package"]);
     assert!(
         first.status.success(),
         "{}",
@@ -59,8 +59,8 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
         std::fs::read_to_string(root.path().join("plugin.toml")).unwrap(),
         EMPTY_PLUGIN
     );
-    let generated = std::fs::read_to_string(root.path().join("manifest.toml")).unwrap();
-    assert!(generated.contains("version = \"0.1.0\""));
+    let generated = memcastle::plugin::package::unpack(&archive).unwrap();
+    assert!(generated.manifest_text.contains("version = \"0.1.0\""));
     assert!(
         command(root.path(), &["package", "plugin.toml"])
             .status
@@ -76,13 +76,13 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
 fn a_plugin_is_installed_and_tested_in_disposable_state() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("plugin.toml"), EMPTY_PLUGIN).unwrap();
-    std::fs::write(root.path().join("manifest.toml"), RELEASE_SEED).unwrap();
     assert!(
-        command(root.path(), &["package", "plugin.toml"])
+        command(root.path(), &["package", "--version", "0.2.0"])
             .status
             .success()
     );
-    let checked = command(root.path(), &["test", "dist/example-0.1.0.tar.gz"]);
+    assert!(!root.path().join("manifest.toml").exists());
+    let checked = command(root.path(), &["test", "dist/example-0.2.0.tar.gz"]);
     assert!(
         checked.status.success(),
         "{}",
