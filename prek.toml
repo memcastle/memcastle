@@ -86,12 +86,20 @@ pass_filenames = false
 # is yours, and Git's 3-way merge preserves it across `git tpl update`.
 #
 # The six architecture invariants (AGENTS.md 1, 2, 4, 5, 8, 11) are defined
-# once as YAML rules under ast-grep/rules/. The trigger is the union of their
-# original scopes; the command scans the entire checkout even on one-file commits.
+# as YAML rules under ast-grep/rules/. This trigger covers their supported
+# source files; the scan checks the whole checkout even on one-file commits.
 [[repos.hooks]]
 id = "architecture"
 name = "architecture invariants (ast-grep)"
 language = "system"
-entry = "bash scripts/architecture-guard.sh"
-files = '^(src/.*\.rs$|tests/.*\.rs$|integrations/|web/|sgconfig\.yml$|ast-grep/|scripts/(test-)?architecture-guard\.sh$)'
+entry = "ast-grep scan --report-style short"
+files = '^(src/.*\.rs$|tests/.*\.rs$|integrations/.*\.(rs|ts|tsx|js|jsx|vue|json)$|web/.*\.(rs|ts|tsx|js|jsx|vue|html|json)$|sgconfig\.yml$|ast-grep/)'
+pass_filenames = false
+
+[[repos.hooks]]
+id = "architecture-rule-tests"
+name = "architecture rule fixtures (ast-grep)"
+language = "system"
+entry = "ast-grep test --skip-snapshot-tests"
+files = '^(sgconfig\.yml$|ast-grep/)'
 pass_filenames = false

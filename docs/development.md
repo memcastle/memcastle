@@ -349,9 +349,9 @@ The `single-writer` rule enforces the companion invariant, one daemon and one wr
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
 The `integrations-http-only-*` and shared `clients-http-only-*` rules keep an integration to MCP and HTTP:
-it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `integrations/`
-(Markdown and `node_modules` are skipped), see [ADR-019](adr/019-shared-integration-contract.md).
-Parsed comments do not trip these rules; unparsed asset types retain a narrowly scoped textual fallback.
+they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path, or `/api/db` in supported source files
+under `integrations/` (Markdown and `node_modules` are skipped), see [ADR-019](adr/019-shared-integration-contract.md).
+Comments and unsupported file types do not trip these rules.
 
 The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
 It is enforced by tests instead: `tests/in_process/auth.rs` walks a list of the REST routes
@@ -405,8 +405,8 @@ network or an agent's settings file or a credential, and when anything under `sr
 
 The web UI is held to HTTP as an integration is: the `web-http-only-*` and shared `clients-http-only-*` rules fail on
 `surrealdb`, `surrealkv`,
-`SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `web/` (Markdown, `node_modules` and `dist` are
-skipped), see [ADR-035](adr/035-web-ui.md).
+`SurrealStore`, a `store` or `jobs` path, or `/api/db` in supported source files under `web/`
+(Markdown, `node_modules`, `dist` and `bun.lock` are skipped), see [ADR-035](adr/035-web-ui.md).
 That the dashboard's static files are the only thing besides the liveness probe that needs no token is held by
 `tests/in_process/auth.rs` and `tests/in_process/web.rs`, which walk the routes with the dashboard off and on.
 
@@ -417,17 +417,16 @@ so a job's status only ever changes through `Job::apply`.
 
 The pinned ast-grep rules live under `ast-grep/rules/`, with discovery and Vue-as-HTML parsing in `sgconfig.yml`.
 The `architecture` hook scans the whole checkout even if only one relevant file was staged;
-`mise run guards` runs that hook, including `ast-grep test --skip-snapshot-tests` and path-scope fixtures.
+`architecture-rule-tests` runs the native YAML rule fixtures, and `mise run guards` runs both prek hooks.
 To inspect diagnostics directly, run `ast-grep scan --report-style short`;
 to iterate on a rule, run `ast-grep test --skip-snapshot-tests`.
 Vue `<script>` blocks use HTML's built-in JavaScript injection, including imports from `lang="ts"` blocks;
 HTML rules check attributes and interpolations separately.
+The rules target Rust, TypeScript, TSX, JavaScript, Vue, HTML and JSON as specified by each rule's file globs;
+other file types are outside their scope.
 The web guard skips Markdown, `node_modules`, `dist` and `bun.lock`, and the integration guard skips Markdown and
 `node_modules`.
-For other unparsed file types, `scripts/architecture-guard.sh` keeps the old text search without extending it to
-parsed code.
-These syntax rules cannot resolve renamed imports, computed strings or runtime behavior;
-the unparsed-file fallback may also report words in comments, as the old hooks did.
+These syntax rules cannot resolve renamed imports, computed strings or runtime behavior.
 
 ## Documentation
 

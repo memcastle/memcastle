@@ -113,7 +113,8 @@ An invariant nothing checks is a comment, and it will be violated.
    Client lifecycle logic does not move into MemCastle to make two clients look alike.
    Enforced by the prek `architecture` hook's `integrations-http-only-*` and shared `clients-http-only-*` rules: they
    fail on `surrealdb`, `surrealkv`, `SurrealStore`, a
-   `store`/`jobs` path or `/api/db` anywhere under `integrations/` (Markdown and `node_modules` excepted),
+   `store`/`jobs` path or `/api/db` in supported source files under `integrations/`
+   (Markdown and `node_modules` excepted),
    and by `tests/in_process/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon
    and fails when the contract page, the capability manifest and the test names disagree.
 
@@ -192,7 +193,8 @@ An invariant nothing checks is a comment, and it will be violated.
     every request; the token lives in `sessionStorage` and is never put in a URL, a cookie or a log
     (see `docs/adr/035-web-ui.md`).
     Enforced by the `prek` `architecture` hook's `web-http-only-*` and shared `clients-http-only-*` rules
-    (they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs` path or `/api/db` anywhere under `web/`,
+    (they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs` path or `/api/db` in supported source files
+    under `web/`,
     Markdown, `node_modules`, `dist` and `bun.lock` excepted),
     by `tests/in_process/web.rs` (off by default, no path leaves `web/dist`, the headers, a missing build is a 503 and
     never a failed start, `/api/config` carries no secret),
