@@ -193,8 +193,9 @@ An accepted delivery is answered `202` with `{"status": "queued" | "coalesced" |
   Either way the mining pipeline is idempotent: an unchanged document is skipped, so a repeat costs one pass over the
   source and never a duplicate memory.
 - **A restart is safe.**
-  A delivery accepted but not yet queued when the daemon died is queued when it starts again, if its trigger is still
-  enabled in the file.
+  A delivery accepted but not yet queued when the daemon died is queued if its trigger is still enabled in the file.
+  Recovery runs at startup and again after the 30-second grace period, so a fast restart does not strand a recently
+  accepted delivery or race a request still being handled.
   A timetable keeps the time it was waiting for.
   A trigger the file says is disabled stays disabled, whatever the palace remembers.
 
