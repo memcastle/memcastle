@@ -189,7 +189,9 @@ pub async fn run(config: Config) -> Result<()> {
     app.recover_plugin_pointers().await?;
     if config.auth.enabled {
         info!(
-            "authentication is enabled: every route except GET /api/health requires a bearer token"
+            web_enabled = config.web.enable,
+            "authentication is enabled: every route except GET /api/health requires a bearer token; when web_enabled, \
+             GET and HEAD under /ui are public static files"
         );
     } else if !config.server.bind.is_loopback() {
         // Not an error (the operator may front the daemon with something else)

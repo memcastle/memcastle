@@ -655,7 +655,8 @@ and every MCP tool call is traced at `debug` (a failed one at `warn`).
 
 **One authentication layer.**
 When authentication is enabled, a single middleware on the merged router checks the bearer token before any REST
-handler or the MCP service sees the request, and only `GET /api/health` is exempt.
+handler or the MCP service sees the request.
+`GET /api/health` is exempt, as are `GET` and `HEAD` for static files under `/ui` when `web.enable` is set.
 It calls `AppServices::authenticate`, which checks a configured secret and the stored verifier in constant time.
 Generating and revoking a token are REST and CLI operations over `AppServices`, and MCP has no tool for either.
 The trace layer logs no headers, so the `Authorization` header never reaches the log.
