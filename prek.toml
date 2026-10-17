@@ -85,9 +85,6 @@ pass_filenames = false
 # template owns everything above it and will keep updating it; everything here
 # is yours, and Git's 3-way merge preserves it across `git tpl update`.
 #
-# The six architecture invariants (AGENTS.md 1, 2, 4, 5, 8, 11) are defined
-# as YAML rules under ast-grep/rules/. This trigger covers their supported
-# source files; the scan checks the whole checkout even on one-file commits.
 [[repos.hooks]]
 id = "architecture"
 name = "architecture invariants (ast-grep)"
