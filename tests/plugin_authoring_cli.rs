@@ -39,7 +39,10 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
         String::from_utf8_lossy(&first.stderr)
     );
     let result: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
-    assert_eq!(result["archive"], "dist/example-0.1.0.tar.gz");
+    assert_eq!(
+        Path::new(result["archive"].as_str().unwrap()),
+        Path::new("dist").join("example-0.1.0.tar.gz")
+    );
     let archive = std::fs::read(root.path().join("dist/example-0.1.0.tar.gz")).unwrap();
     assert_eq!(result["sha256"], memcastle::domain::sha256_hex(&archive));
     assert!(

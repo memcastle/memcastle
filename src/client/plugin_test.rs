@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::domain::{PluginModule, PluginModuleKind, SourceState};
@@ -47,7 +48,8 @@ pub async fn run(archive: &Path) -> Result<()> {
     drop(listener);
 
     let binary = std::env::current_exe().map_err(|e| Error::io("memcastle executable", e))?;
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .arg("--palace")
         .arg(&palace)
         .arg("serve")
@@ -65,8 +67,21 @@ pub async fn run(archive: &Path) -> Result<()> {
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        // Windows needs its system directory to load native libraries even for a child with isolated user state.
+        for key in ["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+        command.env("USERPROFILE", scratch.path());
+        command.env("TEMP", scratch.path());
+        command.env("TMP", scratch.path());
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| Error::io("start disposable plugin test daemon", e))?;
 
@@ -78,9 +93,16 @@ pub async fn run(archive: &Path) -> Result<()> {
                 .try_wait()
                 .map_err(|e| Error::io("plugin test daemon", e))?
             {
+                let mut details = String::new();
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_string(&mut details).await;
+                }
                 return Err(failed(
                     &id,
-                    format!("disposable daemon exited during startup: {status}"),
+                    format!(
+                        "disposable daemon exited during startup: {status}: {}",
+                        details.trim()
+                    ),
                 ));
             }
             if client.health().await {
