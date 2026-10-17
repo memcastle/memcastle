@@ -123,6 +123,20 @@ async fn async_main() -> ExitCode {
             }
         };
     }
+    if let Command::Plugin(
+        command @ (PluginCommand::Inspect { .. }
+        | PluginCommand::Package { .. }
+        | PluginCommand::Test { .. }),
+    ) = &args.command
+    {
+        return match cmd_plugin_local(command).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{:?}", miette::Report::new(error));
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     // Config is loaded before tracing so `logging.level` can drive the
     // filter. A config that fails to load still gets a working logger (at
@@ -765,6 +779,45 @@ fn cmd_plugin_sign(archive: &std::path::Path, key: &std::path::Path) -> Result<(
     )
 }
 
+async fn cmd_plugin_local(command: &PluginCommand) -> Result<()> {
+    match command {
+        PluginCommand::Inspect { manifest } => {
+            let plugin = memcastle::plugin::package::inspect_manifest(manifest)?;
+            print_for_terminal_or_json(
+                |_, _| {
+                    format!(
+                        "{} {} ({} modules)",
+                        plugin.plugin.id,
+                        plugin.plugin.version,
+                        plugin.modules.len()
+                    )
+                },
+                &plugin,
+            )
+        }
+        PluginCommand::Package { manifest, output } => {
+            let packaged =
+                memcastle::plugin::package::package_manifest(manifest, output.as_deref())?;
+            print_for_terminal_or_json(
+                |_, _| {
+                    format!(
+                        "{} (SHA-256: {})",
+                        packaged.archive.display(),
+                        packaged.sha256
+                    )
+                },
+                &packaged,
+            )
+        }
+        PluginCommand::Test { archive } => {
+            memcastle::client::plugin_test::run(archive).await?;
+            println!("Plugin archive installation and source activation passed");
+            Ok(())
+        }
+        _ => unreachable!("only local plugin commands are dispatched before configuration"),
+    }
+}
+
 /// Plugin lifecycle commands always use the daemon for state; local archives are read only for preview/upload.
 async fn cmd_plugin(
     config: &Config,
@@ -774,6 +827,11 @@ async fn cmd_plugin(
     let daemon = client(config, mode);
     match command {
         PluginCommand::Sign { archive, key } => cmd_plugin_sign(&archive, &key),
+        PluginCommand::Inspect { .. }
+        | PluginCommand::Package { .. }
+        | PluginCommand::Test { .. } => {
+            unreachable!("local plugin commands are dispatched before configuration")
+        }
         PluginCommand::Search { query, registry } => {
             let registry = registry.as_deref().map(absolute_location);
             let answer = daemon

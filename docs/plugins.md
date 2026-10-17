@@ -158,6 +158,12 @@ requires it. Review contract and WIT changes against both generated modules befo
 
 From a generated provider checkout, run `python3 scripts/package.py`, `python3 scripts/check_modules.py`, and
 `python3 -m unittest discover -s tests`; commit the source `Cargo.lock` files and reviewed artifact hashes.
+The new `memcastle plugin inspect plugin.toml --json`, `memcastle plugin package plugin.toml`, and
+`memcastle plugin test dist/ID-VERSION.tar.gz` authoring commands are provider-independent.
+`plugin package` updates reviewed hashes of already-built modules and refuses unsafe/unlisted files;
+it does not build source components or agent bundles. `plugin test` uses a disposable palace and does not register
+agent integrations; provider-specific agent and adoption tests remain in the standalone repository.
+Existing providers can keep their own authoring scripts until they migrate their CI and packaging to these commands.
 Set `MEMCASTLE_BIN` to a Core binary with plugin support and run `python3 scripts/smoke_install.py` to preview and install
 the archive into a disposable palace, check installed-but-disabled sources, enable them and register integrations with an
 isolated test agent. The script does not use the user's palace or agent files.
@@ -212,7 +218,8 @@ Add a version such as `"0.5.0"` only after its released Core binary supports the
 there is no conditional integration-test skip.
 The required `artifact-name` and `archive-path` identify the exact uploaded, already-built plugin;
 include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
-The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow provider-owned installation checks and fixtures.
+The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow additional provider-owned checks and fixtures;
+the generic `plugin test` always runs on the supplied archive before them.
 The provider's release workflow decides when to validate, requires its own reviewed version tag,
 and publishes the archive only after the shared validation succeeds.
 The Core binary action accepts `version: main` or an exact stable tag and returns `binary` and `core_sha` outputs;

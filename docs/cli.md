@@ -461,6 +461,9 @@ memcastle plugin install ./built-project [--yes] [--consent MODULE=DIGEST]...
 memcastle plugin install https://github.com/OWNER/REPO [--yes] [--consent MODULE=DIGEST]...
 memcastle plugin update ID [--yes] [--consent MODULE=DIGEST]... [--adopt-source SOURCE]...
 memcastle plugin uninstall ID [--yes]
+memcastle plugin inspect <plugin.toml> [--json]
+memcastle plugin package <plugin.toml> [--output <FILE>] [--json]
+memcastle plugin test <ARCHIVE>
 memcastle plugin sign <ARCHIVE> --key <KEYFILE>
 ```
 
@@ -490,6 +493,14 @@ use the GitTPL source and plugin repositories directly for new provider projects
 `plugin sign` is local authoring tooling with no daemon or registry request.
 It reads a validated plugin archive and a private key generated with `memcastle source keygen`, then prints the
 archive SHA-256 and an ed25519 `signature` entry for a static `plugins.json` version entry.
+`plugin inspect` reads the local root manifest and returns its typed module inventory with `--json`;
+it does not need any built artifacts, configuration or daemon.
+`plugin package` reads a project's already-built source and integration artifacts, updates their SHA-256 values in
+`plugin.toml`, and writes a deterministic `dist/ID-VERSION.tar.gz` (or `--output`) with its archive digest.
+It never builds a module; review and commit the updated manifest and source locks before publishing.
+`plugin test` validates the exact archive and starts a disposable loopback daemon in an isolated temporary palace.
+It previews and installs with per-source consents, verifies integrations remain discoverable but uninstalled in agents,
+then enables each newly installed source. Neither the configured palace nor any agent installation is touched.
 
 ### `source`
 

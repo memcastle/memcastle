@@ -384,6 +384,18 @@ pub enum SourceCommand {
 /// The installable package, not an individual source or agent integration module.
 #[derive(Debug, Subcommand)]
 pub enum PluginCommand {
+    /// Inspect a local plugin's typed module inventory without a daemon.
+    Inspect { manifest: PathBuf },
+    /// Package prebuilt modules from their root manifest, updating reviewed digests.
+    Package {
+        /// Root `plugin.toml` manifest.
+        manifest: PathBuf,
+        /// Destination archive (defaults to dist/ID-VERSION.tar.gz).
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Smoke-test an archive in an isolated, disposable palace.
+    Test { archive: PathBuf },
     /// Search the reviewed plugin catalogues by plugin or module ID.
     Search {
         /// ID or description fragment; absent shows all entries.

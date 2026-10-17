@@ -29,8 +29,9 @@ An invariant nothing checks is a comment, and it will be violated.
    daemon at all, through `crate::source`, which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`
    nor the network, and `source install` of a file or a project directory reads it locally to show its permissions before
    calling the daemon.
-   `plugin sign` is similarly local publisher tooling over a validated archive and key; it touches neither store,
-   jobs nor a daemon, and emits the digest/signature for a reviewed static plugin index.
+   `plugin inspect`, `package` and `sign` are similarly local publisher tooling over a manifest or validated archive;
+   they touch neither store, jobs nor a daemon. `plugin test` spawns a disposable daemon and uses its existing HTTP
+   client to preview, install and enable sources in an isolated palace, never the configured palace or agents.
    `integration list`, `install`, `update` and `remove` work on files and the agent's own commands with no daemon at all,
    through `crate::integration`, which `tests/integration_isolation.rs` holds to touching neither `store`, `jobs`, the
    client nor the network, and which nothing but `main.rs` may call to install one, so there is no MCP tool and no route

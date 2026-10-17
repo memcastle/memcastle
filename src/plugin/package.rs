@@ -1,5 +1,6 @@
 //! Deterministic multi-module archives with bounded, manifest-checked extraction.
 
+use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,90 @@ pub struct PluginPackage {
     pub manifest_text: String,
     /// Every regular archive file under its checked path.
     pub files: BTreeMap<String, Vec<u8>>,
+}
+
+/// The archive a publisher just built from reviewed, prebuilt artifacts.
+#[derive(Debug, Serialize)]
+pub struct PackagedPlugin {
+    /// Destination of the deterministic release archive.
+    pub archive: PathBuf,
+    /// SHA-256 of the exact archive bytes.
+    pub sha256: String,
+}
+
+/// Inspect a project's typed module inventory before building its artifacts.
+///
+/// # Errors
+///
+/// Rejects a missing or malformed root manifest.
+pub fn inspect_manifest(path: &Path) -> Result<PluginManifest> {
+    if path.file_name() != Some(std::ffi::OsStr::new(MANIFEST_FILE)) {
+        return Err(invalid("the root manifest must be named plugin.toml"));
+    }
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let bytes = read_project_file(root, MANIFEST_FILE)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
+    manifest::parse(text)
+}
+
+/// Package a manifest's already-built modules and update their reviewed digests.
+///
+/// # Errors
+///
+/// Rejects unsafe paths, missing/invalid artifacts and manifests that cannot be written.
+pub fn package_manifest(path: &Path, output: Option<&Path>) -> Result<PackagedPlugin> {
+    if path.file_name() != Some(std::ffi::OsStr::new(MANIFEST_FILE)) {
+        return Err(invalid("the root manifest must be named plugin.toml"));
+    }
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let original = read_project_file(root, MANIFEST_FILE)?;
+    let original_text =
+        std::str::from_utf8(&original).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
+    let plugin = manifest::parse(original_text)?;
+    let mut document: toml_edit::DocumentMut = original_text
+        .parse()
+        .map_err(|e| invalid(format!("cannot edit plugin.toml: {e}")))?;
+    if !plugin.modules.is_empty() {
+        let sections = document["modules"]
+            .as_array_of_tables_mut()
+            .ok_or_else(|| invalid("plugin.toml must declare [[modules]] sections"))?;
+        if sections.len() != plugin.modules.len() {
+            return Err(invalid(
+                "plugin.toml module sections do not match the manifest",
+            ));
+        }
+        for (section, module) in sections.iter_mut().zip(&plugin.modules) {
+            for (key, name) in [
+                ("manifest_sha256", module.manifest.as_str()),
+                ("sha256", module.entry.as_str()),
+            ] {
+                let bytes = read_project_file(root, name)?;
+                section[key] = toml_edit::value(sha256_hex(&bytes));
+            }
+        }
+    }
+    let updated = document.to_string();
+    // Validate the complete archive before changing a publisher's manifest on disk.
+    let bytes = pack_project_with_manifest(root, updated.as_bytes())?;
+    std::fs::write(path, updated).map_err(|e| Error::io(path.display().to_string(), e))?;
+    let destination = output.map_or_else(
+        || {
+            root.join("dist").join(format!(
+                "{}-{}.tar.gz",
+                plugin.plugin.id, plugin.plugin.version
+            ))
+        },
+        Path::to_path_buf,
+    );
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Error::io(parent.display().to_string(), e))?;
+    }
+    std::fs::write(&destination, &bytes)
+        .map_err(|e| Error::io(destination.display().to_string(), e))?;
+    Ok(PackagedPlugin {
+        archive: destination,
+        sha256: sha256_hex(&bytes),
+    })
 }
 
 fn invalid(message: impl Into<String>) -> Error {
@@ -68,11 +153,15 @@ pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
 ///
 /// Refuses symlinks, missing artifacts and oversized projects; ignores build outputs not declared by the manifest.
 pub fn pack_project(root: &Path) -> Result<Vec<u8>> {
-    let mut files = BTreeMap::new();
     let manifest = read_project_file(root, MANIFEST_FILE)?;
-    let text = std::str::from_utf8(&manifest).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
+    pack_project_with_manifest(root, &manifest)
+}
+
+fn pack_project_with_manifest(root: &Path, manifest: &[u8]) -> Result<Vec<u8>> {
+    let mut files = BTreeMap::new();
+    let text = std::str::from_utf8(manifest).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
     let plugin = manifest::parse(text)?;
-    files.insert(MANIFEST_FILE.to_string(), manifest);
+    files.insert(MANIFEST_FILE.to_string(), manifest.to_vec());
     for module in &plugin.modules {
         files.insert(
             module.manifest.clone(),
@@ -403,6 +492,34 @@ mod tests {
         let package = unpack(&bytes).unwrap();
         assert_eq!(package.manifest.modules.len(), 2);
         assert_eq!(package.files, files);
+    }
+
+    #[test]
+    fn a_publisher_updates_both_reviewed_hashes_before_packaging_prebuilt_modules() {
+        let root = tempfile::tempdir().unwrap();
+        let mut files = fixture();
+        let text = String::from_utf8(files.remove(MANIFEST_FILE).unwrap()).unwrap();
+        let manifest = text.replace(
+            &sha256_hex(&files["modules/one/source.wasm"]),
+            &"0".repeat(64),
+        );
+        std::fs::write(root.path().join(MANIFEST_FILE), manifest).unwrap();
+        for (name, bytes) in files {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let first = package_manifest(&root.path().join(MANIFEST_FILE), None).unwrap();
+        let archive = std::fs::read(&first.archive).unwrap();
+        assert_eq!(first.sha256, sha256_hex(&archive));
+        assert_eq!(unpack(&archive).unwrap().manifest.modules.len(), 2);
+        let reviewed = std::fs::read(root.path().join(MANIFEST_FILE)).unwrap();
+        let again = package_manifest(&root.path().join(MANIFEST_FILE), None).unwrap();
+        assert_eq!(again.sha256, first.sha256);
+        assert_eq!(
+            std::fs::read(root.path().join(MANIFEST_FILE)).unwrap(),
+            reviewed
+        );
     }
 
     #[test]

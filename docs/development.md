@@ -15,6 +15,10 @@ To test a Core change across repositories, build a Core binary in that checkout 
 `MEMCASTLE_BIN=/absolute/path/to/memcastle python3 scripts/smoke_install.py` in the generated project.
 The smoke test uses a disposable palace and agent directory and validates preview, consent, install and separate module
 activation; it never uses a user's installed plugin or agent configuration.
+The Core publisher equivalents for generated plugins are `memcastle plugin inspect plugin.toml --json`,
+`memcastle plugin package plugin.toml` after building modules, and `memcastle plugin test dist/ID-VERSION.tar.gz`.
+The first updates reviewed artifact hashes; the second checks the exact archive in a disposable palace.
+Agent registration and legacy adoption remain provider-specific checks.
 Standalone provider CI checks source conformance and archive installation against the successful `main` CI prerelease
 and any explicitly selected plugin-capable stable releases; each matrix leg records its exact Core revision.
 Core's provider workflow checks every in-tree provider on each pull request and main push.

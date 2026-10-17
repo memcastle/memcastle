@@ -23,6 +23,7 @@ pub mod miner_view;
 mod miners;
 mod palace;
 pub mod palace_view;
+pub mod plugin_test;
 pub mod report_view;
 pub mod status;
 pub mod table;
