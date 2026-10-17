@@ -51,9 +51,14 @@ jobs:
           python3 "plugins/$PROVIDER/scripts/package.py"
           python3 -m unittest discover -s "plugins/$PROVIDER/tests"
           git diff --exit-code -- "plugins/$PROVIDER/plugin.toml" || {
-            echo "::error::commit the plugin.toml artifact digests produced by packaging"
+            echo "::error::packaging must not change plugin.toml"
             exit 1
           }
+          git diff --exit-code -- "plugins/$PROVIDER/manifest.toml" || {
+            echo "::error::commit the regenerated manifest.toml before publishing"
+            exit 1
+          }
+          (cd "plugins/$PROVIDER/dist" && for checksum in *.sha256sum; do sha256sum --check "$checksum"; done)
           for manifest in plugins/"$PROVIDER"/modules/*/memcastle-source.toml; do
             if [[ -f "$manifest" ]]; then
               lock="$(dirname "$manifest")/Cargo.lock"

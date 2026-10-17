@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// The root manifest's supported format.
 pub const PLUGIN_FORMAT: u32 = 1;
@@ -12,7 +12,7 @@ pub const PLUGIN_FORMAT: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
-    /// Format of `plugin.toml`.
+    /// Format of the complete archive manifest.
     pub format: u32,
     /// Stable identity and publisher-provided metadata.
     pub plugin: PluginInfo,
@@ -30,6 +30,9 @@ pub struct PluginManifest {
     /// Independently selectable capabilities; an empty plugin is valid.
     #[serde(default)]
     pub modules: Vec<PluginModule>,
+    /// SHA-256 of each archive artifact; absent only in an unbuilt project descriptor.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub checksums: BTreeMap<String, String>,
 }
 
 /// Identity and provenance of an installable plugin.
@@ -39,6 +42,7 @@ pub struct PluginInfo {
     /// Stable package identifier.
     pub id: String,
     /// Independent semver release.
+    #[serde(default)]
     pub version: String,
     /// Shared implementation family, which is not a module ID.
     pub provider: String,
@@ -95,14 +99,17 @@ pub struct PluginModule {
     #[serde(rename = "type")]
     pub kind: PluginModuleKind,
     /// Module implementation version, independent of the package release.
+    #[serde(default)]
     pub version: String,
     /// Path to its module-specific manifest relative to the package root.
     pub manifest: String,
-    /// SHA-256 of the module-specific manifest.
+    /// SHA-256 of the module-specific manifest, populated from manifest.toml when unpacked.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub manifest_sha256: String,
     /// Path to the WASM component for a source, or an integration directory's entry file.
     pub entry: String,
-    /// SHA-256 of the entry file.
+    /// SHA-256 of the entry file, populated from manifest.toml when unpacked.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sha256: String,
     /// An optional module is discoverable but need not run on every installation.
     #[serde(default)]
@@ -209,6 +216,7 @@ mod tests {
             shared_config_schema: None,
             authentication: None,
             modules: Vec::new(),
+            checksums: BTreeMap::new(),
         }
     }
 

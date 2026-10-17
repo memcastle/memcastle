@@ -4,7 +4,8 @@ use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin;
 
-const EMPTY_PLUGIN: &str = "format = 1\nmemcastle = '>=0.4'\n[plugin]\nid = 'example'\nversion = '0.1.0'\nprovider = 'example'\ndescription = 'example'\nrepository = 'https://github.com/example/example'\nlicense = 'MIT'\n";
+const EMPTY_PLUGIN: &str = "format = 1\nmemcastle = '>=0.4'\n[plugin]\nid = 'example'\nprovider = 'example'\ndescription = 'example'\nrepository = 'https://github.com/example/example'\nlicense = 'MIT'\n";
+const RELEASE_SEED: &str = "format = 1\nmemcastle = '>=0.4'\n[plugin]\nid = 'example'\nversion = '0.1.0'\nprovider = 'example'\ndescription = 'example'\nrepository = 'https://github.com/example/example'\nlicense = 'MIT'\n";
 
 fn command(root: &Path, args: &[&str]) -> std::process::Output {
     std::process::Command::new(cargo_bin("memcastle"))
@@ -22,6 +23,7 @@ fn command(root: &Path, args: &[&str]) -> std::process::Output {
 fn packaging_and_inspection_work_offline_and_are_repeatable() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("plugin.toml"), EMPTY_PLUGIN).unwrap();
+    std::fs::write(root.path().join("manifest.toml"), RELEASE_SEED).unwrap();
     let inspected = command(root.path(), &["inspect", "plugin.toml"]);
     assert!(
         inspected.status.success(),
@@ -30,6 +32,7 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
     );
     let manifest: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
     assert_eq!(manifest["plugin"]["id"], "example");
+    assert_eq!(manifest["plugin"]["version"], "0.1.0");
     assert_eq!(manifest["modules"].as_array().unwrap().len(), 0);
 
     let first = command(root.path(), &["package", "plugin.toml"]);
@@ -45,6 +48,19 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
     );
     let archive = std::fs::read(root.path().join("dist/example-0.1.0.tar.gz")).unwrap();
     assert_eq!(result["sha256"], memcastle::domain::sha256_hex(&archive));
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("dist/example-0.1.0.sha256sum")).unwrap(),
+        format!(
+            "{}  example-0.1.0.tar.gz\n",
+            result["sha256"].as_str().unwrap()
+        )
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("plugin.toml")).unwrap(),
+        EMPTY_PLUGIN
+    );
+    let generated = std::fs::read_to_string(root.path().join("manifest.toml")).unwrap();
+    assert!(generated.contains("version = \"0.1.0\""));
     assert!(
         command(root.path(), &["package", "plugin.toml"])
             .status
@@ -60,6 +76,7 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
 fn a_plugin_is_installed_and_tested_in_disposable_state() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("plugin.toml"), EMPTY_PLUGIN).unwrap();
+    std::fs::write(root.path().join("manifest.toml"), RELEASE_SEED).unwrap();
     assert!(
         command(root.path(), &["package", "plugin.toml"])
             .status

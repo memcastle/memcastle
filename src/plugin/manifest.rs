@@ -33,9 +33,30 @@ pub fn safe_path(path: &str) -> bool {
 /// [`Error::PluginManifestInvalid`] identifies the first malformed field.
 pub fn parse(text: &str) -> Result<PluginManifest> {
     let manifest: PluginManifest =
-        toml::from_str(text).map_err(|e| invalid(format!("plugin.toml: {}", e.message())))?;
+        toml::from_str(text).map_err(|e| invalid(format!("manifest.toml: {}", e.message())))?;
     validate(&manifest)?;
     Ok(manifest)
+}
+
+/// Validate the immutable descriptor before release metadata is applied.
+///
+/// # Errors
+///
+/// Rejects invalid identities, paths and contracts without requiring release versions or digests.
+pub fn parse_descriptor(text: &str) -> Result<PluginManifest> {
+    let descriptor: PluginManifest =
+        toml::from_str(text).map_err(|e| invalid(format!("plugin.toml: {}", e.message())))?;
+    validate_descriptor(&descriptor)?;
+    Ok(descriptor)
+}
+
+/// Check descriptor fields independently of the generated manifest.toml.
+///
+/// # Errors
+///
+/// Reports malformed identities, version strings, paths or constraints.
+pub fn validate_descriptor(manifest: &PluginManifest) -> Result<()> {
+    validate_fields(manifest, false)
 }
 
 /// Check identities, version requirements, paths and artifact digests.
@@ -44,6 +65,10 @@ pub fn parse(text: &str) -> Result<PluginManifest> {
 ///
 /// [`Error::PluginManifestInvalid`] identifies the first malformed field.
 pub fn validate(manifest: &PluginManifest) -> Result<()> {
+    validate_fields(manifest, true)
+}
+
+fn validate_fields(manifest: &PluginManifest, require_release_fields: bool) -> Result<()> {
     if manifest.format != crate::domain::plugin::PLUGIN_FORMAT {
         return Err(invalid(format!(
             "format {} is unsupported; upgrade MemCastle or use format {}",
@@ -64,7 +89,9 @@ pub fn validate(manifest: &PluginManifest) -> Result<()> {
             )));
         }
     }
-    version(&info.version, "plugin.version")?;
+    if require_release_fields || !info.version.is_empty() {
+        version(&info.version, "plugin.version")?;
+    }
     requirement(&manifest.memcastle, "memcastle")?;
     if manifest
         .shared_config_schema
@@ -114,7 +141,9 @@ pub fn validate(manifest: &PluginManifest) -> Result<()> {
                 module.id
             )));
         }
-        version(&module.version, "module.version")?;
+        if require_release_fields || !module.version.is_empty() {
+            version(&module.version, "module.version")?;
+        }
         if module
             .config_schema
             .as_ref()
@@ -140,10 +169,11 @@ pub fn validate(manifest: &PluginManifest) -> Result<()> {
             }
         }
         for digest in [&module.manifest_sha256, &module.sha256] {
-            if digest.len() != 64
-                || !digest
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            if (require_release_fields || !digest.is_empty())
+                && (digest.len() != 64
+                    || !digest
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
             {
                 return Err(invalid(format!(
                     "module `{}` needs lowercase SHA-256 digests for its artifacts",

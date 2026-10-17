@@ -22,6 +22,14 @@ fn failed(name: &str, reason: impl Into<String>) -> Error {
     }
 }
 
+fn ensure(condition: bool, name: &str, reason: impl Into<String>) -> Result<()> {
+    if condition {
+        Ok(())
+    } else {
+        Err(failed(name, reason))
+    }
+}
+
 fn inventory(modules: &[PluginModule]) -> HashSet<(PluginModuleKind, String)> {
     modules
         .iter()
@@ -111,74 +119,64 @@ pub async fn run(archive: &Path) -> Result<()> {
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        if !ready {
-            return Err(failed(
-                &id,
-                "disposable daemon was not ready within 30 seconds",
-            ));
-        }
+        ensure(
+            ready,
+            &id,
+            "disposable daemon was not ready within 30 seconds",
+        )?;
         let preview = client.preview_plugin(&bytes).await?;
-        if preview.id != id
-            || preview.version != package.manifest.plugin.version
-            || !preview.adoptions.is_empty()
-        {
-            return Err(failed(
-                &id,
-                "archive preview differs from its manifest or unexpectedly requires adoption",
-            ));
-        }
-        if inventory(&preview.modules) != inventory(&package.manifest.modules) {
-            return Err(failed(
-                &id,
-                "preview changed the plugin's typed module inventory",
-            ));
-        }
-        if client
-            .list_plugins()
-            .await?
-            .iter()
-            .any(|item| item.id == id)
-        {
-            return Err(failed(
-                &id,
-                "disposable palace already contains this plugin",
-            ));
-        }
+        ensure(
+            preview.id == id
+                && preview.version == package.manifest.plugin.version
+                && preview.adoptions.is_empty(),
+            &id,
+            "archive preview differs from its manifest or unexpectedly requires adoption",
+        )?;
+        ensure(
+            inventory(&preview.modules) == inventory(&package.manifest.modules),
+            &id,
+            "preview changed the plugin's typed module inventory",
+        )?;
+        ensure(
+            !client
+                .list_plugins()
+                .await?
+                .iter()
+                .any(|item| item.id == id),
+            &id,
+            "disposable palace already contains this plugin",
+        )?;
         let consents = preview
             .source_consents
             .iter()
             .map(|source| (source.source.clone(), source.digest.clone()))
             .collect::<BTreeMap<_, _>>();
         let installed = client.install_plugin(bytes, &consents, &[]).await?;
-        if inventory(&installed.manifest.modules) != inventory(&package.manifest.modules) {
-            return Err(failed(
-                &id,
-                "installed plugin has a different module inventory",
-            ));
-        }
+        ensure(
+            inventory(&installed.manifest.modules) == inventory(&package.manifest.modules),
+            &id,
+            "installed plugin has a different module inventory",
+        )?;
         let shown = client.show_plugin(&id).await?;
-        if shown.digest != installed.digest {
-            return Err(failed(
-                &id,
-                "installed plugin digest changed after installation",
-            ));
-        }
+        ensure(
+            shown.digest == installed.digest,
+            &id,
+            "installed plugin digest changed after installation",
+        )?;
         for module in &package.manifest.modules {
             if module.kind == PluginModuleKind::Source {
                 let source = client.show_source(&module.id).await?;
-                if source.state != SourceState::Installed {
-                    return Err(failed(
-                        &id,
-                        format!("source `{}` was activated during install", module.id),
-                    ));
-                }
+                ensure(
+                    source.state == SourceState::Installed,
+                    &id,
+                    format!("source `{}` was activated during install", module.id),
+                )?;
                 let enabled = client.set_source_enabled(&module.id, true).await?;
-                if enabled.state != SourceState::Enabled {
-                    return Err(failed(
-                        &id,
-                        format!("source `{}` could not be enabled", module.id),
-                    ));
-                }
+                ensure(
+                    enabled.state == SourceState::Enabled,
+                    &id,
+                    format!("source `{}` could not be enabled", module.id),
+                )?;
             }
         }
         Ok(())

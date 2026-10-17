@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::domain::{PluginManifest, PluginModuleKind, sha256_hex};
 use crate::error::{Error, Result};
 
-use super::{MANIFEST_FILE, manifest};
+use super::{MANIFEST_FILE, RELEASE_FILE, manifest};
 
 /// Maximum compressed plugin upload/download size.
 pub const MAX_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
@@ -33,6 +33,8 @@ pub struct PluginPackage {
 pub struct PackagedPlugin {
     /// Destination of the deterministic release archive.
     pub archive: PathBuf,
+    /// External GNU-style checksum for the archive, placed beside it.
+    pub checksum: PathBuf,
     /// SHA-256 of the exact archive bytes.
     pub sha256: String,
 }
@@ -49,49 +51,46 @@ pub fn inspect_manifest(path: &Path) -> Result<PluginManifest> {
     let root = path.parent().unwrap_or_else(|| Path::new("."));
     let bytes = read_project_file(root, MANIFEST_FILE)?;
     let text = std::str::from_utf8(&bytes).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
-    manifest::parse(text)
+    let mut descriptor = manifest::parse_descriptor(text)?;
+    let release = if root.join(RELEASE_FILE).is_file() {
+        let bytes = read_project_file(root, RELEASE_FILE)?;
+        let text =
+            std::str::from_utf8(&bytes).map_err(|_| invalid("manifest.toml is not UTF-8"))?;
+        manifest::parse_descriptor(text)?
+    } else {
+        descriptor.clone()
+    };
+    if release.plugin.version.is_empty() {
+        return Err(invalid("manifest.toml must declare a release version"));
+    }
+    descriptor.plugin.version = release.plugin.version;
+    for module in &mut descriptor.modules {
+        if let Some(released) = release
+            .modules
+            .iter()
+            .find(|released| released.kind == module.kind && released.id == module.id)
+        {
+            module.version = released.version.clone();
+        }
+    }
+    Ok(descriptor)
 }
 
-/// Package a manifest's already-built modules and update their reviewed digests.
+/// Package a manifest's already-built modules without changing the manifest.
 ///
 /// # Errors
 ///
-/// Rejects unsafe paths, missing/invalid artifacts and manifests that cannot be written.
+/// Rejects unsafe paths and missing/invalid artifacts.
 pub fn package_manifest(path: &Path, output: Option<&Path>) -> Result<PackagedPlugin> {
     if path.file_name() != Some(std::ffi::OsStr::new(MANIFEST_FILE)) {
         return Err(invalid("the root manifest must be named plugin.toml"));
     }
     let root = path.parent().unwrap_or_else(|| Path::new("."));
-    let original = read_project_file(root, MANIFEST_FILE)?;
-    let original_text =
-        std::str::from_utf8(&original).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
-    let plugin = manifest::parse(original_text)?;
-    let mut document: toml_edit::DocumentMut = original_text
-        .parse()
-        .map_err(|e| invalid(format!("cannot edit plugin.toml: {e}")))?;
-    if !plugin.modules.is_empty() {
-        let sections = document["modules"]
-            .as_array_of_tables_mut()
-            .ok_or_else(|| invalid("plugin.toml must declare [[modules]] sections"))?;
-        if sections.len() != plugin.modules.len() {
-            return Err(invalid(
-                "plugin.toml module sections do not match the manifest",
-            ));
-        }
-        for (section, module) in sections.iter_mut().zip(&plugin.modules) {
-            for (key, name) in [
-                ("manifest_sha256", module.manifest.as_str()),
-                ("sha256", module.entry.as_str()),
-            ] {
-                let bytes = read_project_file(root, name)?;
-                section[key] = toml_edit::value(sha256_hex(&bytes));
-            }
-        }
-    }
-    let updated = document.to_string();
-    // Validate the complete archive before changing a publisher's manifest on disk.
-    let bytes = pack_project_with_manifest(root, updated.as_bytes())?;
-    std::fs::write(path, updated).map_err(|e| Error::io(path.display().to_string(), e))?;
+    let plugin = inspect_manifest(path)?;
+    let bytes = pack_project(root)?;
+    let release = unpack(&bytes)?;
+    std::fs::write(root.join(RELEASE_FILE), &release.files[RELEASE_FILE])
+        .map_err(|e| Error::io(root.join(RELEASE_FILE).display().to_string(), e))?;
     let destination = output.map_or_else(
         || {
             root.join("dist").join(format!(
@@ -106,9 +105,25 @@ pub fn package_manifest(path: &Path, output: Option<&Path>) -> Result<PackagedPl
     }
     std::fs::write(&destination, &bytes)
         .map_err(|e| Error::io(destination.display().to_string(), e))?;
+    let checksum = destination.with_file_name(format!(
+        "{}.sha256sum",
+        destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .trim_end_matches(".tar.gz")
+    ));
+    let archive_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| invalid("archive filename must be UTF-8"))?;
+    let digest = sha256_hex(&bytes);
+    std::fs::write(&checksum, format!("{digest}  {archive_name}\n"))
+        .map_err(|e| Error::io(checksum.display().to_string(), e))?;
     Ok(PackagedPlugin {
         archive: destination,
-        sha256: sha256_hex(&bytes),
+        checksum,
+        sha256: digest,
     })
 }
 
@@ -124,10 +139,81 @@ fn invalid(message: impl Into<String>) -> Error {
 ///
 /// [`Error::PluginPackageInvalid`] if the input is incomplete or the archive cannot be written.
 pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
-    validate_files(files)?;
+    let mut all = files.clone();
+    let descriptor_bytes = all
+        .remove(MANIFEST_FILE)
+        .ok_or_else(|| invalid("missing plugin.toml descriptor"))?;
+    let mut descriptor = manifest::parse_descriptor(
+        std::str::from_utf8(&descriptor_bytes).map_err(|_| invalid("plugin.toml is not UTF-8"))?,
+    )?;
+    let seed = if let Some(bytes) = all.remove(RELEASE_FILE) {
+        manifest::parse_descriptor(
+            std::str::from_utf8(&bytes).map_err(|_| invalid("manifest.toml is not UTF-8"))?,
+        )?
+    } else {
+        descriptor.clone()
+    };
+    if seed.plugin.version.is_empty() {
+        return Err(invalid("manifest.toml must declare a release version"));
+    }
+    descriptor.plugin.version = seed.plugin.version;
+    for module in &mut descriptor.modules {
+        module.version = match module.kind {
+            PluginModuleKind::Source => {
+                let text = std::str::from_utf8(
+                    all.get(&module.manifest)
+                        .ok_or_else(|| invalid(format!("missing `{}`", module.manifest)))?,
+                )
+                .map_err(|_| invalid(format!("module `{}` manifest is not UTF-8", module.id)))?;
+                crate::source::manifest::parse(text, &crate::mining::registry::BUILTIN_NAMES)?
+                    .source
+                    .version
+            }
+            PluginModuleKind::Integration => {
+                let text = std::str::from_utf8(
+                    all.get(&module.manifest)
+                        .ok_or_else(|| invalid(format!("missing `{}`", module.manifest)))?,
+                )
+                .map_err(|_| invalid(format!("module `{}` manifest is not UTF-8", module.id)))?;
+                crate::integration::manifest::parse(text)?
+                    .integration
+                    .version
+            }
+            PluginModuleKind::EmbeddingProvider => seed
+                .modules
+                .iter()
+                .find(|entry| entry.kind == module.kind && entry.id == module.id)
+                .map_or_else(|| module.version.clone(), |entry| entry.version.clone()),
+        };
+        module.manifest_sha256 = sha256_hex(
+            all.get(&module.manifest)
+                .ok_or_else(|| invalid(format!("missing `{}`", module.manifest)))?,
+        );
+        module.sha256 = sha256_hex(
+            all.get(&module.entry)
+                .ok_or_else(|| invalid(format!("missing `{}`", module.entry)))?,
+        );
+    }
+    let mut checksums = BTreeMap::new();
+    for (path, bytes) in &all {
+        if path.bytes().any(|byte| byte.is_ascii_control()) {
+            return Err(invalid(format!(
+                "archive path `{path}` contains a control character"
+            )));
+        }
+        checksums.insert(path.clone(), sha256_hex(bytes));
+    }
+    descriptor.checksums = checksums;
+    all.insert(
+        RELEASE_FILE.to_string(),
+        toml::to_string(&descriptor)
+            .map_err(|e| invalid(format!("cannot format manifest.toml: {e}")))?
+            .into_bytes(),
+    );
+    validate_files(&all)?;
     let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     let mut tarball = tar::Builder::new(encoder);
-    for (path, bytes) in files {
+    for (path, bytes) in &all {
         let mut header = tar::Header::new_gnu();
         header.set_size(bytes.len() as u64);
         header.set_mode(0o644);
@@ -160,8 +246,14 @@ pub fn pack_project(root: &Path) -> Result<Vec<u8>> {
 fn pack_project_with_manifest(root: &Path, manifest: &[u8]) -> Result<Vec<u8>> {
     let mut files = BTreeMap::new();
     let text = std::str::from_utf8(manifest).map_err(|_| invalid("plugin.toml is not UTF-8"))?;
-    let plugin = manifest::parse(text)?;
+    let plugin = manifest::parse_descriptor(text)?;
     files.insert(MANIFEST_FILE.to_string(), manifest.to_vec());
+    if root.join(RELEASE_FILE).is_file() {
+        files.insert(
+            RELEASE_FILE.to_string(),
+            read_project_file(root, RELEASE_FILE)?,
+        );
+    }
     for module in &plugin.modules {
         files.insert(
             module.manifest.clone(),
@@ -317,12 +409,13 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
     }
     let text = std::str::from_utf8(
         files
-            .get(MANIFEST_FILE)
-            .ok_or_else(|| invalid("missing plugin.toml"))?,
+            .get(RELEASE_FILE)
+            .ok_or_else(|| invalid("missing manifest.toml"))?,
     )
-    .map_err(|_| invalid("plugin.toml is not UTF-8"))?;
+    .map_err(|_| invalid("manifest.toml is not UTF-8"))?;
     let root = manifest::parse(text)?;
-    let mut allowed = HashSet::from([MANIFEST_FILE]);
+    verify_checksums(files, &root.checksums)?;
+    let mut allowed = HashSet::from([RELEASE_FILE]);
     for module in &root.modules {
         for (path, expected) in [
             (&module.manifest, &module.manifest_sha256),
@@ -333,7 +426,7 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
                 .ok_or_else(|| invalid(format!("module `{}` is missing `{path}`", module.id)))?;
             if sha256_hex(bytes) != *expected {
                 return Err(invalid(format!(
-                    "module `{}`: `{path}` does not match the declared SHA-256",
+                    "module `{}`: `{path}` does not match its manifest.toml digest",
                     module.id
                 )));
             }
@@ -430,6 +523,40 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
     })
 }
 
+fn verify_checksums(
+    files: &BTreeMap<String, Vec<u8>>,
+    checksums: &BTreeMap<String, String>,
+) -> Result<()> {
+    for (path, expected) in checksums {
+        if expected.len() != 64
+            || !expected
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || path == RELEASE_FILE
+            || !manifest::safe_path(path)
+            || path.bytes().any(|b| b.is_ascii_control())
+        {
+            return Err(invalid(format!(
+                "invalid manifest.toml checksum entry `{path}`"
+            )));
+        }
+        let actual = files
+            .get(path)
+            .ok_or_else(|| invalid(format!("manifest.toml names missing file `{path}`")))?;
+        if sha256_hex(actual) != *expected {
+            return Err(invalid(format!(
+                "manifest.toml checksum does not match `{path}`"
+            )));
+        }
+    }
+    if checksums.len() != files.len() - 1 {
+        return Err(invalid(
+            "manifest.toml must checksum every other archive file exactly once",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,6 +596,7 @@ mod tests {
             shared_config_schema: None,
             authentication: None,
             modules,
+            checksums: BTreeMap::new(),
         };
         let mut files = BTreeMap::from([(
             MANIFEST_FILE.to_string(),
@@ -491,11 +619,47 @@ mod tests {
         assert_eq!(pack(&files).unwrap(), bytes);
         let package = unpack(&bytes).unwrap();
         assert_eq!(package.manifest.modules.len(), 2);
-        assert_eq!(package.files, files);
+        let mut archived = package.files;
+        assert!(archived.remove(RELEASE_FILE).is_some());
+        let mut expected = files;
+        expected.remove(MANIFEST_FILE);
+        assert_eq!(archived, expected);
     }
 
     #[test]
-    fn a_publisher_updates_both_reviewed_hashes_before_packaging_prebuilt_modules() {
+    fn a_static_descriptor_is_merged_with_reviewed_release_metadata() {
+        let mut files = fixture();
+        let seed = String::from_utf8(files.remove(MANIFEST_FILE).unwrap()).unwrap();
+        let mut descriptor: toml_edit::DocumentMut = seed.parse().unwrap();
+        descriptor["plugin"]
+            .as_table_mut()
+            .unwrap()
+            .remove("version");
+        for module in descriptor["modules"]
+            .as_array_of_tables_mut()
+            .unwrap()
+            .iter_mut()
+        {
+            for key in ["version", "sha256", "manifest_sha256"] {
+                module.remove(key);
+            }
+        }
+        let unchanged = descriptor.to_string();
+        files.insert(MANIFEST_FILE.into(), unchanged.as_bytes().to_vec());
+        files.insert(RELEASE_FILE.into(), seed.into_bytes());
+        let packed = unpack(&pack(&files).unwrap()).unwrap();
+        assert_eq!(packed.manifest.plugin.version, "0.1.0");
+        assert_eq!(packed.manifest.modules.len(), 2);
+        assert_eq!(packed.manifest.checksums.len(), 4);
+        assert!(!packed.files.contains_key(MANIFEST_FILE));
+        assert_eq!(
+            std::str::from_utf8(&files[MANIFEST_FILE]).unwrap(),
+            unchanged
+        );
+    }
+
+    #[test]
+    fn a_publisher_keeps_the_manifest_immutable_and_emits_both_checksum_files() {
         let root = tempfile::tempdir().unwrap();
         let mut files = fixture();
         let text = String::from_utf8(files.remove(MANIFEST_FILE).unwrap()).unwrap();
@@ -503,7 +667,7 @@ mod tests {
             &sha256_hex(&files["modules/one/source.wasm"]),
             &"0".repeat(64),
         );
-        std::fs::write(root.path().join(MANIFEST_FILE), manifest).unwrap();
+        std::fs::write(root.path().join(MANIFEST_FILE), &manifest).unwrap();
         for (name, bytes) in files {
             let path = root.path().join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -512,27 +676,70 @@ mod tests {
         let first = package_manifest(&root.path().join(MANIFEST_FILE), None).unwrap();
         let archive = std::fs::read(&first.archive).unwrap();
         assert_eq!(first.sha256, sha256_hex(&archive));
-        assert_eq!(unpack(&archive).unwrap().manifest.modules.len(), 2);
-        let reviewed = std::fs::read(root.path().join(MANIFEST_FILE)).unwrap();
+        let packaged = unpack(&archive).unwrap();
+        assert_eq!(packaged.manifest.modules.len(), 2);
+        assert!(!packaged.files.contains_key(MANIFEST_FILE));
+        assert_eq!(
+            packaged.files[RELEASE_FILE],
+            packaged.manifest_text.as_bytes()
+        );
+        assert_eq!(packaged.manifest.plugin.version, "0.1.0");
+        assert_eq!(
+            std::fs::read(root.path().join(MANIFEST_FILE)).unwrap(),
+            manifest.as_bytes()
+        );
+        let expected = format!("{}  example-0.1.0.tar.gz\n", first.sha256);
+        assert_eq!(std::fs::read_to_string(&first.checksum).unwrap(), expected);
         let again = package_manifest(&root.path().join(MANIFEST_FILE), None).unwrap();
         assert_eq!(again.sha256, first.sha256);
         assert_eq!(
             std::fs::read(root.path().join(MANIFEST_FILE)).unwrap(),
-            reviewed
+            manifest.as_bytes()
         );
     }
 
     #[test]
-    fn an_artifact_changed_after_manifest_creation_is_refused() {
-        let mut files = fixture();
+    fn an_artifact_changed_after_the_archive_checksum_is_created_is_refused() {
+        let mut files = unpack(&pack(&fixture()).unwrap()).unwrap().files;
         files.insert(
             "modules/two/source.wasm".to_string(),
             b"\0asmreplaced".to_vec(),
         );
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for (path, bytes) in &files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            tarball
+                .append_data(&mut header, path, bytes.as_slice())
+                .unwrap();
+        }
+        let archive = tarball.into_inner().unwrap().finish().unwrap();
         assert!(matches!(
-            pack(&files),
+            unpack(&archive),
             Err(Error::PluginPackageInvalid { .. })
         ));
+    }
+
+    #[test]
+    fn an_archive_without_the_required_manifest_is_refused() {
+        let files = fixture();
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for (path, bytes) in &files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            tarball
+                .append_data(&mut header, path, bytes.as_slice())
+                .unwrap();
+        }
+        let archive = tarball.into_inner().unwrap().finish().unwrap();
+        let error = unpack(&archive).unwrap_err().to_string();
+        assert!(error.contains("manifest.toml"), "{error}");
     }
 
     #[test]
@@ -674,9 +881,12 @@ mod tests {
             std::fs::create_dir_all(target.parent().unwrap()).unwrap();
             std::fs::write(target, bytes).unwrap();
         }
+        let mut archived = unpack(&pack_project(root.path()).unwrap()).unwrap().files;
+        assert!(archived.remove(RELEASE_FILE).is_some());
+        let mut expected = files;
+        expected.remove(MANIFEST_FILE);
         assert_eq!(
-            unpack(&pack_project(root.path()).unwrap()).unwrap().files,
-            files,
+            archived, expected,
             "packaging from a provider checkout must retain the integration's nested assets"
         );
     }

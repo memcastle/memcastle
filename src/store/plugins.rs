@@ -258,6 +258,7 @@ mod tests {
     use crate::domain::{
         PluginInfo, PluginModule, PluginModuleKind, SourceOrigin, SourcePackageState,
     };
+    use std::collections::BTreeMap;
 
     #[tokio::test]
     async fn replacing_a_plugin_generation_keeps_one_installation_record() {
@@ -280,6 +281,7 @@ mod tests {
                 shared_config_schema: None,
                 authentication: None,
                 modules: Vec::new(),
+                checksums: BTreeMap::new(),
             },
             digest: "old".to_string(),
             generation: "example/old".to_string(),
@@ -321,6 +323,7 @@ mod tests {
                 shared_config_schema: None,
                 authentication: None,
                 modules: Vec::new(),
+                checksums: BTreeMap::new(),
             },
             digest: "a".repeat(64),
             generation: "a".repeat(64),
@@ -397,6 +400,7 @@ mod tests {
             shared_config_schema: None,
             authentication: None,
             modules: Vec::new(),
+            checksums: BTreeMap::new(),
         };
         let first = PluginRecord {
             id: "first".into(),
@@ -525,6 +529,7 @@ mod tests {
                     contract: None,
                     config_schema: None,
                 }],
+                checksums: BTreeMap::new(),
             },
             digest: "a".repeat(64),
             generation: "a".repeat(64),

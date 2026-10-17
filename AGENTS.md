@@ -237,7 +237,9 @@ An invariant nothing checks is a comment, and it will be violated.
 
 14. **Plugins are the distribution unit; their modules never acquire one another's lifecycle state** —
     the reviewed `plugins.json` catalogue is separate from the legacy `registry.json` source index, and a release
-    archive contains a versioned parent manifest plus one or more typed modules. Plugin install defaults each new
+   archive contains a generated `manifest.toml` with the descriptor's metadata, release versions, checksums of every
+   artifact, and typed modules; the project-local `plugin.toml` descriptor is never rewritten or archived.
+   Plugin install defaults each new
     source to `installed`, never enables it or installs an integration in an agent; only `source enable` or the local
     `integration install` does that. A legacy source cannot be silently claimed by a plugin: a mined legacy name needs
     explicit `--adopt-source`, and a previously installed plugin retains ownership after uninstall so another plugin

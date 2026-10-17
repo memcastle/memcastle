@@ -278,6 +278,7 @@ mod tests {
                 contract: None,
                 config_schema: None,
             }],
+            checksums: std::collections::BTreeMap::new(),
         };
         let files = std::collections::BTreeMap::from([
             (
