@@ -10,7 +10,13 @@ on:
       archive-path:
         description: Path to the single already-built archive, relative to the artifact root
         type: string
-        required: true
+        required: false
+        default: ""
+      core-version:
+        description: One caller-selected Core release tree or exact version (empty uses the legacy matrix)
+        type: string
+        required: false
+        default: ""
       smoke-command:
         description: Optional provider-owned installation check after the generic archive smoke test
         type: string
@@ -31,6 +37,10 @@ on:
         type: string
         required: false
         default: "[]"
+    outputs:
+      archive:
+        description: The sole validated archive path relative to the repository root
+        value: ${{ jobs.compatibility.outputs.archive }}
 
 permissions:
   contents: read
@@ -44,20 +54,30 @@ jobs:
       - id: list
         env:
           VERSIONS: ${{ inputs.core-versions }}
+          VERSION: ${{ inputs.core-version }}
         run: |
-          jq -cnr --arg raw "$VERSIONS" '
-            ($raw | fromjson) as $versions
-            | if ($versions | type) == "array"
-                 and ($versions | all(.[]; type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
-                 and ($versions | length) == ($versions | unique | length)
-              then "cores=\(["main"] + $versions | tojson)"
-              else error("core-versions must contain unique exact stable tags") end
-          ' >> "$GITHUB_OUTPUT"
+          if [[ -n "$VERSION" ]]; then
+            [[ "$VERSION" == main || "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || {
+              echo '::error::core-version must be main, a release tree or an exact stable version'; exit 1;
+            }
+            jq -cnr --arg version "$VERSION" '"cores=\([$version] | tojson)"' >> "$GITHUB_OUTPUT"
+          else
+            jq -cnr --arg raw "$VERSIONS" '
+              ($raw | fromjson) as $versions
+              | if ($versions | type) == "array"
+                   and ($versions | all(.[]; type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
+                   and ($versions | length) == ($versions | unique | length)
+                then "cores=\(["main"] + $versions | tojson)"
+                else error("core-versions must contain unique exact stable tags") end
+            ' >> "$GITHUB_OUTPUT"
+          fi
 
   compatibility:
     needs: matrix
     name: Core ${{ matrix.core }}
     runs-on: ubuntu-latest
+    outputs:
+      archive: ${{ steps.archive.outputs.path }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,24 +88,31 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}
       - name: Require the provider's built archive
+        id: archive
         env:
           ARCHIVE: ${{ inputs.archive-path }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "$ARCHIVE" ]]; then
+            shopt -s nullglob
+            archives=(dist/*.tar.gz)
+            [[ "${#archives[@]}" -eq 1 ]] || { echo '::error::expected exactly one built plugin archive below dist/'; exit 1; }
+            ARCHIVE="${archives[0]}"
+          fi
           [[ "$ARCHIVE" == dist/* && "$ARCHIVE" != *..* && "$ARCHIVE" == *.tar.gz ]] || {
             echo '::error::archive-path must name one archive below dist/'
             exit 1
           }
           test -s "$ARCHIVE" || { echo "::error::built archive missing: $ARCHIVE"; exit 1; }
-      - uses: memcastle/memcastle/.github/actions/core-binary@main
+          echo "path=$ARCHIVE" >> "$GITHUB_OUTPUT"
+      - uses: memcastle/memcastle@main
         id: core
         with:
           version: ${{ matrix.core }}
       - name: Check source conformance and isolated plugin installation
         env:
-          MEMCASTLE_BIN: ${{ steps.core.outputs.binary }}
-          ARCHIVE: ${{ inputs.archive-path }}
+          ARCHIVE: ${{ steps.archive.outputs.path }}
           FIXTURE_BIN: ${{ inputs.fixture-bin }}
           SMOKE: ${{ inputs.smoke-command }}
           EXTRA_SMOKE: ${{ inputs.extra-smoke-command }}
@@ -97,10 +124,15 @@ jobs:
           fi
           for manifest in modules/*/memcastle-source.toml; do
             if [[ -f "$manifest" ]]; then
-              "$MEMCASTLE_BIN" source test "$(dirname "$manifest")" --no-build
+              module_dir="$(dirname "$manifest")"
+              if [[ -f "$module_dir/source.wasm" ]]; then
+                mkdir -p "$module_dir/dist"
+                cp "$module_dir/source.wasm" "$module_dir/dist/source.wasm"
+              fi
+              memcastle source test "$module_dir" --no-build
             fi
           done
-          "$MEMCASTLE_BIN" plugin test "$ARCHIVE"
+          memcastle plugin test "$ARCHIVE"
           if [[ -n "$SMOKE" ]]; then
             bash -e -o pipefail -c "$SMOKE"
           fi
