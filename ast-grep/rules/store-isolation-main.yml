@@ -1,0 +1,35 @@
+id: store-isolation-main
+language: Rust
+severity: error
+message: main.rs may import only SurrealStore for migrate, not other store/jobs APIs.
+files:
+  - src/main.rs
+rule:
+  any:
+    - all:
+        - kind: scoped_identifier
+          regex: '^(crate|memcastle)::(store|jobs)\b'
+        - not:
+            inside:
+              kind: use_declaration
+              regex: '^use memcastle::store::SurrealStore;$'
+              stopBy: end
+    - all:
+        - kind: scoped_use_list
+        - has:
+            field: path
+            regex: '^(crate|memcastle)$'
+        - has:
+            field: list
+            has:
+              any:
+                - kind: scoped_identifier
+                  regex: '^(store|jobs)::'
+                - kind: scoped_use_list
+                  regex: '^(store|jobs)::'
+                - kind: identifier
+                  regex: '^(store|jobs)$'
+    - kind: string_literal
+      regex: '(crate|memcastle)::(store|jobs)\b'
+    - kind: raw_string_literal
+      regex: '(crate|memcastle)::(store|jobs)\b'

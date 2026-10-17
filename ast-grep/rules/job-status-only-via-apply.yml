@@ -1,0 +1,11 @@
+id: job-status-only-via-apply
+language: Rust
+severity: error
+message: Change job.status through Job::apply, never with a direct assignment.
+files:
+  - src/**/*.rs
+  - tests/**/*.rs
+ignores:
+  - src/domain/job.rs
+rule:
+  pattern: $OBJ.status = $VALUE

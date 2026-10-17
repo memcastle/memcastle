@@ -37,6 +37,9 @@ idiomatic_version_file_enable_tools = []
 
 [tools]
 actionlint = "latest"
+# The project-owned architecture hook runs in CI's lint job, so `mise install`
+# must install the same pinned ast-grep binary on developer machines and CI.
+"aqua:ast-grep/ast-grep" = "0.51.0"
 # actionlint silently skips its shellcheck integration when the binary is
 # absent, so without this a local run is NOT the CI run. Runners ship it.
 #
@@ -248,20 +251,15 @@ git tpl diff --exit-code --stat
 # committed binaries, so a routine run would dirty the working tree every time.
 
 [tasks.guards]
-description = "Run the architecture guard hooks over the whole tree"
-# The same hooks CI runs through `prek run --all-files`, minus the ones that
+description = "Run the architecture guard over the whole tree"
+# The same hook CI runs through `prek run --all-files`, minus the ones that
 # duplicate other tasks (fmt, clippy, typos, markdownlint, actionlint). These
 # enforce AGENTS.md invariants 1, 2, 4, 5, 8 and 11, which nothing else in `check` covers.
 # Invariants 9 and 10 are enforced by tests (`tests/source_isolation.rs`), not hooks: see docs/development.md.
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-prek run --all-files store-isolation
-prek run --all-files single-writer
-prek run --all-files job-status-only-via-apply
-prek run --all-files no-hand-rolled-ddl
-prek run --all-files integrations-http-only
-prek run --all-files web-http-only
+prek run --all-files architecture
 """
 
 [tasks."test:wasm"]

@@ -1,0 +1,34 @@
+id: store-isolation
+language: Rust
+severity: error
+message: Interface code must access store/jobs through AppServices or the daemon HTTP API.
+files:
+  - src/cli.rs
+  - src/client/**/*.rs
+  - src/mcp/**/*.rs
+  - src/api/**/*.rs
+rule:
+  any:
+    - kind: scoped_identifier
+      regex: '^(crate|memcastle)::(store|jobs)\b'
+    - all:
+        - kind: scoped_use_list
+        - has:
+            field: path
+            regex: '^(crate|memcastle)$'
+        - has:
+            field: list
+            has:
+              any:
+                - kind: scoped_identifier
+                  regex: '^(store|jobs)::'
+                - kind: scoped_use_list
+                  regex: '^(store|jobs)::'
+                - kind: identifier
+                  regex: '^(store|jobs)$'
+    # Diagnostic codes are public paths too: spelling one here used to fail
+    # the old guard, even inside a string, so retain that explicit restriction.
+    - kind: string_literal
+      regex: '(crate|memcastle)::(store|jobs)\b'
+    - kind: raw_string_literal
+      regex: '(crate|memcastle)::(store|jobs)\b'

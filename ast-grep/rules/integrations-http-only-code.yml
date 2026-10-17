@@ -1,0 +1,22 @@
+id: integrations-http-only-code
+language: TypeScript
+severity: error
+message: Integrations must use MCP/HTTP, never storage, jobs, or the database admin endpoint.
+files:
+  - integrations/**/*.js
+  - integrations/**/*.ts
+  - integrations/**/*.vue
+ignores:
+  - integrations/node_modules/**
+rule:
+  any:
+    - kind: identifier
+      regex: '^(surrealdb|surrealkv|SurrealStore)$'
+    - kind: type_identifier
+      regex: '^SurrealStore$'
+    - kind: string
+      regex: 'surrealkv:|/api/db\b|^(?:"|''|`)(?:@[^/"''`]+/)?surrealdb(?:/[^"''`]*)?(?:"|''|`)$|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: template_string
+      regex: 'surrealkv:|/api/db\b|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: import_statement
+      regex: '(?i)\bsurrealdb\b'

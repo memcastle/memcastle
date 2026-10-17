@@ -1,0 +1,9 @@
+id: single-writer
+valid:
+  - 'let store = app.store();'
+  - '// SurrealStore::connect(&backend);'
+  - 'let a = "surrealdb:";'
+invalid:
+  - 'let store = SurrealStore::connect(&backend).await?;'
+  - 'let endpoint = "surrealkv:/data/palace";'
+  - 'let endpoint = r#"surrealkv:/data/palace"#;'

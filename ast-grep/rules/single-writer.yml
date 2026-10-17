@@ -1,0 +1,17 @@
+id: single-writer
+language: Rust
+severity: error
+message: Only the server, storage implementation, and migrate may open a SurrealStore/SurrealKV endpoint.
+files:
+  - src/**/*.rs
+ignores:
+  - src/server/**/*.rs
+  - src/store/**/*.rs
+  - src/main.rs
+rule:
+  any:
+    - pattern: SurrealStore::connect($$$ARGS)
+    - kind: string_literal
+      regex: 'surrealkv:'
+    - kind: raw_string_literal
+      regex: 'surrealkv:'

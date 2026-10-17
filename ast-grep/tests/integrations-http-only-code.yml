@@ -1,0 +1,8 @@
+id: integrations-http-only-code
+valid:
+  - 'const client = fetch("/api/search")'
+  - '// const client = fetch("/api/db")'
+invalid:
+  - 'const db = require("surrealdb")'
+  - 'fetch("/api/db")'
+  - 'const uri = "surrealkv:/x"'

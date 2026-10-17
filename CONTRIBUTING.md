@@ -41,7 +41,7 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run lint:actions` | actionlint over the workflows |
 | `mise run lint:md` | markdownlint over AGENTS.md, CONTRIBUTING.md, README.md, docs/ and the skills' `SKILL.md` files |
 | `mise run spell` | typos |
-| `mise run guards` | The architecture guard hooks (`store-isolation`, `single-writer`, `job-status-only-via-apply`, `no-hand-rolled-ddl`, `integrations-http-only`, `web-http-only`) over the whole tree |
+| `mise run guards` | The `architecture` prek hook: ast-grep rules and fixtures for invariants 1, 2, 4, 5, 8 and 11 over the whole tree |
 | `mise run snapshots` | Review pending insta snapshots |
 | `mise run check` | Every lint, the guards, both test suites, the sources and the integrations, without modifying the working tree |
 | `mise run ci` | `check` plus the documentation build |

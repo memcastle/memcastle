@@ -1,0 +1,23 @@
+id: clients-http-only-javascript
+language: JavaScript
+severity: error
+message: Web and integration JavaScript must use HTTP/MCP, never storage, jobs, or /api/db.
+files:
+  - web/**/*.js
+  - web/**/*.jsx
+  - integrations/**/*.js
+  - integrations/**/*.jsx
+ignores:
+  - web/node_modules/**
+  - web/dist/**
+  - integrations/node_modules/**
+rule:
+  any:
+    - kind: identifier
+      regex: '^(surrealdb|surrealkv|SurrealStore)$'
+    - kind: string
+      regex: 'surrealkv:|/api/db\b|^(?:"|''|`)(?:@[^/"''`]+/)?surrealdb(?:/[^"''`]*)?(?:"|''|`)$|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: template_string
+      regex: 'surrealkv:|/api/db\b|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: import_statement
+      regex: '(?i)\bsurrealdb\b'
