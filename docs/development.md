@@ -70,9 +70,9 @@ Changing a source or removing an output makes the corresponding task run again; 
 (or the other task name) to rebuild regardless of freshness.
 The test and check tasks still run on every invocation, including when used through `mise run check` or `mise run ci`.
 
-`prek install` (once) wires the same checks into `git commit` as pre-commit hooks —
-formatting, Clippy, spelling, actionlint, markdownlint, commitlint, basic file hygiene,
-and the architecture guard described below.
+`prek install` (once) wires formatting, spelling, actionlint, markdownlint, commitlint, basic file hygiene,
+and the architecture guard described below into `git commit` as hooks.
+Full-project Clippy runs in CI and with `mise run lint`, rather than on every local commit.
 
 ## Running the daemon locally
 
