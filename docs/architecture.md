@@ -670,7 +670,7 @@ it has no scheduler for an integration's timers and no session of its own beyond
 See the [Integration contract](integration-contract.md) and [ADR-019](adr/019-shared-integration-contract.md).
 
 **Installing an integration is local tooling, not a daemon operation.**
-`memcastle integration` finds an integration under the assets root, checks it against the running MemCastle and the
+`memcastle integration` finds an integration under the assets root, checks it against the local MemCastle version and the
 agent's version, copies it to the user's data directory, and registers it through the agent's own mechanism:
 `pi install` for Pi, one marked plugin file for OpenCode.
 It lives in `crate::integration`, which like `crate::source` touches neither the store nor the jobs and opens no network,
