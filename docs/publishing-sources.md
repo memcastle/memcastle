@@ -171,6 +171,8 @@ The daemon does the fetching, so `mining.registries` and the trust settings are 
 `--registry <LOCATION>` consults one place only for a single command.
 Before anything is installed the daemon has downloaded and verified the package, and the CLI shows what that package
 asks for: you agree to the permissions of what was actually fetched.
+The CLI sends the previewed archive digest with the install request; if the registry serves a different archive before
+installation, the daemon refuses it and asks you to preview again.
 `source show` afterwards says where it came from, which registry and, when there is one, which key vouched for it.
 
 **Updating** installs the newest version from the index a registry source was installed from.

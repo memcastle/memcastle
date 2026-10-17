@@ -96,6 +96,9 @@ pub struct RegistryInstall {
     /// Consult only this index, instead of the configured ones.
     #[serde(default)]
     pub registry: Option<String>,
+    /// The archive digest shown at preview, when the caller reviewed a release before installation.
+    #[serde(default)]
+    pub archive_digest: Option<String>,
     /// The digest of the permissions the user agreed to.
     #[serde(default)]
     pub consent: Option<String>,
@@ -295,6 +298,20 @@ impl AppServices {
                 request.registry.as_deref(),
             )
             .await?;
+        // Registry verification proves that these bytes match the *current* index; pinning also proves that they are
+        // the bytes the caller reviewed, even if the same version was republished between preview and install.
+        if request
+            .archive_digest
+            .as_deref()
+            .is_some_and(|digest| digest != fetched.archive_digest)
+        {
+            return Err(Error::SourceIntegrity {
+                name: request.name,
+                message:
+                    "the release changed since it was previewed; preview it again before agreeing"
+                        .into(),
+            });
+        }
         self.install_archive(
             fetched.archive,
             request.consent.as_deref(),

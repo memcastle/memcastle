@@ -164,22 +164,16 @@ impl Fixture {
         )
     }
 
-    /// The digest the user agrees to, as the preview reports it.
-    async fn consent_digest(&self, version: Option<&str>) -> String {
-        let query = version.map_or_else(String::new, |v| format!("?version={v}"));
+    async fn install(&self, enable: bool) -> Value {
         let (status, preview) = self
-            .get(&format!("/api/source-registry/sources/{NAME}{query}"))
+            .get(&format!("/api/source-registry/sources/{NAME}"))
             .await;
         assert_eq!(status, StatusCode::OK, "{preview}");
-        preview["consent_digest"].as_str().unwrap().to_string()
-    }
-
-    async fn install(&self, enable: bool) -> Value {
-        let digest = self.consent_digest(None).await;
         let (status, body) = self
             .post(
                 "/api/source-registry/install",
-                json!({"name": NAME, "consent": digest, "enable": enable}),
+                json!({"name": NAME, "consent": preview["consent_digest"],
+                       "archive_digest": preview["archive_digest"], "enable": enable}),
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -196,6 +190,41 @@ impl Fixture {
             .cloned()
             .unwrap_or(Value::Null)
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archive_republished_after_preview_is_refused_even_when_the_index_verifies_it() {
+    let registry = Registry::new();
+    registry.publish(&preview_archive("0.1.0", false, ">=0.2"));
+    let fixture = Fixture::start(vec![registry.label()]).await;
+    let (status, preview) = fixture
+        .get(&format!("/api/source-registry/sources/{NAME}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+
+    // Simulate an upstream changing the same-version index and its archive together: index verification alone would
+    // accept the newly published bytes, but the user's earlier preview was of a different archive.
+    let bytes = preview_archive("0.1.0", true, ">=0.2");
+    let index_path = registry.path().join(memcastle::distribution::INDEX_FILE);
+    let mut index = registry.index();
+    let entry = &mut index.sources[0].versions[0];
+    std::fs::write(registry.path().join(&entry.url), &bytes).unwrap();
+    entry.sha256 = memcastle::domain::sha256_hex(&bytes);
+    entry.size = Some(bytes.len() as u64);
+    publish::write_index(&index_path, &mut index).unwrap();
+
+    let (status, refused) = fixture
+        .post(
+            "/api/source-registry/install",
+            json!({"name": NAME, "version": "0.1.0", "registry": registry.label(),
+                   "archive_digest": preview["archive_digest"], "consent": preview["consent_digest"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{refused}");
+    assert_eq!(refused["code"], "memcastle::source::integrity");
+    assert!(refused["error"].as_str().unwrap().contains("previewed"));
+    assert!(fixture.listed().await.is_null());
+    fixture.daemon.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

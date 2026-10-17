@@ -1693,6 +1693,7 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
                     name,
                     version: Some(preview.version),
                     registry,
+                    archive_digest: Some(preview.archive_digest),
                     consent,
                     enable: args.enable,
                 })
