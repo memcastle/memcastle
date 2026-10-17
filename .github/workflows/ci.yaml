@@ -75,11 +75,14 @@ jobs:
         with:
           cache: true
 
-      # The hooks, not the mise tasks: this is the same command a developer's
-      # `git commit` runs, so a green CI means the hooks are actually passing
-      # rather than a parallel set of checks that happens to agree.
+      # Run the same hooks as `git commit` so their results cannot drift.
       - name: Run hooks
         run: prek run --all-files --show-diff-on-failure
+
+      # Full-project Clippy is too expensive for every local commit; keep it
+      # in CI through the same lint task developers can run explicitly.
+      - name: Run Clippy
+        run: mise run lint
 
   # Basic behavior on every OS; expensive process-boundary and retrieval-baseline tests run in the Linux slow job.
   test:
