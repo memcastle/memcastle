@@ -254,33 +254,14 @@ jobs:
           directory: target/nextest/ci-wasm
           report_type: test_results
 
-  # One CI leg per directory under sources/, found at run time: adding `sources/<new>/` adds a leg and needs no
-  # workflow edit.
-  sources-list:
-    name: 📋 List the sources
-    runs-on: ubuntu-latest
-    outputs:
-      sources: ${{ steps.list.outputs.sources }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: List sources/*/
-        id: list
-        run: |
-          # A source is a directory with a manifest, so a stray directory or README never becomes a leg.
-          names=$(for manifest in sources/*/memcastle-source.toml; do basename "$(dirname "$manifest")"; done | jq -R . | jq -sc .)
-          echo "sources=$names" >> "$GITHUB_OUTPUT"
-
+  # Core tests the maintained reference source explicitly; provider-owned sources run in their own repositories.
   sources:
     name: 🧩 Source (${{ matrix.source }})
-    needs: sources-list
-    # A matrix with no entries is an error, not an empty run.
-    if: needs.sources-list.outputs.sources != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        source: ${{ fromJSON(needs.sources-list.outputs.sources) }}
+        source: [directory]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -301,6 +282,52 @@ jobs:
         env:
           SOURCE: ${{ matrix.source }}
         run: mise run sources:test -- "$SOURCE"
+
+  # The in-tree plugin is a packaging fixture, not a provider released from Core.
+  example_plugin:
+    name: 🧩 Example plugin tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Check Core release selection tooling
+        run: python3 -m unittest discover -s packaging/plugins
+
+      - name: Build and package the example plugin
+        run: |
+          python3 plugins/example/scripts/package.py
+          python3 -m unittest discover -s plugins/example/tests
+          git diff --exit-code -- plugins/example/plugin.toml || {
+            echo "::error::packaging must not change plugin.toml"
+            exit 1
+          }
+          git diff --exit-code -- plugins/example/manifest.toml || {
+            echo "::error::packaging must not change the checked-in manifest.toml"
+            exit 1
+          }
+          (cd plugins/example/dist && for checksum in *.sha256sum; do sha256sum --check "$checksum"; done)
+          for manifest in plugins/example/modules/*/memcastle-source.toml; do
+            if [[ -f "$manifest" ]]; then
+              lock="$(dirname "$manifest")/Cargo.lock"
+              git ls-files --error-unmatch "$lock" >/dev/null || {
+                echo "::error::commit $lock after packaging so release dependencies stay pinned"
+                exit 1
+              }
+            fi
+          done
+
+      - name: Preserve compiled components when artifact digests disagree
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: example-plugin-components
+          path: plugins/example/modules/*/source.wasm
 
   # The Core-shipped declarative integrations must install from a package and a checkout through the same local code.
   # Their agent assets are checked without needing a provider's build or client test suite.
@@ -442,13 +469,13 @@ jobs:
 
   development:
     name: 🧪 Publish tested development Core
-    needs: [lint, test, slow, wasm, sources-list, sources, integrations, web, packaging, ship]
+    needs: [lint, test, slow, wasm, sources, example_plugin, integrations, web, packaging, ship]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.lint.result == 'success' && needs.test.result == 'success' &&
       needs.slow.result == 'success' &&
-      needs.wasm.result == 'success' && needs.sources-list.result == 'success' &&
-      needs.sources.result == 'success' && needs.integrations.result == 'success' &&
+      needs.wasm.result == 'success' && needs.sources.result == 'success' &&
+      needs.example_plugin.result == 'success' && needs.integrations.result == 'success' &&
       needs.web.result == 'success' && needs.packaging.result == 'success' &&
       needs.ship.result == 'success'
     uses: ./.github/workflows/development-release.yaml

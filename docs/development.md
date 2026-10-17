@@ -2,8 +2,8 @@
 
 Provider-plugin authoring uses the [three GitTPL repositories](plugins.md) directly.
 The parent template composes reviewed source and integration modules, including an initially empty plugin.
-Each generated provider owns its descriptor, module builds, tests and CI/release workflows;
-the in-tree `plugins/<provider>/` layout also has an all-provider workflow.
+Each generated provider owns its descriptor, module builds, tests and CI/release workflows.
+Core CI uses `plugins/example` as a packaging-tooling fixture.
 Move that project to a standalone repository without changing the stable plugin and module IDs.
 
 ## Working on a standalone provider
@@ -19,7 +19,7 @@ it never uses the configured palace or agent installation.
 Agent registration and legacy adoption remain provider-specific checks.
 Standalone provider CI checks source conformance and archive installation against the successful `main` CI prerelease
 and selected plugin-capable release trees (latest stable patch), recording the exact Core revision or resolved tag.
-Core's provider workflow checks every in-tree provider on each pull request and main push.
+Core CI builds and checks only the `plugins/example` fixture on each pull request and main push.
 See [Plugin packages](plugins.md#shared-ci-and-development-core) for the release assets, SHA verification, reusable
 workflow inputs and compatibility policy.
 
@@ -126,8 +126,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   `mise run check:all` combines the template's `check` task with this project-specific slow gate.
   The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.
   The WebAssembly suite runs in CI on Linux only, in its own `wasm` job with its own Codecov flag,
-  and each directory under `sources/` also gets a CI leg of its own (`mise run sources:test -- <name>`), found automatically.
-  Each source's own CI leg runs conformance, plus any source-owned `core-tests.rs` cases not expressible as conformance.
+  and its `sources` job explicitly tests the `directory` reference source with `mise run sources:test -- directory`.
+  That job runs conformance, plus any source-owned `core-tests.rs` cases not expressible as conformance.
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
   Those that start the daemon inside the test process are modules of one binary, `tests/in_process/main.rs`:
   each `tests/` binary links the whole server, about 600 MB with debug info, so sixteen of them were most of what

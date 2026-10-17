@@ -378,8 +378,8 @@ same package contract that provider plugins use.
 `memcastle source test` needs no daemon and builds the component first, so it is all a CI job has to run.
 In a project of your own, install the `wasm32-wasip2` target (or your template's toolchain), build `memcastle`,
 and run `memcastle source test .`.
-In this repository nothing needs adding: each directory under `sources/` that holds a `memcastle-source.toml`
-gets its own CI job, which runs `mise run sources:test -- <name>`.
+In this repository Core CI explicitly runs `mise run sources:test -- directory` for the maintained reference source.
+Adding another reference source to CI requires an entry in the `sources` matrix in `.github/workflows/ci.yaml`.
 
 ## Troubleshooting
 
