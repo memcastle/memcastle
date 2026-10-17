@@ -216,11 +216,19 @@ pub fn component_dir(record: &SourcePackageRecord, mining: &MiningConfig) -> Pat
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
-        return mining
-            .plugin_dir()
-            .join(plugin)
-            .join(generation)
-            .join("modules");
+        let root = mining.plugin_dir().join(plugin).join(generation);
+        let typed = root.join("sources");
+        let source_dir = typed.join(&record.name);
+        // New generations keep source files in sources/<id>; old plugin archives still use modules/<id>.
+        // Refuse a linked candidate rather than following it out of the verified generation.
+        if typed.symlink_metadata().is_ok_and(|entry| entry.is_dir())
+            && source_dir
+                .symlink_metadata()
+                .is_ok_and(|entry| entry.is_dir())
+        {
+            return typed;
+        }
+        return root.join("modules");
     }
     if record.origin == SourceOrigin::Bundled
         && let Some(bundle) = Bundle::find(mining)

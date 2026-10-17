@@ -168,6 +168,18 @@ fn validate_fields(manifest: &PluginManifest, require_release_fields: bool) -> R
                 module.id
             )));
         }
+        let legacy = format!("modules/{}/", module.id);
+        let typed = match module.kind {
+            PluginModuleKind::Source => format!("sources/{}/", module.id),
+            PluginModuleKind::Integration => format!("integrations/{}/", module.id),
+            PluginModuleKind::EmbeddingProvider => legacy.clone(),
+        };
+        // The descriptor chooses one root per module; old archives retain modules/<id>.
+        let prefix = if module.manifest.starts_with(&typed) {
+            &typed
+        } else {
+            &legacy
+        };
         for path in [&module.manifest, &module.entry] {
             if !safe_path(path) || !paths.insert(path) {
                 return Err(invalid(format!(
@@ -175,10 +187,10 @@ fn validate_fields(manifest: &PluginManifest, require_release_fields: bool) -> R
                     module.id
                 )));
             }
-            if !path.starts_with(&format!("modules/{}/", module.id)) {
+            if !path.starts_with(prefix) {
                 return Err(invalid(format!(
-                    "module `{}` artifact `{path}` must stay under modules/{}/",
-                    module.id, module.id
+                    "module `{}` artifact `{path}` must stay under {typed} or {legacy}",
+                    module.id
                 )));
             }
         }
@@ -370,6 +382,21 @@ mod tests {
         integration.contract = None;
         manifest.modules.push(integration);
         validate(&manifest).unwrap();
+
+        // Distinct typed directories prevent two modules with the same public ID from sharing files.
+        manifest.modules[0].manifest = "sources/source-one/memcastle-source.toml".into();
+        manifest.modules[0].entry = "sources/source-one/source.wasm".into();
+        manifest.modules[1].manifest = "integrations/source-one/memcastle-integration.toml".into();
+        manifest.modules[1].entry = "integrations/source-one/dist/extension.js".into();
+        validate(&manifest).unwrap();
+        manifest.modules[1].entry = "sources/source-one/dist/extension.js".into();
+        assert!(
+            validate(&manifest)
+                .unwrap_err()
+                .to_string()
+                .contains("must stay under")
+        );
+        manifest.modules[1].entry = "integrations/source-one/dist/extension.js".into();
 
         // A second integration with that ID would make its install receipt ambiguous.
         manifest.modules.push(manifest.modules[1].clone());

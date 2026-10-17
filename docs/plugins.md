@@ -39,6 +39,9 @@ An optional dependency may be absent, but is version-checked when present.
 Removing a plugin blocks required dependents; optional dependents remain installed without it.
 Each module specifies a stable `id`, `type`, paths `manifest` and `entry`,
 and optionally `optional`, `config_schema` and a source `contract`.
+Source artifacts normally live under `sources/<id>/`, and integration artifacts under `integrations/<id>/`;
+previously published packages using `modules/<id>/` remain installable. Both paths for one module must share that
+module's selected directory. The typed roots let a source and integration share an ID without sharing files.
 `plugin.toml` is not rewritten by packaging; `manifest.toml` holds the parent and module versions and checksums.
 An optional top-level `artifacts = ["shared/config.json", "modules/example/support"]` lists additional project-relative
 files or directories to include once for multiple modules; integration manifests continue to supply agent assets and
@@ -154,7 +157,7 @@ update `plugin.repository` and the discovery catalogue through review before rel
 
 ## Standalone development and compatibility
 
-A provider repository has an immutable `plugin.toml` descriptor, independent `modules/<id>/` implementations and
+A provider repository has an immutable `plugin.toml` descriptor, independent typed source/integration implementations and
 fixtures, and its own CI and release workflows. The release `manifest.toml` exists inside the archive only;
 older providers may still retain a local manifest seed until they migrate.
 The parent manifest's `memcastle` semver range must match the source and integration manifests' Core requirements;
@@ -204,7 +207,8 @@ Standalone plugins own their build, packaging, versioning and release workflow.
 The generated `ci.yaml` builds each source/integration and calls `plugin package`, then uploads the archive and
 source components before Core's shared validation workflow.
 The shared workflow downloads that artifact; it never builds or packages a plugin.
-It reconstructs each source's `dist/source.wasm` fixture from the uploaded root component only after packaging.
+It reconstructs each source's `dist/source.wasm` fixture from the uploaded root component only after packaging,
+whether the plugin uses `sources/<id>` or the legacy `modules/<id>` layout.
 Caller jobs grant `contents: read` for validation and `contents: write` only where the provider publishes its release.
 For example, after a provider's `package` job uploads one archive and its source components:
 
@@ -229,7 +233,7 @@ New callers supply one `core-version` per static matrix leg, including `main` or
 Add `0.5` only after a plugin-capable Core release exists; there is no conditional integration-test skip.
 The required `artifact-name` identifies the already-built plugin; `archive-path` remains an optional legacy input.
 Without it Core demands exactly one archive below `dist/` and reports that path to the caller;
-include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
+include `sources/*/source.wasm` (or legacy `modules/*/source.wasm`) so `source test --no-build` exercises those bytes.
 For a release dispatched on `main`, pass `plugin-ref` with the reviewed tag so the fixture checkout matches the
 exact tagged archive; normal PR/main validation defaults to the caller's commit.
 The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow additional provider-owned checks and fixtures;

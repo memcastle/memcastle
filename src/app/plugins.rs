@@ -112,7 +112,15 @@ fn stage_generation(
                 .iter()
                 .filter(|module| module.kind == PluginModuleKind::Integration)
                 .any(|module| {
-                    let prefix = format!("modules/{}/", module.id);
+                    // Project only this integration's verified files, not a source sharing its ID.
+                    let prefix = format!(
+                        "{}/",
+                        module
+                            .manifest
+                            .rsplit_once('/')
+                            .expect("validated module path")
+                            .0
+                    );
                     files
                         .iter()
                         .filter(|(name, _)| name.starts_with(&prefix))
@@ -154,7 +162,14 @@ fn stage_generation(
             .iter()
             .filter(|module| module.kind == PluginModuleKind::Integration)
         {
-            let prefix = format!("modules/{}/", module.id);
+            let prefix = format!(
+                "{}/",
+                module
+                    .manifest
+                    .rsplit_once('/')
+                    .expect("validated module path")
+                    .0
+            );
             for (name, bytes) in files.iter().filter(|(name, _)| name.starts_with(&prefix)) {
                 let relative = name.strip_prefix(&prefix).expect("checked prefix");
                 let target = staging.join("integrations").join(&module.id).join(relative);

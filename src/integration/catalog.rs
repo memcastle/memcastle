@@ -159,7 +159,15 @@ impl Catalog {
                 .iter()
                 .filter(|module| module.kind == crate::domain::PluginModuleKind::Integration)
             {
-                let prefix = format!("modules/{}/", module.id);
+                // An integration's manifest is the authoritative root for its projected assets.
+                let prefix = format!(
+                    "{}/",
+                    module
+                        .manifest
+                        .rsplit_once('/')
+                        .expect("validated module path")
+                        .0
+                );
                 for (name, bytes) in package
                     .files
                     .iter()
