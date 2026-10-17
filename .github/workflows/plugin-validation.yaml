@@ -129,7 +129,7 @@ jobs:
           if [[ -n "$FIXTURE_BIN" ]]; then
             export PATH="$PWD/$FIXTURE_BIN:$PATH"
           fi
-          for manifest in modules/*/memcastle-source.toml; do
+          for manifest in modules/*/memcastle-source.toml sources/*/memcastle-source.toml; do
             if [[ -f "$manifest" ]]; then
               module_dir="$(dirname "$manifest")"
               if [[ -f "$module_dir/source.wasm" ]]; then

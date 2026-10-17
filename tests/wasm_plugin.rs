@@ -30,16 +30,16 @@ fn release() -> Vec<u8> {
             id: name.to_string(),
             kind: PluginModuleKind::Source,
             version: "0.1.0".into(),
-            manifest: format!("modules/{name}/memcastle-source.toml"),
+            manifest: format!("sources/{name}/memcastle-source.toml"),
             manifest_sha256: sha256_hex(&manifest),
-            entry: format!("modules/{name}/source.wasm"),
+            entry: format!("sources/{name}/source.wasm"),
             sha256: sha256_hex(&component),
             optional: false,
             contract: Some("0.4".into()),
             config_schema: None,
         });
-        files.insert(format!("modules/{name}/memcastle-source.toml"), manifest);
-        files.insert(format!("modules/{name}/source.wasm"), component);
+        files.insert(format!("sources/{name}/memcastle-source.toml"), manifest);
+        files.insert(format!("sources/{name}/source.wasm"), component);
     }
     let integration = b"format = 1\n[integration]\nid = 'assistant'\nversion = '0.1.0'\ndescription = 'agent-side lifecycle'\n[compatibility]\nmemcastle = '>=0.4'\n[agent]\nkind = 'opencode'\nentry = 'index.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
     let entry = b"export default { id: 'assistant', server: async () => ({}) };\n";
@@ -47,19 +47,22 @@ fn release() -> Vec<u8> {
         id: "assistant".into(),
         kind: PluginModuleKind::Integration,
         version: "0.1.0".into(),
-        manifest: "modules/assistant/memcastle-integration.toml".into(),
+        manifest: "integrations/assistant/memcastle-integration.toml".into(),
         manifest_sha256: sha256_hex(integration),
-        entry: "modules/assistant/dist/index.js".into(),
+        entry: "integrations/assistant/dist/index.js".into(),
         sha256: sha256_hex(entry),
         optional: false,
         contract: None,
         config_schema: None,
     });
     files.insert(
-        "modules/assistant/memcastle-integration.toml".into(),
+        "integrations/assistant/memcastle-integration.toml".into(),
         integration.to_vec(),
     );
-    files.insert("modules/assistant/dist/index.js".into(), entry.to_vec());
+    files.insert(
+        "integrations/assistant/dist/index.js".into(),
+        entry.to_vec(),
+    );
     let manifest = PluginManifest {
         format: 1,
         plugin: PluginInfo {
@@ -261,10 +264,10 @@ async fn multiple_sources_and_an_integration_keep_independent_lifecycles_and_min
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     let raw = package::unpack(&archive).unwrap();
     let legacy_manifest =
-        std::str::from_utf8(&raw.files["modules/first/memcastle-source.toml"]).unwrap();
+        std::str::from_utf8(&raw.files["sources/first/memcastle-source.toml"]).unwrap();
     let legacy = memcastle::source::package::pack(
         legacy_manifest,
-        &raw.files["modules/first/source.wasm"],
+        &raw.files["sources/first/source.wasm"],
         &[],
     )
     .unwrap();
@@ -603,7 +606,7 @@ async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_
 
     let mut package = package::unpack(&archive).unwrap();
     package.manifest.plugin.version = "0.2.0".into();
-    let name = "modules/first/memcastle-source.toml";
+    let name = "sources/first/memcastle-source.toml";
     let source = String::from_utf8(package.files[name].clone())
         .unwrap()
         .replace("version = \"0.1.0\"", "version = \"0.2.0\"")
@@ -712,7 +715,7 @@ async fn changing_one_source_permissions_requires_its_own_consent_and_preserves_
         .retain(|module| module.id == "first");
     package
         .files
-        .retain(|path, _| path == "plugin.toml" || path.starts_with("modules/first/"));
+        .retain(|path, _| path == "plugin.toml" || path.starts_with("sources/first/"));
     package.files.insert(
         "plugin.toml".into(),
         toml::to_string(&package.manifest).unwrap().into_bytes(),

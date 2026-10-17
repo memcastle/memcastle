@@ -975,28 +975,37 @@ mod tests {
         manifest.modules.retain(|module| module.id == "one");
         files.remove("modules/two/memcastle-source.toml");
         files.remove("modules/two/source.wasm");
+        let source = files.remove("modules/one/memcastle-source.toml").unwrap();
+        let component = files.remove("modules/one/source.wasm").unwrap();
+        manifest.modules[0].manifest = "sources/one/memcastle-source.toml".into();
+        manifest.modules[0].entry = "sources/one/source.wasm".into();
+        files.insert("sources/one/memcastle-source.toml".into(), source);
+        files.insert("sources/one/source.wasm".into(), component);
         let integration = b"format = 1\n[integration]\nid = 'one'\nversion = '0.1.0'\ndescription = 'An assistant integration'\n[compatibility]\nmemcastle = '>=0.4.0'\n[agent]\nkind = 'opencode'\nentry = 'dist/plugin.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
         let entry = b"export default () => {}";
         manifest.modules.push(PluginModule {
             id: "one".to_string(),
             kind: PluginModuleKind::Integration,
             version: "0.1.0".to_string(),
-            manifest: "modules/one/memcastle-integration.toml".to_string(),
+            manifest: "integrations/one/memcastle-integration.toml".to_string(),
             manifest_sha256: sha256_hex(integration),
-            entry: "modules/one/dist/plugin.js".to_string(),
+            entry: "integrations/one/dist/plugin.js".to_string(),
             sha256: sha256_hex(entry),
             optional: false,
             contract: None,
             config_schema: None,
         });
         files.insert(
-            "modules/one/memcastle-integration.toml".to_string(),
+            "integrations/one/memcastle-integration.toml".to_string(),
             integration.to_vec(),
         );
-        files.insert("modules/one/dist/plugin.js".to_string(), entry.to_vec());
+        files.insert(
+            "integrations/one/dist/plugin.js".to_string(),
+            entry.to_vec(),
+        );
         // The installer needs the entire declared asset tree, including chunks beside the entry point.
         files.insert(
-            "modules/one/dist/chunks/runtime.js".to_string(),
+            "integrations/one/dist/chunks/runtime.js".to_string(),
             b"export const chunk = true;".to_vec(),
         );
         files.insert(

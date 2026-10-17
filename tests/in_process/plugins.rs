@@ -303,9 +303,9 @@ async fn plugin_installation_exposes_an_integration_in_the_local_catalog() {
             id: "assistant".into(),
             kind: PluginModuleKind::Integration,
             version: "0.1.0".into(),
-            manifest: "modules/assistant/memcastle-integration.toml".into(),
+            manifest: "integrations/assistant/memcastle-integration.toml".into(),
             manifest_sha256: sha256_hex(manifest_text),
-            entry: "modules/assistant/dist/index.js".into(),
+            entry: "integrations/assistant/dist/index.js".into(),
             sha256: sha256_hex(entry),
             optional: false,
             contract: None,
@@ -320,11 +320,11 @@ async fn plugin_installation_exposes_an_integration_in_the_local_catalog() {
             toml::to_string(&manifest).unwrap().into_bytes(),
         ),
         (
-            "modules/assistant/memcastle-integration.toml".to_string(),
+            "integrations/assistant/memcastle-integration.toml".to_string(),
             manifest_text.to_vec(),
         ),
         (
-            "modules/assistant/dist/index.js".to_string(),
+            "integrations/assistant/dist/index.js".to_string(),
             entry.to_vec(),
         ),
     ]))
