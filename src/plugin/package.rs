@@ -86,11 +86,15 @@ pub fn package_manifest(path: &Path, output: Option<&Path>) -> Result<PackagedPl
         return Err(invalid("the root manifest must be named plugin.toml"));
     }
     let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let release_path = root.join(RELEASE_FILE);
+    if std::fs::symlink_metadata(&release_path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(invalid("manifest.toml must not be a symlink"));
+    }
     let plugin = inspect_manifest(path)?;
     let bytes = pack_project(root)?;
     let release = unpack(&bytes)?;
-    std::fs::write(root.join(RELEASE_FILE), &release.files[RELEASE_FILE])
-        .map_err(|e| Error::io(root.join(RELEASE_FILE).display().to_string(), e))?;
+    std::fs::write(&release_path, &release.files[RELEASE_FILE])
+        .map_err(|e| Error::io(release_path.display().to_string(), e))?;
     let destination = output.map_or_else(
         || {
             root.join("dist").join(format!(
@@ -696,6 +700,20 @@ mod tests {
             std::fs::read(root.path().join(MANIFEST_FILE)).unwrap(),
             manifest.as_bytes()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn packaging_never_writes_a_release_manifest_through_a_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("outside.toml");
+        std::fs::write(&outside, "untouched").unwrap();
+        std::os::unix::fs::symlink(&outside, root.path().join(RELEASE_FILE)).unwrap();
+        let error = package_manifest(&root.path().join(MANIFEST_FILE), None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("symlink"), "{error}");
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "untouched");
     }
 
     #[test]
