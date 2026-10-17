@@ -29,7 +29,11 @@ jobs:
           python3 "plugins/$PROVIDER/scripts/package.py"
           python3 -m unittest discover -s "plugins/$PROVIDER/tests"
           git diff --exit-code -- "plugins/$PROVIDER/plugin.toml" || {
-            echo "::error::commit the plugin.toml artifact digests produced by packaging"
+            echo "::error::packaging must not change plugin.toml"
+            exit 1
+          }
+          git diff --exit-code -- "plugins/$PROVIDER/manifest.toml" || {
+            echo "::error::commit the regenerated manifest.toml before publishing"
             exit 1
           }
           for manifest in plugins/"$PROVIDER"/modules/*/memcastle-source.toml; do
@@ -60,7 +64,7 @@ jobs:
           PROVIDER: ${{ inputs.provider }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          read -r id version < <(python3 -c 'import sys,tomllib; plugin=tomllib.load(open(sys.argv[1], "rb"))["plugin"]; print(plugin["id"], plugin["version"])' "plugins/$PROVIDER/plugin.toml")
+          read -r id version < <(cargo run --quiet -- plugin inspect "plugins/$PROVIDER/plugin.toml" --json | jq -r '.plugin | "\(.id) \(.version)"')
           if [[ "$id" != "$PROVIDER" ]]; then
             echo "::error::plugin.toml declares $id but the selected provider directory is $PROVIDER"
             exit 1
@@ -77,5 +81,7 @@ jobs:
           # GitHub's auto-notes would include unrelated Core/provider commits in this monorepo.
           artifact="plugins/$PROVIDER/dist/$id-$version.tar.gz"
           test -f "$artifact" || { echo "::error::expected validated artifact $artifact"; exit 1; }
-          gh release create "$tag" "$artifact" --target "$GITHUB_SHA" \
+          checksum="plugins/$PROVIDER/dist/$id-$version.sha256sum"
+          test -f "$checksum" || { echo "::error::expected checksum $checksum"; exit 1; }
+          gh release create "$tag" "$artifact" "$checksum" --target "$GITHUB_SHA" \
             --title "$PROVIDER $version" --notes "Independent $PROVIDER provider plugin release."

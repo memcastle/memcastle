@@ -10,6 +10,7 @@ python3 scripts/package.py
 ```
 
 The archive in `dist/` is independently releasable from MemCastle Core.
-The root `plugin.toml` declares stable module identities; the package script fills artifact hashes after building.
-Commit each source module's generated `Cargo.lock` before publishing a release.
+The immutable `plugin.toml` declares stable module identities; packaging regenerates `manifest.toml` with the
+release version and checksums of the built artifacts and writes `dist/example-0.1.0.sha256sum` for the archive.
+Commit `manifest.toml` and each source module's `Cargo.lock` before publishing a release.
 Keep IDs stable when moving this project from `plugins/example/` to its own repository.

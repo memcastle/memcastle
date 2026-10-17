@@ -28,7 +28,7 @@ An older version with a different module inventory may give its own `modules` li
 The root inventory describes the newest release; a pinned older release without indexed module metadata is
 identified and checked against the digest of its own archive.
 
-The root `plugin.toml` has `format = 1` and a `[plugin]` table containing `id`, `version`, `provider`,
+The immutable root `plugin.toml` has `format = 1` and a `[plugin]` table containing `id`, `provider`,
 `description`, `repository` and `license`.
 It also declares a top-level `memcastle` version requirement, optional `[[dependencies]]` with `id`, `version`
 and `optional`,
@@ -37,8 +37,9 @@ A required dependency must already be installed at a compatible version; MemCast
 plugin while installing this one.
 An optional dependency may be absent, but is version-checked when present.
 Removing a plugin blocks required dependents; optional dependents remain installed without it.
-Each module specifies a stable `id`, `type`, semantic `version`, paths `manifest` and `entry`,
-SHA-256 values `manifest_sha256` and `sha256`, and optionally `optional`, `config_schema` and a source `contract`.
+Each module specifies a stable `id`, `type`, paths `manifest` and `entry`,
+and optionally `optional`, `config_schema` and a source `contract`.
+`plugin.toml` is not rewritten by packaging; `manifest.toml` holds the parent and module versions and checksums.
 A source and an integration may share an ID (for example, Pi's two `pi` modules); identities are unique by `(type, id)`.
 Two modules of the same type cannot share an ID, and their artifact paths must remain distinct.
 The parent may also declare `shared_config_schema` and `[authentication]` with a public `kind` and a credential reference;
@@ -51,8 +52,10 @@ Source modules retain their `memcastle-source.toml` and `source.wasm` contract;
 integration modules retain their `memcastle-integration.toml` and agent assets.
 An embedding-provider module may be declared for discovery, but its execution contract and selection belong to #256.
 
-The tar.gz release archive contains `plugin.toml` and the declared module files under their module directories.
-Its manifest and entry bytes must match their declared hashes.
+The tar.gz release archive contains generated `manifest.toml` and the declared module files, **not** `plugin.toml`.
+The generated manifest combines the descriptor's metadata with release versions and SHA-256 for every other archive
+file, including agent assets; it is required for installation, and earlier archives without it are not accepted.
+`plugin package` also writes `dist/ID-VERSION.sha256sum` beside the archive for verifying the archive itself.
 The archive is limited to 1024 canonical-path regular files, 64 MiB compressed and 256 MiB expanded;
 symlinks, aliases, undeclared files and path escapes are refused before a generation is published.
 Source and integration module identities and versions must match their own manifests.
@@ -105,8 +108,8 @@ git tpl init "$PWD/memcastle-plugin.tpl" example --init \
   --answer "source_template=$PWD/memcastle-source.tpl" \
   --answer "integration_template=$PWD/memcastle-integration.tpl" \
   --defaults --strict-answers --json
-# Build every selected source and calculate artifact digests before installing the resulting archive.
-python3 example/scripts/package.py
+# Build every selected source and integration first, then package their existing artifacts.
+memcastle plugin package example/plugin.toml
 memcastle plugin install example/dist/example-0.1.0.tar.gz
 ```
 
@@ -148,19 +151,27 @@ update `plugin.repository` and the discovery catalogue through review before rel
 
 ## Standalone development and compatibility
 
-A provider repository has one `plugin.toml`, independent `modules/<id>/` implementations and fixtures, local packaging
-and tests under `scripts/` and `tests/`, and its own validation and release workflows in `.github/workflows/`.
+A provider repository has an immutable `plugin.toml` descriptor, a reviewed `manifest.toml` release manifest,
+independent `modules/<id>/` implementations and fixtures, and its own CI and release workflows.
 The parent manifest's `memcastle` semver range must match the source and integration manifests' Core requirements;
 source `contract` must also match its module manifest's versioned WIT contract.
 Module IDs stay stable across repository moves; module versions and the parent release version are separate.
 Keep the lower bound at the oldest Core actually supported and narrow the upper bound when a breaking Core contract
 requires it. Review contract and WIT changes against both generated modules before advertising a new range.
 
-From a generated provider checkout, run `python3 scripts/package.py`, `python3 scripts/check_modules.py`, and
-`python3 -m unittest discover -s tests`; commit the source `Cargo.lock` files and reviewed artifact hashes.
-Set `MEMCASTLE_BIN` to a Core binary with plugin support and run `python3 scripts/smoke_install.py` to preview and install
-the archive into a disposable palace, check installed-but-disabled sources, enable them and register integrations with an
-isolated test agent. The script does not use the user's palace or agent files.
+Existing standalone providers still use their own build and test scripts until they adopt the new plugin template.
+For a newly generated checkout, build modules using its `ci.yaml` steps and run `memcastle plugin package plugin.toml`;
+commit source `Cargo.lock` files and the regenerated `manifest.toml`; packaging does not change `plugin.toml`.
+The new `memcastle plugin inspect plugin.toml --json`, `memcastle plugin package plugin.toml`, and
+`memcastle plugin test dist/ID-VERSION.tar.gz` authoring commands are provider-independent.
+`plugin package` regenerates the complete archive manifest and external archive checksum from built modules,
+refusing unsafe or unlisted files;
+it does not build source components or agent bundles. `plugin test` uses a disposable palace and does not register
+agent integrations; provider-specific agent and adoption tests remain in the standalone repository.
+Existing providers can keep their own authoring scripts until they migrate their CI and packaging to these commands.
+Existing providers may still use `MEMCASTLE_BIN=/path/to/memcastle python3 scripts/smoke_install.py` until migrated;
+that script tests additional agent registration using isolated configuration. Generic `plugin test` checks source
+activation without changing the user's palace or agent configuration.
 The shared plugin validation workflow always tests source conformance and archive installation/activation against the
 tested Core `main` prerelease.
 Callers may additionally name exact plugin-capable stable versions; each gets the same required integration checks.
@@ -186,8 +197,8 @@ Core's publishing job uses the existing GitHub App credentials in its `release` 
 binary build jobs need only `contents: read`.
 
 Standalone plugins own their build, packaging, versioning and release workflow.
-They keep local `scripts/package.py`, `scripts/check_modules.py`, tests and smoke scripts, then upload a built archive
-and source components as an Actions artifact before calling Core's shared validation workflow.
+The current providers keep local scripts until migrated; the generated `ci.yaml` builds each source/integration and calls
+`plugin package`, then uploads the archive and source components before Core's shared validation workflow.
 The shared workflow downloads that artifact; it never builds or packages a plugin.
 Caller jobs grant `contents: read` for validation and `contents: write` only where the provider publishes its release.
 For example, after a provider's `package` job uploads the archive and exposes its relative path:
@@ -212,7 +223,8 @@ Add a version such as `"0.5.0"` only after its released Core binary supports the
 there is no conditional integration-test skip.
 The required `artifact-name` and `archive-path` identify the exact uploaded, already-built plugin;
 include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
-The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow provider-owned installation checks and fixtures.
+The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow additional provider-owned checks and fixtures;
+the generic `plugin test` always runs on the supplied archive before them.
 The provider's release workflow decides when to validate, requires its own reviewed version tag,
 and publishes the archive only after the shared validation succeeds.
 The Core binary action accepts `version: main` or an exact stable tag and returns `binary` and `core_sha` outputs;

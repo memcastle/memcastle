@@ -108,6 +108,7 @@ async fn plugin_commands_use_the_daemon_for_install_listing_and_uninstall() {
         shared_config_schema: None,
         authentication: None,
         modules: Vec::new(),
+        checksums: BTreeMap::new(),
     };
     let archive = memcastle::plugin::package::pack(&BTreeMap::from([(
         "plugin.toml".to_string(),
@@ -178,6 +179,7 @@ async fn plugin_cli_search_install_and_update_use_a_selected_offline_catalogue()
         shared_config_schema: None,
         authentication: None,
         modules: Vec::new(),
+        checksums: BTreeMap::new(),
     };
     let archive = memcastle::plugin::package::pack(&BTreeMap::from([(
         "plugin.toml".to_string(),

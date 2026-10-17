@@ -12,10 +12,10 @@ on:
         type: string
         required: true
       smoke-command:
-        description: Provider-owned installation and activation check
+        description: Optional provider-owned installation check after the generic archive smoke test
         type: string
         required: false
-        default: python3 scripts/smoke_install.py
+        default: ""
       extra-smoke-command:
         description: Optional provider-owned migration check
         type: string
@@ -45,15 +45,14 @@ jobs:
         env:
           VERSIONS: ${{ inputs.core-versions }}
         run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, re
-          versions = json.loads(os.environ['VERSIONS'])
-          if not isinstance(versions, list) or any(not isinstance(v, str) or not re.fullmatch(r'\d+\.\d+\.\d+', v) for v in versions):
-              raise ValueError('core-versions must be a JSON array of exact stable tags')
-          if len(set(versions)) != len(versions):
-              raise ValueError('core-versions must not contain duplicates')
-          print('cores=' + json.dumps(['main', *versions]))
-          PY
+          jq -cnr --arg raw "$VERSIONS" '
+            ($raw | fromjson) as $versions
+            | if ($versions | type) == "array"
+                 and ($versions | all(.[]; type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
+                 and ($versions | length) == ($versions | unique | length)
+              then "cores=\(["main"] + $versions | tojson)"
+              else error("core-versions must contain unique exact stable tags") end
+          ' >> "$GITHUB_OUTPUT"
 
   compatibility:
     needs: matrix
@@ -83,9 +82,10 @@ jobs:
         id: core
         with:
           version: ${{ matrix.core }}
-      - name: Check source conformance and installation
+      - name: Check source conformance and isolated plugin installation
         env:
           MEMCASTLE_BIN: ${{ steps.core.outputs.binary }}
+          ARCHIVE: ${{ inputs.archive-path }}
           FIXTURE_BIN: ${{ inputs.fixture-bin }}
           SMOKE: ${{ inputs.smoke-command }}
           EXTRA_SMOKE: ${{ inputs.extra-smoke-command }}
@@ -100,7 +100,10 @@ jobs:
               "$MEMCASTLE_BIN" source test "$(dirname "$manifest")" --no-build
             fi
           done
-          bash -e -o pipefail -c "$SMOKE"
+          "$MEMCASTLE_BIN" plugin test "$ARCHIVE"
+          if [[ -n "$SMOKE" ]]; then
+            bash -e -o pipefail -c "$SMOKE"
+          fi
           if [[ -n "$EXTRA_SMOKE" ]]; then
             bash -e -o pipefail -c "$EXTRA_SMOKE"
           fi
