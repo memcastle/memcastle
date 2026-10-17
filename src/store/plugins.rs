@@ -282,6 +282,7 @@ mod tests {
                 authentication: None,
                 modules: Vec::new(),
                 checksums: BTreeMap::new(),
+                artifacts: Vec::new(),
             },
             digest: "old".to_string(),
             generation: "example/old".to_string(),
@@ -324,6 +325,7 @@ mod tests {
                 authentication: None,
                 modules: Vec::new(),
                 checksums: BTreeMap::new(),
+                artifacts: Vec::new(),
             },
             digest: "a".repeat(64),
             generation: "a".repeat(64),
@@ -401,6 +403,7 @@ mod tests {
             authentication: None,
             modules: Vec::new(),
             checksums: BTreeMap::new(),
+            artifacts: Vec::new(),
         };
         let first = PluginRecord {
             id: "first".into(),
@@ -530,6 +533,7 @@ mod tests {
                     config_schema: None,
                 }],
                 checksums: BTreeMap::new(),
+                artifacts: Vec::new(),
             },
             digest: "a".repeat(64),
             generation: "a".repeat(64),

@@ -82,6 +82,20 @@ fn validate_fields(manifest: &PluginManifest, require_release_fields: bool) -> R
             "a plugin may declare at most 64 modules and 64 dependencies",
         ));
     }
+    let mut artifacts = HashSet::new();
+    for path in &manifest.artifacts {
+        if !safe_path(path)
+            || path.split('/').count() > 16
+            || matches!(path.as_str(), "plugin.toml" | "manifest.toml")
+            || path == ".git"
+            || path.starts_with(".git/")
+            || !artifacts.insert(path)
+        {
+            return Err(invalid(format!(
+                "invalid or duplicate plugin artifact `{path}`"
+            )));
+        }
+    }
     for (field, value) in [("plugin.id", &info.id), ("plugin.provider", &info.provider)] {
         if !is_valid_source_name(value) {
             return Err(invalid(format!(

@@ -461,8 +461,8 @@ memcastle plugin install ./built-project [--yes] [--consent MODULE=DIGEST]...
 memcastle plugin install https://github.com/OWNER/REPO [--yes] [--consent MODULE=DIGEST]...
 memcastle plugin update ID [--yes] [--consent MODULE=DIGEST]... [--adopt-source SOURCE]...
 memcastle plugin uninstall ID [--yes]
-memcastle plugin inspect <plugin.toml> [--json]
-memcastle plugin package <plugin.toml> [--output <FILE>] [--json]
+memcastle plugin inspect [plugin.toml] [--json]
+memcastle plugin package [plugin.toml] [--version <SEMVER>] [--output <FILE>] [--json]
 memcastle plugin test <ARCHIVE>
 memcastle plugin sign <ARCHIVE> --key <KEYFILE>
 ```
@@ -493,13 +493,19 @@ use the GitTPL source and plugin repositories directly for new provider projects
 `plugin sign` is local authoring tooling with no daemon or registry request.
 It reads a validated plugin archive and a private key generated with `memcastle source keygen`, then prints the
 archive SHA-256 and an ed25519 `signature` entry for a static `plugins.json` version entry.
-`plugin inspect` reads the local descriptor and `manifest.toml` release version and returns its typed module inventory
-with `--json`; it does not need built artifacts, configuration or a daemon.
+`plugin inspect` and `plugin package` default to `./plugin.toml`; either also accepts an explicit descriptor path.
+`plugin inspect` reads the local descriptor and, for older projects, a local `manifest.toml` release seed;
+otherwise it derives the package version from the plugin's own Git tags. It returns a typed module inventory with
+`--json` and needs neither built artifacts nor a daemon.
 `plugin package` reads a project's already-built source and integration artifacts **without modifying `plugin.toml`**.
-It regenerates a reviewable `manifest.toml` beside the descriptor, combining its static metadata with the package
-version, module versions and SHA-256 checksums, then archives `manifest.toml` with the declared artifacts.
+It builds `manifest.toml` only inside the archive, combining descriptor metadata, module versions and SHA-256 checksums.
+The descriptor may list extra support file/directory paths under `artifacts`; integration manifests also supply their
+own asset and skill paths. Symbolic links, missing entries and unlisted archive files are refused.
+An exact `ID/vVERSION` tag supplies the release version; an untagged checkout gets a SemVer development version based
+on the nearest matching release tag, commit distance, revision and dirty state (initial base `0.1.0`).
+Use `--version` to override Git inference or package from a checkout without Git metadata.
 The archive does not contain `plugin.toml`; an `ID-VERSION.sha256sum` beside it verifies the entire archive.
-It never builds a module; commit the generated `manifest.toml` and source locks before publishing.
+It never builds a module or writes `manifest.toml` beside the project; commit source locks before publishing.
 `plugin test` validates the exact archive and starts a disposable loopback daemon in an isolated temporary palace.
 It previews and installs with per-source consents, verifies integrations remain discoverable but uninstalled in agents,
 then enables each newly installed source. Neither the configured palace nor any agent installation is touched.

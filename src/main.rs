@@ -795,9 +795,16 @@ async fn cmd_plugin_local(command: &PluginCommand) -> Result<()> {
                 &plugin,
             )
         }
-        PluginCommand::Package { manifest, output } => {
-            let packaged =
-                memcastle::plugin::package::package_manifest(manifest, output.as_deref())?;
+        PluginCommand::Package {
+            manifest,
+            output,
+            version,
+        } => {
+            let packaged = memcastle::plugin::package::package_manifest_with_version(
+                manifest,
+                output.as_deref(),
+                version.as_deref(),
+            )?;
             print_for_terminal_or_json(
                 |_, _| {
                     format!(

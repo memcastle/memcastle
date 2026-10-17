@@ -40,6 +40,9 @@ Removing a plugin blocks required dependents; optional dependents remain install
 Each module specifies a stable `id`, `type`, paths `manifest` and `entry`,
 and optionally `optional`, `config_schema` and a source `contract`.
 `plugin.toml` is not rewritten by packaging; `manifest.toml` holds the parent and module versions and checksums.
+An optional top-level `artifacts = ["shared/config.json", "modules/example/support"]` lists additional project-relative
+files or directories to include once for multiple modules; integration manifests continue to supply agent assets and
+skills. Missing or symlinked declared artifacts are refused.
 A source and an integration may share an ID (for example, Pi's two `pi` modules); identities are unique by `(type, id)`.
 Two modules of the same type cannot share an ID, and their artifact paths must remain distinct.
 The parent may also declare `shared_config_schema` and `[authentication]` with a public `kind` and a credential reference;
@@ -109,7 +112,7 @@ git tpl init "$PWD/memcastle-plugin.tpl" example --init \
   --answer "integration_template=$PWD/memcastle-integration.tpl" \
   --defaults --strict-answers --json
 # Build every selected source and integration first, then package their existing artifacts.
-memcastle plugin package example/plugin.toml
+memcastle plugin package example/plugin.toml --version 0.1.0
 memcastle plugin install example/dist/example-0.1.0.tar.gz
 ```
 
@@ -117,8 +120,8 @@ This offline example records the machine-specific child paths in the generated p
 For a shared provider repository, use the published GitTPL and all three published template URLs from the start;
 GitTPL records those URLs and the resolved child commits and does not rewrite local paths to remote URLs later.
 
-The packager remaps Rust and Cargo source paths and bypasses a local compiler wrapper so its reviewed component
-digests match the provider CI build.
+Build source components with the provider's reproducible Cargo flags before calling Core's packager;
+the packager only gathers validated, already-built artifacts.
 
 With the three published `https://github.com/memcastle/*.tpl` URLs, `git tpl init` needs `--trust`
 to allow the child-template clones.
@@ -151,33 +154,34 @@ update `plugin.repository` and the discovery catalogue through review before rel
 
 ## Standalone development and compatibility
 
-A provider repository has an immutable `plugin.toml` descriptor, a reviewed `manifest.toml` release manifest,
-independent `modules/<id>/` implementations and fixtures, and its own CI and release workflows.
+A provider repository has an immutable `plugin.toml` descriptor, independent `modules/<id>/` implementations and
+fixtures, and its own CI and release workflows. The release `manifest.toml` exists inside the archive only;
+older providers may still retain a local manifest seed until they migrate.
 The parent manifest's `memcastle` semver range must match the source and integration manifests' Core requirements;
 source `contract` must also match its module manifest's versioned WIT contract.
 Module IDs stay stable across repository moves; module versions and the parent release version are separate.
 Keep the lower bound at the oldest Core actually supported and narrow the upper bound when a breaking Core contract
 requires it. Review contract and WIT changes against both generated modules before advertising a new range.
 
-Existing standalone providers still use their own build and test scripts until they adopt the new plugin template.
-For a newly generated checkout, build modules using its `ci.yaml` steps and run `memcastle plugin package plugin.toml`;
-commit source `Cargo.lock` files and the regenerated `manifest.toml`; packaging does not change `plugin.toml`.
-The new `memcastle plugin inspect plugin.toml --json`, `memcastle plugin package plugin.toml`, and
+For a generated checkout, build modules using its `ci.yaml` steps and run `memcastle plugin package` from its root;
+commit source `Cargo.lock` files, review the archive digest, and leave `plugin.toml` unchanged.
+The `memcastle plugin inspect --json`, `memcastle plugin package`, and
 `memcastle plugin test dist/ID-VERSION.tar.gz` authoring commands are provider-independent.
-`plugin package` regenerates the complete archive manifest and external archive checksum from built modules,
-refusing unsafe or unlisted files;
+`plugin package` generates the complete manifest **only inside the archive** and writes an external archive checksum
+from built modules, refusing unsafe or unlisted files. Both inspect and package default to `./plugin.toml`.
+An exact `ID/vVERSION` tag yields that version; untagged Git revisions use an identifiable development version,
+and `--version` overrides Git when packaging without a repository;
 it does not build source components or agent bundles. `plugin test` uses a disposable palace and does not register
 agent integrations; provider-specific agent and adoption tests remain in the standalone repository.
-Existing providers can keep their own authoring scripts until they migrate their CI and packaging to these commands.
-Existing providers may still use `MEMCASTLE_BIN=/path/to/memcastle python3 scripts/smoke_install.py` until migrated;
-that script tests additional agent registration using isolated configuration. Generic `plugin test` checks source
+Provider-owned JavaScript adoption and agent-installation checks remain separate; generic `plugin test` checks source
 activation without changing the user's palace or agent configuration.
 The shared plugin validation workflow always tests source conformance and archive installation/activation against the
 tested Core `main` prerelease.
-Callers may additionally name exact plugin-capable stable versions; each gets the same required integration checks.
+Callers may additionally name plugin-capable release trees such as `0.5` (the latest published patch), or an exact
+stable version; each gets the same required integration checks.
 Stable Core 0.4.1 does not support plugin installation, so it cannot be added to this matrix.
 Core's provider workflow builds and tests every in-tree provider on each pull request and main push.
-For cross-repository development, set `MEMCASTLE_BIN` to a binary built in the Core worktree and run the same smoke check;
+For cross-repository development, put a Core binary from its worktree on PATH and run the same smoke check;
 standalone provider CI and its release workflow build neither unrelated providers nor Core from source.
 
 ### Shared CI and development Core
@@ -197,11 +201,12 @@ Core's publishing job uses the existing GitHub App credentials in its `release` 
 binary build jobs need only `contents: read`.
 
 Standalone plugins own their build, packaging, versioning and release workflow.
-The current providers keep local scripts until migrated; the generated `ci.yaml` builds each source/integration and calls
-`plugin package`, then uploads the archive and source components before Core's shared validation workflow.
+The generated `ci.yaml` builds each source/integration and calls `plugin package`, then uploads the archive and
+source components before Core's shared validation workflow.
 The shared workflow downloads that artifact; it never builds or packages a plugin.
+It reconstructs each source's `dist/source.wasm` fixture from the uploaded root component only after packaging.
 Caller jobs grant `contents: read` for validation and `contents: write` only where the provider publishes its release.
-For example, after a provider's `package` job uploads the archive and exposes its relative path:
+For example, after a provider's `package` job uploads one archive and its source components:
 
 ```yaml
 permissions:
@@ -209,26 +214,32 @@ permissions:
 jobs:
   validate:
     needs: package
-    uses: memcastle/memcastle/.github/workflows/plugin-validation.yaml@<reviewed Core commit>
+    strategy:
+      matrix:
+        core: [main]
+    uses: memcastle/memcastle/.github/workflows/plugin-validation.yaml@main
     with:
       artifact-name: plugin-package
-      archive-path: ${{ needs.package.outputs.archive }}
-      core-versions: '[]'
-      extra-smoke-command: python3 scripts/smoke_adoption.py
+      core-version: ${{ matrix.core }}
+      extra-smoke-command: node scripts/smoke_adoption.mjs
 ```
 
-`core-versions` is a JSON array of exact stable version tags and defaults to `[]`,
-yielding the required `[main]` matrix.
-Add a version such as `"0.5.0"` only after its released Core binary supports the plugin install contract;
-there is no conditional integration-test skip.
-The required `artifact-name` and `archive-path` identify the exact uploaded, already-built plugin;
+The legacy `core-versions` JSON array still accepts exact tags and defaults to `[]`, yielding `[main]` for old callers.
+New callers supply one `core-version` per static matrix leg, including `main` or a published stable release tree.
+Add `0.5` only after a plugin-capable Core release exists; there is no conditional integration-test skip.
+The required `artifact-name` identifies the already-built plugin; `archive-path` remains an optional legacy input.
+Without it Core demands exactly one archive below `dist/` and reports that path to the caller;
 include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
+For a release dispatched on `main`, pass `plugin-ref` with the reviewed tag so the fixture checkout matches the
+exact tagged archive; normal PR/main validation defaults to the caller's commit.
 The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow additional provider-owned checks and fixtures;
 the generic `plugin test` always runs on the supplied archive before them.
 The provider's release workflow decides when to validate, requires its own reviewed version tag,
 and publishes the archive only after the shared validation succeeds.
-The Core binary action accepts `version: main` or an exact stable tag and returns `binary` and `core_sha` outputs;
-`main` is verified against the SHA-qualified development checksums and stable binaries against their release checksums.
+The root `memcastle/memcastle@main` action places the verified binary on PATH and returns `binary`, `core_sha` and
+`resolved_version`. `main` is verified against SHA-qualified development checksums, while `0.5`/`1` choose the latest
+published patch in that minor/major tree before checking its exact stable release checksum.
+The nested `core-binary` action still supports exact versions and exports `MEMCASTLE_BIN` for older callers.
 Each compatibility matrix leg reports its exact Core revision in the job summary.
 To add another provider, supply its own package/check and archive install scripts,
 select compatible stable tags explicitly, and keep provider-specific fixture setup or legacy migration smokes

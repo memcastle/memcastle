@@ -1,0 +1,59 @@
+name: Setup MemCastle Core
+description: Download a verified Core release and put memcastle on PATH for plugin CI
+inputs:
+  version:
+    description: main, an exact stable version, or the latest patch in a major/minor release tree
+    default: main
+outputs:
+  binary:
+    description: Absolute path to the verified memcastle executable
+    value: ${{ steps.path.outputs.binary }}
+  core_sha:
+    description: Core source SHA for main, or the resolved exact stable version
+    value: ${{ steps.download.outputs.core_sha }}
+  resolved_version:
+    description: Exact stable release selected for a version tree, or main
+    value: ${{ steps.resolve.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve Core release tree
+      id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [[ "$VERSION" == main || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          selected="$VERSION"
+        elif [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+          selected="$(gh api --paginate 'repos/memcastle/memcastle/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | awk -v tree="$VERSION" '
+                /^[0-9]+\.[0-9]+\.[0-9]+$/ {
+                  split($0, version, "."); split(tree, requested, ".");
+                  if (version[1] == requested[1] && (index(tree, ".") == 0 || version[2] == requested[2])) print
+                }' | sort -V | tail -n 1)"
+          [[ -n "$selected" ]] || { echo "::error::no published Core release matches $VERSION"; exit 1; }
+        else
+          echo "::error::Core version must be main, a release tree (0.5 or 1), or an exact stable tag"
+          exit 1
+        fi
+        echo "version=$selected" >> "$GITHUB_OUTPUT"
+    - uses: memcastle/memcastle/.github/actions/core-binary@main
+      id: download
+      with:
+        version: ${{ steps.resolve.outputs.version }}
+    - name: Put verified binary on PATH
+      id: path
+      shell: bash
+      env:
+        BINARY: ${{ steps.download.outputs.binary }}
+      run: |
+        set -euo pipefail
+        directory="$RUNNER_TEMP/memcastle-${{ steps.download.outputs.core_sha }}/bin"
+        mkdir -p "$directory"
+        ln -sfn "$BINARY" "$directory/memcastle"
+        echo "$directory" >> "$GITHUB_PATH"
+        echo "binary=$directory/memcastle" >> "$GITHUB_OUTPUT"

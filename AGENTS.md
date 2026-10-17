@@ -239,6 +239,8 @@ An invariant nothing checks is a comment, and it will be violated.
     the reviewed `plugins.json` catalogue is separate from the legacy `registry.json` source index, and a release
    archive contains a generated `manifest.toml` with the descriptor's metadata, release versions, checksums of every
    artifact, and typed modules; the project-local `plugin.toml` descriptor is never rewritten or archived.
+   Package generation does not write a sibling `manifest.toml`; it derives the version from the plugin's own Git tags
+   (or an explicit `--version`) and accepts only declared module and support assets.
    Plugin install defaults each new
     source to `installed`, never enables it or installs an integration in an agent; only `source enable` or the local
     `integration install` does that. A legacy source cannot be silently claimed by a plugin: a mined legacy name needs

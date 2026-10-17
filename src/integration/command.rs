@@ -279,6 +279,7 @@ mod tests {
                 config_schema: None,
             }],
             checksums: std::collections::BTreeMap::new(),
+            artifacts: Vec::new(),
         };
         let files = std::collections::BTreeMap::from([
             (

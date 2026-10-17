@@ -1,28 +1,24 @@
 # Development
 
 Provider-plugin authoring uses the [three GitTPL repositories](plugins.md) directly.
-The parent template composes commit-pinned source and integration module templates, including an initially empty plugin.
-Each generated provider has its own manifest, tests, packaging script and CI/release workflow;
-the in-tree `plugins/<provider>/` layout uses the same script and an all-provider workflow.
+The parent template composes reviewed source and integration modules, including an initially empty plugin.
+Each generated provider owns its descriptor, module builds, tests and CI/release workflows;
+the in-tree `plugins/<provider>/` layout also has an all-provider workflow.
 Move that project to a standalone repository without changing the stable plugin and module IDs.
 
 ## Working on a standalone provider
 
-Use the generated provider project's own `scripts/package.py` and `scripts/check_modules.py` to build and check only its
-declared modules; run its `python3 -m unittest discover -s tests` for parent and module manifest agreement.
-Package only after building; `plugin.toml` stays unchanged, and the generated `manifest.toml` records versions and
-checksums of every artifact. Review `dist/ID-VERSION.sha256sum` and commit `manifest.toml` and source `Cargo.lock` files.
-To test a Core change across repositories, build a Core binary in that checkout and run
-`MEMCASTLE_BIN=/absolute/path/to/memcastle python3 scripts/smoke_install.py` in the generated project.
-The smoke test uses a disposable palace and agent directory and validates preview, consent, install and separate module
-activation; it never uses a user's installed plugin or agent configuration.
-The Core publisher equivalents for generated plugins are `memcastle plugin inspect plugin.toml --json`,
-`memcastle plugin package plugin.toml` after building modules, and `memcastle plugin test dist/ID-VERSION.tar.gz`.
-The first regenerates `manifest.toml` for review and an external archive checksum; the second checks the exact
-archive in a disposable palace.
+Build the provider's own source and integration modules with Cargo and Bun before packaging their declared artifacts.
+From the provider root, run `memcastle plugin inspect --json`, `memcastle plugin package`, then
+`memcastle plugin test dist/ID-VERSION.tar.gz` against the exact resulting archive.
+The descriptor `plugin.toml` stays unchanged; the archive alone carries generated versioned `manifest.toml` metadata
+and an external `.sha256sum`. Use a tagged Git commit, an SCM development version, or an explicit `--version` override.
+Review the archive inventory and checksum and commit source `Cargo.lock` files with source changes.
+The smoke test uses a disposable palace and validates preview, consent, installation and source activation;
+it never uses the configured palace or agent installation.
 Agent registration and legacy adoption remain provider-specific checks.
 Standalone provider CI checks source conformance and archive installation against the successful `main` CI prerelease
-and any explicitly selected plugin-capable stable releases; each matrix leg records its exact Core revision.
+and selected plugin-capable release trees (latest stable patch), recording the exact Core revision or resolved tag.
 Core's provider workflow checks every in-tree provider on each pull request and main push.
 See [Plugin packages](plugins.md#shared-ci-and-development-core) for the release assets, SHA verification, reusable
 workflow inputs and compatibility policy.
