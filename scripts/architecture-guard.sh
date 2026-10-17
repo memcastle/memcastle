@@ -15,15 +15,17 @@ fi
 # etc.). Retain the old text guard *only* for those unparsed file types rather
 # than silently dropping the original all-files scope. The AST rules handle
 # comments in parsed code; this fallback keeps the old text semantics.
-pattern='surrealdb|surrealkv|SurrealStore|(^|[^A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b'
+pattern='surrealdb|surrealkv|SurrealStore|(^|[^A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)([^A-Za-z0-9_]|$)|/api/db([^A-Za-z0-9_]|$)'
 for root in integrations web; do
-  globs=(--glob '!*.md' --glob '!**/node_modules/**'
-    --glob '!*.rs' --glob '!*.ts' --glob '!*.tsx' --glob '!*.js'
-    --glob '!*.jsx' --glob '!*.vue' --glob '!*.html' --glob '!*.json')
+  # grep is present on the lint runner; ripgrep is not. Only extensions with
+  # AST rules are excluded here, so new asset formats remain covered.
+  excludes=(--exclude='*.md' --exclude-dir=node_modules
+    --exclude='*.rs' --exclude='*.ts' --exclude='*.tsx' --exclude='*.js'
+    --exclude='*.jsx' --exclude='*.vue' --exclude='*.html' --exclude='*.json')
   if [[ $root == web ]]; then
-    globs+=(--glob '!**/dist/**' --glob '!bun.lock')
+    excludes+=(--exclude-dir=dist --exclude=bun.lock)
   fi
-  if rg --hidden -n "${globs[@]}" "$pattern" "$root"; then
+  if grep -rnE "${excludes[@]}" "$pattern" "$root"; then
     printf 'Architecture violation in an unparsed %s file.\n' "$root" >&2
     exit 1
   else
