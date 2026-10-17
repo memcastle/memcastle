@@ -600,8 +600,8 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
-- **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle, the agent integrations
-  and the skills they read, and the web UI.
+- **Installed** by a package manager under `share/memcastle`: shared skills and the web UI.
+  Core's sources and integrations directories are empty; provider plugins supply their own sources and agent integrations.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
