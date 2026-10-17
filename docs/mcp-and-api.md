@@ -700,13 +700,15 @@ Each entry of `adapters` lists them as `options: [{name, description, type, brea
 ```json
 {
   "adapters": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
-                 "origin": "package", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
+                 "origin": "plugin", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
   "sources": [{"id": "...", "source": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
                "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
 }
 ```
 
-An adapter's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
+An adapter's `origin` is `builtin`, `package` (installed from a local archive or project), `bundled` (shipped with Core),
+`registry` (installed from a source registry), or `plugin` (provided by an installed plugin).
+An installed one also has a `version`, and a `state` of `installed`,
 `enabled`, `disabled` or `unavailable` (with an `unavailable_reason`).
 It is a read, so a `disabled` session is refused, and it is guarded like every route but the health check.
 There is no MCP tool for it, and none for credentials or for installing sources.
