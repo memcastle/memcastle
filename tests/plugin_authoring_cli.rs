@@ -73,3 +73,16 @@ fn a_plugin_is_installed_and_tested_in_disposable_state() {
     );
     assert!(!root.path().join("palace").exists());
 }
+
+#[test]
+fn an_invalid_archive_or_manifest_path_is_rejected_before_any_daemon_starts() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("not-a-plugin.toml"), EMPTY_PLUGIN).unwrap();
+    let rejected = command(root.path(), &["package", "not-a-plugin.toml"]);
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("plugin.toml"));
+    std::fs::write(root.path().join("bad.tar.gz"), b"not an archive").unwrap();
+    let rejected = command(root.path(), &["test", "bad.tar.gz"]);
+    assert!(!rejected.status.success());
+    assert!(!root.path().join("palace").exists());
+}

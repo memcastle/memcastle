@@ -5,6 +5,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
+use assert_cmd::cargo::cargo_bin;
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::config::CredentialBackend;
 use memcastle::domain::{
@@ -80,6 +81,28 @@ fn release() -> Vec<u8> {
         toml::to_string(&manifest).unwrap().into_bytes(),
     );
     package::pack(&files).unwrap()
+}
+
+#[test]
+fn a_generic_plugin_test_checks_two_source_activations_without_registering_an_agent() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("example.tar.gz");
+    std::fs::write(&archive, release()).unwrap();
+    let output = std::process::Command::new(cargo_bin("memcastle"))
+        .arg("--config")
+        .arg(root.path().join("missing.toml"))
+        .args(["plugin", "test"])
+        .arg(&archive)
+        .env("MEMCASTLE_TOKEN", "not-the-test-palace-token")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("activation passed"));
+    assert!(!root.path().join("palace").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
