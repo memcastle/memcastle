@@ -18,7 +18,7 @@ version = "0.1.0"
 manifest = "modules/files-one/memcastle-source.toml"
 manifest_sha256 = "b00ef9b5f618a10301846fad6471696cfd1a5d3d2e1adccb16d9f0f119273686"
 entry = "modules/files-one/source.wasm"
-sha256 = "54c0c25cf696af40f153ed033efbd2ae410230232d9623ba49b2c115294c6156"
+sha256 = "57af4dfe2a93f6a8e969a3eb4309442fb986b225c4fbb21375444fab44093691"
 contract = "0.4.0"
 
 [[modules]]
@@ -28,7 +28,7 @@ version = "0.1.0"
 manifest = "modules/files-two/memcastle-source.toml"
 manifest_sha256 = "53b899b4f53fd31486de5925df422e4b92ce6f13f3b1dff5ad57128473136056"
 entry = "modules/files-two/source.wasm"
-sha256 = "d23ba012717d1bdd52dd4caa69568dd451bda34f2175ee27475618a2fb0db720"
+sha256 = "7492a3f300eabb3a5db4b69a8a801a15944f5e1502dc06f36a8db26e550a65c6"
 contract = "0.4.0"
 
 
