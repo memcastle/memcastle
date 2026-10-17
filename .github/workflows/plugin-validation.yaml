@@ -12,6 +12,11 @@ on:
         type: string
         required: false
         default: ""
+      plugin-ref:
+        description: Plugin tag/ref whose checked-out fixtures match the uploaded archive
+        type: string
+        required: false
+        default: ""
       core-version:
         description: One caller-selected Core release tree or exact version (empty uses the legacy matrix)
         type: string
@@ -84,6 +89,8 @@ jobs:
         core: ${{ fromJSON(needs.matrix.outputs.cores) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.plugin-ref || github.sha }}
       - uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}

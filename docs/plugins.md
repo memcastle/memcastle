@@ -230,6 +230,8 @@ Add `0.5` only after a plugin-capable Core release exists; there is no condition
 The required `artifact-name` identifies the already-built plugin; `archive-path` remains an optional legacy input.
 Without it Core demands exactly one archive below `dist/` and reports that path to the caller;
 include `modules/*/source.wasm` in that artifact so `source test --no-build` exercises those bytes.
+For a release dispatched on `main`, pass `plugin-ref` with the reviewed tag so the fixture checkout matches the
+exact tagged archive; normal PR/main validation defaults to the caller's commit.
 The `smoke-command`, `extra-smoke-command` and `fixture-bin` inputs allow additional provider-owned checks and fixtures;
 the generic `plugin test` always runs on the supplied archive before them.
 The provider's release workflow decides when to validate, requires its own reviewed version tag,
