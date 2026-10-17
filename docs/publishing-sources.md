@@ -175,7 +175,9 @@ asks for: you agree to the permissions of what was actually fetched.
 
 **Updating** installs the newest version from the index a registry source was installed from.
 A source you installed from a file has no upstream and is left alone, and a bundled source is updated with MemCastle:
-`update` leaves it out, and `update github` says so (`memcastle::source::bundled`).
+`source update` leaves it out, and naming a bundled source returns `memcastle::source::bundled`.
+A plugin-owned source such as `github` is updated through its provider plugin (`memcastle plugin update ID`), not through
+`source update github`.
 An update keeps the source's state.
 The consent you gave is to a set of permissions, not to a version, so an update that asks for the same permissions needs
 no new agreement, and one that asks for anything else is not installed until you agree to exactly those: the command says
