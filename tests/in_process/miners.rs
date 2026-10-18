@@ -312,6 +312,83 @@ async fn two_miners_reuse_one_source_configuration_without_sharing_destination_c
 }
 
 #[tokio::test]
+async fn source_configuration_lifecycle_keeps_defaults_and_never_returns_credential_locations() {
+    let daemon = TestDaemon::start_configured(|config| {
+        config.credentials.backend = memcastle::config::CredentialBackend::File;
+        config.credentials.dir = Some(
+            config
+                .config_file
+                .as_ref()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("credentials"),
+        );
+    })
+    .await;
+    let (_, defaults) = get(&daemon, "/api/source-configs").await;
+    assert!(
+        defaults
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "directory")
+    );
+
+    let (status, created) = request(
+        &daemon,
+        Method::PUT,
+        "/api/source-configs/work",
+        Some(json!({
+            "source": "directory", "credential": { "type": "env", "name": "WORK_ACCESS_REFERENCE" },
+            "options": { "include": "docs/**" }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["credential_kind"], "env");
+    assert_eq!(created["credential_available"], false);
+    let (_, shown) = get(&daemon, "/api/source-configs/work").await;
+    assert_eq!(shown["options"]["include"], "docs/**");
+    assert!(!shown.to_string().contains("WORK_ACCESS_REFERENCE"));
+
+    let (status, changed) = request(
+        &daemon,
+        Method::PUT,
+        "/api/source-configs/work",
+        Some(json!({
+            "unset_credential": true, "unset_options": ["include"], "allow_broaden": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert!(changed["credential_kind"].is_null());
+    assert_eq!(changed["options"], json!({}));
+
+    let (status, removed) =
+        request(&daemon, Method::DELETE, "/api/source-configs/work", None).await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    let (status, missing) = get(&daemon, "/api/source-configs/work").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{missing}");
+    let (_, after) = get(&daemon, "/api/source-configs").await;
+    assert!(
+        after
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "directory")
+    );
+    assert!(
+        !after
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "work")
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn different_fixed_wings_keep_separate_document_records_for_the_same_input() {
     let daemon = TestDaemon::start().await;
     let dir = notes_dir();
