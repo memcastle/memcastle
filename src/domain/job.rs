@@ -124,6 +124,9 @@ pub struct MiningPreset {
     pub miner: Option<String>,
     /// The source configuration used to resolve this run's options and credentials.
     pub configuration: Option<String>,
+    /// Selected reference, pinned for retries; the resolved value is never persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<super::CredentialRef>,
     /// Fixed destination room, or the adapter's room when absent.
     pub room: Option<String>,
     /// Dynamic destination mapping pinned with the job.
@@ -133,6 +136,41 @@ pub struct MiningPreset {
     pub max_documents: Option<usize>,
     /// Existing embedding profile identity, resolved by the embedding subsystem.
     pub embedding_profile: Option<String>,
+}
+
+impl MiningPreset {
+    /// Remove the private reference from a response copy, not the durable job.
+    pub fn redact_credential(&mut self) {
+        self.credential = None;
+    }
+}
+
+#[cfg(test)]
+mod credential_preset_tests {
+    use super::*;
+
+    #[test]
+    fn a_retry_keeps_its_reference_but_a_response_copy_omits_it() {
+        let preset = MiningPreset {
+            configuration: Some("work".into()),
+            credential: Some(super::super::CredentialRef::File {
+                path: "/run/secrets/work".into(),
+            }),
+            ..Default::default()
+        };
+        let stored = serde_json::to_string(&preset).unwrap();
+        assert!(stored.contains("/run/secrets/work"));
+        let resumed: MiningPreset = serde_json::from_str(&stored).unwrap();
+        assert_eq!(resumed, preset);
+        let mut public = resumed.clone();
+        public.redact_credential();
+        assert!(
+            !serde_json::to_string(&public)
+                .unwrap()
+                .contains("/run/secrets/work")
+        );
+        assert_eq!(resumed.credential, preset.credential);
+    }
 }
 
 /// What kind of work a job performs, and its parameters.

@@ -1172,7 +1172,7 @@ async fn a_credential_is_checked_but_never_shown_or_stored() {
         json!({ "kind": "file", "available": true })
     );
 
-    // Nothing a client can read names where the daemon keeps its secrets, and the value is never read.
+    // Nothing a client can read names where the daemon keeps its secrets; readiness checks the value.
     let (_, list) = get(&daemon, "/api/miners").await;
     let (_, config) = get(&daemon, "/api/config").await;
     for body in [list.to_string(), created.to_string(), config.to_string()] {
@@ -1186,6 +1186,34 @@ async fn a_credential_is_checked_but_never_shown_or_stored() {
     let stored = std::fs::read_to_string(&daemon.config_path).unwrap();
     assert!(stored.contains("type = \"file\""), "{stored}");
     assert!(!stored.contains("hunter2"));
+
+    let (status, submitted) = post(&daemon, "/api/miners/docs/run").await;
+    assert!(status.is_success(), "{submitted}");
+    let id = submitted["id"].as_str().unwrap();
+    let (_, fetched) = get(&daemon, &format!("/api/jobs/{id}")).await;
+    let (_, listed) = get(&daemon, "/api/jobs?kind=mine").await;
+    for body in [&submitted, &fetched, &listed] {
+        assert!(
+            !body
+                .to_string()
+                .contains(secret_file.path().to_str().unwrap()),
+            "{body}"
+        );
+        assert!(!body.to_string().contains("hunter2"), "{body}");
+    }
+
+    std::fs::write(secret_file.path(), [0xff, b'\n']).unwrap();
+    let (_, invalid) = get(&daemon, "/api/miners/docs").await;
+    assert_eq!(invalid["state"], "unavailable");
+    assert!(
+        invalid["reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("invalid UTF-8"),
+        "{invalid}"
+    );
+    assert!(!invalid.to_string().contains("hunter2"));
+    std::fs::write(secret_file.path(), "hunter2\n").unwrap();
 
     // A credential that disappears makes the miner unavailable, with the fix, rather than failing a run later.
     drop(secret_file);

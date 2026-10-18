@@ -29,7 +29,7 @@ pub type Cursor = serde_json::Value;
 /// A reference to a credential, never the credential itself.
 ///
 /// What an adapter needs to authenticate to an external system is looked up through this at acquisition time and
-/// held as a `Secret`; the reference is what is stored on a source, so no secret is ever written to the palace.
+/// held as a `Secret`; only the reference is pinned on a durable mining job, so no secret is ever written to the palace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CredentialRef {

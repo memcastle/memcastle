@@ -872,6 +872,48 @@ ChatGPT's current web authorization can select only the default account: an addi
 cannot authenticate yet; export-import miners remain usable without an account.
 Legacy miner `credential` references still load, but put new reusable credentials on the source configuration.
 
+For a source named `team-feed` whose manifest declares `needs_credentials = true`,
+`[permissions] credential = true` and the network permission it needs to fetch its feed,
+two accounts can use separate references without putting either value in TOML:
+
+```toml
+[[source_configs]]
+id = "team-feed-work"
+source = "team-feed"
+credential = { type = "env", name = "TEAM_FEED_WORK_TOKEN" }
+
+[[source_configs]]
+id = "team-feed-personal"
+source = "team-feed"
+credential = { type = "file", path = "/run/secrets/team-feed-personal" }
+
+[[miners]]
+name = "work-daily"
+source = "team-feed"
+source_config = "team-feed-work"
+wing = "work"
+
+[[miners]]
+name = "work-weekly"
+source = "team-feed"
+source_config = "team-feed-work"
+wing = "work"
+
+[[miners]]
+name = "personal-daily"
+source = "team-feed"
+source_config = "team-feed-personal"
+wing = "personal"
+```
+
+Start the daemon with `TEAM_FEED_WORK_TOKEN` set and put the personal token on the file's first line.
+The two work miners reuse one configuration; the personal account and destination have separate source records and
+cursors.
+Changing a configuration's reference changes future jobs only; a queued or resumed job keeps its selected reference
+but reads its current value again when it runs.
+Existing miner-level `credential = { type = "env", name = "..." }` remains a legacy way to select a reference.
+Installation preview and consent name the selected-credential permission, and an update adding it requires fresh consent.
+
 ### Miner definitions
 
 A miner is a named, persistent definition of what to mine and how: a source or reusable source configuration,
@@ -947,8 +989,10 @@ Likewise REST callers must replace `scope` and `config` with `options`, and `uns
   A key in `options` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
   is refused, and the daemon reports a credential only as `env`, `file` or `oauth` and whether it resolves
   (for `oauth`, whether the source is signed in), never its name or path.
-  Handing an `env` or `file` credential to a source is the source's side of the contract, which does not take one yet;
-  today the daemon checks that it resolves, so an enabled miner whose variable is unset is `unavailable`, with the fix.
+  A source with consented `[permissions] credential = true` can request the selected `env` or `file` value during
+  `identify`, `discover` and `read`; `normalize` and host-run processes never receive it implicitly.
+  An enabled miner whose variable is unset, or whose file's first line is unreadable, invalid UTF-8 or empty,
+  is `unavailable` with the fix.
   An OAuth sign-in is handed over: a source that declares one is given a fresh access token on each call that asks.
   Sources requiring it for every mode make a miner unavailable until `memcastle source auth <source>` has been run;
   a source with on-demand OAuth may also offer an offline mode or an explicit manual-session fallback.

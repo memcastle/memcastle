@@ -167,6 +167,9 @@ An invariant nothing checks is a comment, and it will be violated.
     digest) and is given an access token only by `host.access-token`, never for `normalize` and never one it did not declare;
     signing a source in is REST and CLI only, with no MCP tool, so an agent cannot start one
     (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
+    A source declaring `[permissions] credential = true` can also ask the host for only the env/file reference
+    selected by its mining job, during acquisition and with the value resolved afresh for every execution;
+    neither `normalize` nor `run-process` inherits that value, and public job responses omit the reference.
     Enforced by `tests/source_isolation.rs` (the host calls nothing that inherits the environment, standard streams,
     arguments or a writable directory, and opens the network only inside the manifest's flag),
     by `tests/wasm_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
@@ -287,7 +290,7 @@ src/
 ├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters
 │               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing, through `project`),
 │               the registry that names them, `bundled`, which reads the sources unpacked beside the binary, and the
-│               WebAssembly host that runs installed sources (`wasm/`)
+│               WebAssembly host that runs installed sources (`wasm/`), and the selected credential resolver (`credential`)
 ├── integration/ agent integrations: manifest, discovery under the assets root, install/update/remove with a receipt, and
 │               the Pi, OpenCode and Claude Code agent adapters (no store, no jobs, no network, no daemon)
 ├── plugin/      versioned parent manifest, multi-module archive validation and local signing (no store, jobs or network)

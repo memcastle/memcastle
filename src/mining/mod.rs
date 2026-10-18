@@ -24,6 +24,7 @@ pub mod adapter;
 pub mod adapters;
 pub mod bundled;
 pub mod chunk;
+pub(crate) mod credential;
 pub mod pipeline;
 pub mod registry;
 pub mod wasm;
@@ -146,6 +147,9 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         preset
             .as_ref()
             .and_then(|preset| preset.configuration.as_deref()),
+        preset
+            .as_ref()
+            .and_then(|preset| preset.credential.as_ref()),
     )
     .await?;
     pipeline::mine(&adapter, ctx, job, request).await

@@ -175,6 +175,10 @@ pub struct Permissions {
     pub process: Vec<String>,
     /// Environment variables the source may read; it sees no others.
     pub env: Vec<String>,
+    /// Read the env/file reference selected for this mining job through `host.source-credential`.
+    /// Omitted when false so older packages retain their existing consent digest.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub credential: bool,
     /// The OAuth sign-in the source needs, when it has one (docs/adr/039): the host runs the flow, keeps the tokens, and
     /// hands the source a fresh access token through `host.access-token`. Absent is absent from the consent digest too,
     /// so a source that asks for no sign-in keeps the digest it was consented under.
@@ -374,6 +378,7 @@ impl Permissions {
             network: self.network,
             process: sorted(&self.process),
             env: sorted(&self.env),
+            credential: self.credential,
             oauth: self.oauth.as_ref().map(|oauth| OAuthRequirement {
                 scopes: sorted(&oauth.scopes),
                 ..oauth.clone()
@@ -388,6 +393,7 @@ impl Permissions {
             && !self.network
             && self.process.is_empty()
             && self.env.is_empty()
+            && !self.credential
             && self.oauth.is_none()
     }
 
@@ -425,6 +431,9 @@ impl Permissions {
                 "read environment variables {}",
                 self.env.join(", ")
             ));
+        }
+        if self.credential {
+            parts.push("read the selected job's env or file credential".to_string());
         }
         if let Some(oauth) = &self.oauth {
             let scopes = if oauth.scopes.is_empty() {
@@ -818,6 +827,23 @@ mod tests {
     }
 
     #[test]
+    fn selected_credentials_require_new_consent_without_changing_older_digests() {
+        let old = Permissions {
+            network: true,
+            ..Permissions::default()
+        };
+        let canonical = serde_json::json!({ "name": "x", "permissions": old.normalized() });
+        assert!(canonical["permissions"].get("credential").is_none());
+        let with_grant = Permissions {
+            credential: true,
+            ..old.clone()
+        };
+        assert_ne!(old.consent_digest("x"), with_grant.consent_digest("x"));
+        assert!(!with_grant.is_empty());
+        assert!(with_grant.describe().contains("selected job"));
+    }
+
+    #[test]
     fn asking_for_a_sign_in_or_a_wider_one_needs_consent_again() {
         let plain = Permissions::default();
         let signed_in = Permissions {
@@ -965,6 +991,7 @@ mod tests {
             network: true,
             process: vec!["git".into()],
             env: vec!["TOKEN".into()],
+            credential: true,
             oauth: Some(oauth()),
         }
         .describe();
@@ -973,6 +1000,7 @@ mod tests {
             "network",
             "git",
             "TOKEN",
+            "selected job",
             "OAuth",
             "auth.example.com",
             "read",

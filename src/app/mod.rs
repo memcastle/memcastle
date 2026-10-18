@@ -77,6 +77,18 @@ struct MiningSubmission {
     preset: Option<crate::domain::MiningPreset>,
 }
 
+/// Public job results retain routing but never expose credential reference locations.
+fn redact_job(mut job: Job) -> Job {
+    if let JobKind::Mine {
+        preset: Some(preset),
+        ..
+    } = &mut job.kind
+    {
+        preset.redact_credential();
+    }
+    job
+}
+
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -840,6 +852,7 @@ impl AppServices {
         // Ad-hoc runs remain jobs, never miner definitions: pin their effective defaults and limit for recovery.
         let preset = crate::domain::MiningPreset {
             configuration: Some(source_name.to_string()),
+            credential: defaults.credential,
             max_documents: Some(self.mining.max_documents),
             ..Default::default()
         };
@@ -917,7 +930,8 @@ impl AppServices {
         if let Some(wing) = wing.as_deref() {
             self.check_new_wing_name(wing).await?;
         }
-        self.scheduler
+        let job = self
+            .scheduler
             .submit(
                 JobKind::Mine {
                     source,
@@ -930,7 +944,8 @@ impl AppServices {
                 Priority::Background,
                 requested_by,
             )
-            .await
+            .await?;
+        Ok(redact_job(job))
     }
 
     /// Validate a mining source at submission, and give the `directory`
@@ -1395,7 +1410,13 @@ impl AppServices {
     /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
     pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
         Self::require_read(mode, "job_list")?;
-        self.store.list_jobs(status).await
+        Ok(self
+            .store
+            .list_jobs(status)
+            .await?
+            .into_iter()
+            .map(redact_job)
+            .collect())
     }
 
     /// A bounded page of jobs, newest first, optionally narrowed to a status and to a kind (`mine`, `audit`, ...).
@@ -1414,9 +1435,13 @@ impl AppServices {
     ) -> Result<Vec<Job>> {
         Self::require_read(mode, "job_list")?;
         let kind = kind.map(str::trim).filter(|kind| !kind.is_empty());
-        self.store
+        Ok(self
+            .store
             .list_jobs_page(status, kind, effective_limit(limit, DEFAULT_JOB_LIMIT))
-            .await
+            .await?
+            .into_iter()
+            .map(redact_job)
+            .collect())
     }
 
     /// Fetch one job by id. Gated as a **read** for the same reason as
@@ -1434,6 +1459,7 @@ impl AppServices {
         self.store
             .get_job(id)
             .await?
+            .map(redact_job)
             .ok_or_else(|| Error::JobNotFound { id: id.to_string() })
     }
 

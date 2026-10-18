@@ -793,6 +793,10 @@ impl AppServices {
         }
         let preset = crate::domain::MiningPreset {
             miner: Some(miner.name.clone()),
+            credential: miner
+                .credential
+                .clone()
+                .or(configuration.credential.clone()),
             configuration: Some(configuration.id),
             room: miner.room.clone(),
             mapping: miner.mapping.clone(),
@@ -827,7 +831,7 @@ impl AppServices {
                 _ => false,
             });
             if let Some(job) = waiting {
-                return Ok((job, true));
+                return Ok((super::redact_job(job), true));
             }
         }
         let job = self
@@ -1062,19 +1066,25 @@ impl AppServices {
             ));
         }
         let credential = miner.credential.as_ref().or(config.credential.as_ref());
+        if credential.is_none()
+            && self
+                .store
+                .get_source_package(&miner.source)
+                .await
+                .map_err(|error| error.to_string())?
+                .is_some_and(|record| {
+                    record.manifest.permissions.credential
+                        && record.manifest.permissions.oauth.is_none()
+                })
+        {
+            return Err(format!(
+                "the source `{}` needs a selected env or file credential; set one on its source configuration or miner",
+                miner.source
+            ));
+        }
         match credential {
-            Some(CredentialRef::Env { name })
-                if !credential_available(&CredentialRef::Env { name: name.clone() }) =>
-            {
-                return Err(format!(
-                    "the credential's environment variable `{name}` is not set or is empty in the daemon's \
-                     environment; export it and restart the daemon, or disable the miner"
-                ));
-            }
-            Some(CredentialRef::File { path }) if !Path::new(path).is_file() => {
-                return Err(format!(
-                    "the credential's file `{path}` does not exist; create it, or disable the miner"
-                ));
+            Some(reference @ (CredentialRef::Env { .. } | CredentialRef::File { .. })) => {
+                crate::mining::credential::resolve(reference)?;
             }
             Some(CredentialRef::Oauth) if requirement.is_none() => {
                 return Err(format!(
@@ -1261,11 +1271,12 @@ pub(super) fn find<'a>(miners: &'a [MinerDefinition], name: &str) -> Result<&'a 
         })
 }
 
-/// Whether a credential reference points at something that exists. The value itself is never read here.
+/// Whether a reference is usable by the source; its value never enters a view.
 pub(super) fn credential_available(credential: &CredentialRef) -> bool {
     match credential {
-        CredentialRef::Env { name } => std::env::var_os(name).is_some_and(|v| !v.is_empty()),
-        CredentialRef::File { path } => Path::new(path).is_file(),
+        CredentialRef::Env { .. } | CredentialRef::File { .. } => {
+            crate::mining::credential::resolve(credential).is_ok()
+        }
         // Whether a sign-in exists is the daemon's to answer, not a file or a variable to look at.
         CredentialRef::Oauth => false,
     }

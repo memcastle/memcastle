@@ -420,14 +420,16 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, source: &str) -> E
 ///
 /// # Errors
 ///
-/// As [`ensure_minable`] without the options, [`Error::CredentialRequired`] when the source signs in with OAuth and nobody has signed it
-/// in, and [`Error::SourceIncompatible`] or [`Error::SourceFailed`] when the component does not load.
+/// As [`ensure_minable`] without the options, [`Error::CredentialRequired`] when a selected env/file
+/// reference cannot be resolved or required OAuth sign-in is missing, and [`Error::SourceIncompatible`]
+/// or [`Error::SourceFailed`] when the component does not load.
 pub async fn resolve(
     store: &SurrealStore,
     mining: &MiningConfig,
     credentials: Option<&Arc<dyn AccessTokens>>,
     source: &str,
     configuration: Option<&str>,
+    reference: Option<&crate::domain::CredentialRef>,
 ) -> Result<AnySource> {
     match source {
         directory::NAME => Ok(AnySource::Directory(DirectoryAdapter::new(
@@ -441,6 +443,23 @@ pub async fn resolve(
             minable_package(&record, &dir)?;
             let bytes = read_installed_component(&dir, &record.name)?;
             let manifest = record.manifest;
+            // A source with both permissions may select OAuth or an offline mode instead; the guest gets a
+            // deterministic denial if it asks for a selected credential that this job does not have.
+            let selected = if manifest.permissions.credential {
+                reference
+                    .filter(|reference| !matches!(reference, crate::domain::CredentialRef::Oauth))
+                    .map(|reference| {
+                        super::credential::resolve(reference).map_err(|reason| {
+                            Error::CredentialRequired {
+                                source_name: other.to_string(),
+                                reason,
+                            }
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
             ensure_signed_in(
                 configuration.unwrap_or(&record.name),
                 &manifest.permissions,
@@ -450,9 +469,21 @@ pub async fn resolve(
             let mining = mining.clone();
             let credentials = credentials.cloned();
             let configuration = configuration.map(str::to_string);
+            let selected_env = match reference {
+                Some(crate::domain::CredentialRef::Env { name }) => Some(name.clone()),
+                _ => None,
+            };
             // Compiling a component is CPU-bound and takes noticeable time on first use.
             let adapter = tokio::task::spawn_blocking(move || {
-                WasmAdapter::load_with_key(&manifest, &bytes, &mining, credentials, configuration)
+                WasmAdapter::load_with_credential(
+                    &manifest,
+                    &bytes,
+                    &mining,
+                    credentials,
+                    configuration,
+                    selected,
+                    selected_env,
+                )
             })
             .await
             .map_err(|e| Error::SourceFailed {

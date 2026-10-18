@@ -122,7 +122,12 @@ fn view(config: &SourceConfiguration) -> SourceConfigurationView {
 impl AppServices {
     async fn source_config_view(&self, config: &SourceConfiguration) -> SourceConfigurationView {
         let mut answer = view(config);
-        if let Some(requirement) = self.oauth_requirement(&config.source).await {
+        if let Some(requirement) = self.oauth_requirement(&config.source).await
+            && !matches!(
+                config.credential,
+                Some(CredentialRef::Env { .. } | CredentialRef::File { .. })
+            )
+        {
             answer.credential_kind = Some("oauth".into());
             answer.credential_available = self.signed_in(&config.id, requirement).await;
         }
