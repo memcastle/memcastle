@@ -87,6 +87,13 @@ pub(super) async fn list(State(state): State<ApiState>) -> Result<impl IntoRespo
     Ok(Json(state.app.list_plugins().await?))
 }
 
+/// `GET /api/embedding-providers` exposes independently selectable installed capabilities.
+pub(super) async fn list_embedding_providers(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.list_embedding_providers().await?))
+}
+
 /// `GET /api/plugins/{id}`.
 pub(super) async fn show(
     State(state): State<ApiState>,

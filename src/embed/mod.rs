@@ -2,23 +2,24 @@
 //!
 //! An embedding is *derived* data. This module is how MemCastle obtains one
 //! — from a program the operator provides, an OpenAI-compatible HTTP
-//! endpoint, or not at all — and nothing here touches storage: `store` keeps
+//! endpoint, an installed provider component, or not at all — and nothing here touches storage: `store` keeps
 //! the vectors and SurrealDB searches them. Because the provider is
 //! pluggable behind [`Embedder`], the palace works with none configured, and
 //! a provider that is down degrades search to lexical instead of breaking it.
 //!
-//! No LLM or model is linked into MemCastle, and credentials are never
-//! MemCastle's to manage when a `command` provider is used: the program the
-//! operator names owns them.
+//! No LLM or model is linked into MemCastle. Command providers own their credentials;
+//! plugin providers receive only the selected connection's host-scoped credential reference.
 
 pub mod command;
 pub mod http;
 pub mod job;
+pub mod wasm;
 
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::config::{EmbeddingConnection, EmbeddingProvider, EmbeddingsConfig};
 use crate::domain::{EMBEDDING_DIMENSION, EmbeddingSpace};
@@ -57,6 +58,7 @@ pub struct Embeddings {
     space: Option<EmbeddingSpace>,
     profiles: Arc<BTreeMap<String, Embeddings>>,
     default_profile: Option<String>,
+    installed: Arc<RwLock<BTreeMap<String, Embeddings>>>,
 }
 
 impl std::fmt::Debug for Embeddings {
@@ -91,6 +93,7 @@ impl Embeddings {
             )),
             profiles: Arc::default(),
             default_profile: None,
+            installed: Arc::default(),
         }
     }
 
@@ -107,6 +110,10 @@ impl Embeddings {
             api_key: config.api_key.clone(),
             timeout_secs: config.timeout_secs,
             batch_size: config.batch_size,
+            plugin: None,
+            module: None,
+            settings: serde_json::json!({}),
+            credential: None,
         };
         let mut profiles = BTreeMap::new();
         if legacy.provider != EmbeddingProvider::None {
@@ -158,6 +165,124 @@ impl Embeddings {
         Ok(selected)
     }
 
+    /// Refresh the executable modules from the installed ledger, without swapping the scheduler's handle.
+    /// A missing plugin leaves its profile unavailable while unrelated profiles keep working.
+    pub fn load_plugins(
+        &self,
+        config: &EmbeddingsConfig,
+        records: &[crate::domain::PluginRecord],
+        root: &std::path::Path,
+    ) -> Result<()> {
+        let mut installed = BTreeMap::new();
+        for (name, profile) in &config.profiles {
+            let Some(connection) = config.providers.get(&profile.provider) else {
+                continue;
+            };
+            if connection.provider != EmbeddingProvider::Plugin {
+                continue;
+            }
+            let (Some(plugin_id), Some(module_id)) = (&connection.plugin, &connection.module)
+            else {
+                continue;
+            };
+            let Some(record) = records.iter().find(|record| &record.id == plugin_id) else {
+                continue;
+            };
+            let Some(module) = record.manifest.modules.iter().find(|module| {
+                module.kind == crate::domain::PluginModuleKind::EmbeddingProvider
+                    && &module.id == module_id
+            }) else {
+                continue;
+            };
+            let base = root.join(plugin_id).join(&record.generation);
+            let manifest_bytes = std::fs::read(base.join(&module.manifest))
+                .map_err(|error| Error::io(module.manifest.clone(), error))?;
+            let bytes = std::fs::read(base.join(&module.entry))
+                .map_err(|error| Error::io(module.entry.clone(), error))?;
+            if crate::domain::sha256_hex(&manifest_bytes) != module.manifest_sha256
+                || crate::domain::sha256_hex(&bytes) != module.sha256
+            {
+                return Err(Error::EmbeddingFailed {
+                    message: format!(
+                        "embedding module `{module_id}` files changed; reinstall the plugin"
+                    ),
+                });
+            }
+            let descriptor = crate::plugin::embedding::parse(
+                std::str::from_utf8(&manifest_bytes).map_err(|error| Error::EmbeddingFailed {
+                    message: format!(
+                        "embedding module `{module_id}` manifest is not UTF-8: {error}"
+                    ),
+                })?,
+            )?;
+            if descriptor.id != module.id
+                || descriptor.version != module.version
+                || module.contract.as_deref() != Some(descriptor.contract.as_str())
+                || module.config_schema != descriptor.config_schema
+            {
+                return Err(Error::EmbeddingFailed {
+                    message: format!(
+                        "embedding module `{module_id}` differs from its installed plugin manifest; reinstall the plugin"
+                    ),
+                });
+            }
+            crate::plugin::embedding::validate_selection(
+                &descriptor,
+                &connection.settings,
+                &profile.model,
+                profile.dimensions,
+            )?;
+            if connection.credential.is_some() && !descriptor.credential {
+                return Err(Error::EmbeddingFailed {
+                    message: format!(
+                        "embedding module `{module_id}` does not declare credential access"
+                    ),
+                });
+            }
+            let settings = serde_json::to_string(&connection.settings).map_err(|error| {
+                Error::EmbeddingFailed {
+                    message: error.to_string(),
+                }
+            })?;
+            let provider = wasm::WasmEmbedder::load(
+                descriptor,
+                &bytes,
+                profile.model.clone(),
+                profile.dimensions,
+                settings.clone(),
+                connection.credential.clone(),
+                std::time::Duration::from_secs(connection.timeout_secs),
+            )?;
+            let mut handle = Self::new(provider, connection.batch_size);
+            let credential = serde_json::to_vec(&connection.credential)
+                .expect("credential reference serializes");
+            let identity = serde_json::to_vec(&(
+                plugin_id,
+                module_id,
+                &module.version,
+                &module.sha256,
+                &module.manifest_sha256,
+                &settings,
+                crate::domain::sha256_hex(&credential),
+            ))
+            .expect("strings serialize");
+            handle.space = Some(EmbeddingSpace::new(
+                name.clone(),
+                profile.provider.clone(),
+                format!("plugin:{plugin_id}/{module_id}"),
+                crate::domain::sha256_hex(&identity),
+                profile.model.clone(),
+                profile.dimensions,
+            ));
+            installed.insert(name.clone(), handle);
+        }
+        *self
+            .installed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = installed;
+        Ok(())
+    }
+
     fn from_connection(
         name: &str,
         provider_name: &str,
@@ -171,6 +296,7 @@ impl Embeddings {
             EmbeddingProvider::External => "external",
             EmbeddingProvider::Command => "command",
             EmbeddingProvider::Http | EmbeddingProvider::Openai => "openai",
+            EmbeddingProvider::Plugin => "plugin",
         };
         let connection = match config.provider {
             EmbeddingProvider::Command => {
@@ -180,6 +306,7 @@ impl Embeddings {
         };
         let mut handle = match config.provider {
             EmbeddingProvider::None | EmbeddingProvider::External => Self::disabled(),
+            EmbeddingProvider::Plugin => Self::disabled(),
             EmbeddingProvider::Command => Self::new(
                 command::CommandEmbedder::new(config.command.clone(), Some(model.clone()), timeout)
                     .with_dimensions(dimensions),
@@ -211,19 +338,53 @@ impl Embeddings {
 
     /// Resolve a named profile; an unknown or disabled profile must never substitute another.
     pub fn select(&self, name: Option<&str>) -> Result<Self> {
+        let requested = name.or(self.default_profile.as_deref());
+        if let Some(provider) = requested.and_then(|name| {
+            self.installed
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(name)
+                .cloned()
+        }) {
+            return Ok(provider);
+        }
         if let Some(name) = name {
             if self
                 .space
                 .as_ref()
                 .is_some_and(|space| space.profile == name)
             {
+                if self.provider.is_none()
+                    && self
+                        .space
+                        .as_ref()
+                        .is_some_and(|space| space.provider_type == "plugin")
+                {
+                    return Err(Error::EmbeddingProfileUnavailable { name: name.into() });
+                }
                 return Ok(self.clone());
             }
-            return self.profiles.get(name).cloned().ok_or_else(|| Error::invalid_input(
+            let profile = self.profiles.get(name).ok_or_else(|| Error::invalid_input(
                 "profile", format!("unknown embedding profile `{name}`; configure it under [embeddings.profiles.{name}]"),
-            ));
+            ))?;
+            if profile
+                .space
+                .as_ref()
+                .is_some_and(|space| space.provider_type == "plugin")
+            {
+                return Err(Error::EmbeddingProfileUnavailable { name: name.into() });
+            }
+            return Ok(profile.clone());
         }
         if !self.is_configured() {
+            if let Some(name) = self.default_profile.as_deref()
+                && self
+                    .space
+                    .as_ref()
+                    .is_some_and(|space| space.provider_type == "plugin")
+            {
+                return Err(Error::EmbeddingProfileUnavailable { name: name.into() });
+            }
             return Err(Error::EmbeddingsNotConfigured);
         }
         Ok(self.clone())
@@ -239,6 +400,12 @@ impl Embeddings {
     #[must_use]
     pub fn is_configured(&self) -> bool {
         self.provider.is_some()
+            || self.default_profile.as_ref().is_some_and(|name| {
+                self.installed
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .contains_key(name)
+            })
     }
 
     /// Embed every text, in order, validating what comes back.

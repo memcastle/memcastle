@@ -343,6 +343,7 @@ pub struct AppServices {
     /// Produces query vectors for semantic search; disabled unless an
     /// `[embeddings]` provider is configured.
     embeddings: Embeddings,
+    embedding_config: Arc<crate::config::EmbeddingsConfig>,
     /// Whether entity extraction is configured, so a job that could only fail
     /// is refused up front; disabled unless an `[extraction]` provider is.
     extraction: Extraction,
@@ -376,6 +377,7 @@ impl AppServices {
             auth: Arc::new(AuthPolicy::default()),
             db_endpoint: Arc::new(DbEndpoint::default()),
             embeddings: Embeddings::disabled(),
+            embedding_config: Arc::new(crate::config::EmbeddingsConfig::default()),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
             preferences: crate::domain::SourcePreferences::default(),
@@ -467,6 +469,13 @@ impl AppServices {
     #[must_use]
     pub fn with_embeddings(mut self, embeddings: Embeddings) -> Self {
         self.embeddings = embeddings;
+        self
+    }
+
+    /// Keep the profile definitions for refreshing installed modules after a plugin transaction.
+    #[must_use]
+    pub fn with_embedding_config(mut self, config: crate::config::EmbeddingsConfig) -> Self {
+        self.embedding_config = Arc::new(config);
         self
     }
 

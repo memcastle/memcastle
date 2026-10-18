@@ -217,13 +217,14 @@ sha2 = "0.11.0"
 dashmap = "6.2.1"
 
 # The source runtime (docs/adr/026): third-party mining sources are WebAssembly Components run in-process, behind the
-# `SourceAdapter` contract. Only `mining::wasm` may name these crates (`tests/source_isolation.rs`). Pinned to 41,
+# `SourceAdapter` contract. Only `mining::wasm` and `embed::wasm` may name these crates
+# (`tests/source_isolation.rs`). Pinned to 41,
 # the newest line whose MSRV is this crate's (42 needs Rust 1.91); a newer line is a deliberate MSRV bump.
 # `default-features = false` drops the profiler, GC, coredump, debug and cache stacks a source host never uses; what is
 # left is the Cranelift compiler, the component model, and async support (which WASI preview 2 requires).
 wasmtime = { version = "41.0.4", default-features = false, features = ["runtime", "cranelift", "component-model", "async", "std"] }
-# WASI preview 2 is what a `wasm32-wasip2` component imports. Nothing is granted by default: `mining::wasm` builds each
-# context from the manifest's permissions alone.
+# WASI preview 2 is what a `wasm32-wasip2` component imports. Nothing is granted by default: each source and embedding
+# host builds its context from the module's reviewed permissions alone.
 wasmtime-wasi = { version = "41.0.4", default-features = false, features = ["p2"] }
 # Source manifests state which MemCastle versions they run on (`[compatibility] memcastle = ">=0.3, <0.4"`).
 semver = "1"

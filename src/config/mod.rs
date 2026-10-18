@@ -312,6 +312,8 @@ pub enum EmbeddingProvider {
     Http,
     /// The OpenAI embeddings protocol, also spoken by compatible endpoints.
     Openai,
+    /// An installed plugin's independently selected embedding component.
+    Plugin,
     /// Vectors are computed by callers; the daemon never invokes this provider.
     External,
 }
@@ -325,9 +327,10 @@ impl std::str::FromStr for EmbeddingProvider {
             "command" => Ok(Self::Command),
             "http" => Ok(Self::Http),
             "openai" => Ok(Self::Openai),
+            "plugin" => Ok(Self::Plugin),
             "external" => Ok(Self::External),
             other => Err(format!(
-                "unknown embedding provider `{other}`; expected one of: none, command, http, openai, external"
+                "unknown embedding provider `{other}`; expected one of: none, command, http, openai, plugin, external"
             )),
         }
     }
@@ -357,6 +360,15 @@ pub struct EmbeddingConnection {
     pub timeout_secs: u64,
     /// Number of texts per provider call.
     pub batch_size: usize,
+    /// Installed plugin that owns the embedding module.
+    pub plugin: Option<String>,
+    /// Embedding module within the plugin's archive.
+    pub module: Option<String>,
+    /// JSON-compatible public settings validated by the installed module's schema.
+    pub settings: serde_json::Value,
+    /// A reference resolved only when a selected component asks for a token.
+    #[serde(skip_serializing)]
+    pub credential: Option<crate::domain::CredentialRef>,
 }
 
 impl Default for EmbeddingConnection {
@@ -368,6 +380,10 @@ impl Default for EmbeddingConnection {
             api_key: None,
             timeout_secs: DEFAULT_EMBEDDING_TIMEOUT_SECS,
             batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+            plugin: None,
+            module: None,
+            settings: serde_json::json!({}),
+            credential: None,
         }
     }
 }
@@ -1750,6 +1766,11 @@ impl Config {
         let embeddings = &self.embeddings;
         match embeddings.provider {
             EmbeddingProvider::None | EmbeddingProvider::External => {}
+            EmbeddingProvider::Plugin => {
+                return Err(Error::config(
+                    "legacy embeddings.provider cannot be plugin; configure a named connection and profile",
+                ));
+            }
             EmbeddingProvider::Command => {
                 if embeddings
                     .command
@@ -1841,6 +1862,43 @@ impl Config {
                 {
                     return Err(Error::config(format!(
                         "embedding provider `{name}` needs an http(s) url"
+                    )));
+                }
+                EmbeddingProvider::Plugin
+                    if provider
+                        .plugin
+                        .as_deref()
+                        .is_none_or(|id| !crate::domain::is_valid_source_name(id))
+                        || provider
+                            .module
+                            .as_deref()
+                            .is_none_or(|id| !crate::domain::is_valid_source_name(id))
+                        || !provider.settings.is_object()
+                        || !provider.command.is_empty()
+                        || provider.url.is_some()
+                        || provider.api_key.is_some()
+                        || matches!(
+                            provider.credential,
+                            Some(crate::domain::CredentialRef::Oauth)
+                        )
+                        || provider.settings.as_object().is_some_and(|settings| {
+                            settings.keys().any(|name| {
+                                let name = name.to_ascii_lowercase();
+                                [
+                                    "token",
+                                    "secret",
+                                    "password",
+                                    "api_key",
+                                    "credential",
+                                    "authorization",
+                                ]
+                                .iter()
+                                .any(|word| name.contains(word))
+                            })
+                        }) =>
+                {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` needs valid plugin/module ids and non-secret object settings; use only an env/file credential reference, not command, url or api_key"
                     )));
                 }
                 _ => {}
@@ -2909,6 +2967,40 @@ mod tests {
                 .unwrap()
                 .contains("secret-test-value")
         );
+    }
+
+    #[test]
+    fn a_plugin_connection_parses_settings_and_keeps_credential_references_out_of_reports() {
+        let text = r#"
+default = "vendor"
+[providers.vendor]
+type = "plugin"
+plugin = "vendor-plugin"
+module = "vendor-embeddings"
+credential = { type = "env", name = "VENDOR_TOKEN" }
+settings = { region = "eu" }
+[profiles.vendor]
+provider = "vendor"
+model = "stable-model"
+dimensions = 1536
+"#;
+        let embeddings: EmbeddingsConfig = toml::from_str(text).unwrap();
+        assert_eq!(embeddings.providers["vendor"].settings["region"], "eu");
+        assert!(
+            !toml::to_string(&embeddings)
+                .unwrap()
+                .contains("VENDOR_TOKEN")
+        );
+        let mut config = valid_config();
+        config.embeddings = embeddings;
+        config.validate().unwrap();
+        config
+            .embeddings
+            .providers
+            .get_mut("vendor")
+            .unwrap()
+            .settings = serde_json::json!({"api_key": "a-secret"});
+        assert!(config.validate().is_err());
     }
 
     #[test]

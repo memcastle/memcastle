@@ -38,7 +38,7 @@ plugin while installing this one.
 An optional dependency may be absent, but is version-checked when present.
 Removing a plugin blocks required dependents; optional dependents remain installed without it.
 Each module specifies a stable `id`, `type`, paths `manifest` and `entry`,
-and optionally `optional`, `config_schema` and a source `contract`.
+and optionally `optional`, `config_schema`; source and embedding modules also require a versioned `contract`.
 Source artifacts normally live under `sources/<id>/`, and integration artifacts under `integrations/<id>/`;
 previously published packages using `modules/<id>/` remain installable. Both paths for one module must share that
 module's selected directory. The typed roots let a source and integration share an ID without sharing files.
@@ -56,7 +56,62 @@ The reviewed [`plugins.json`](plugins.json) catalogue lists `memcastle-pi`, `mem
 repositories; until a provider publishes a release, build its archive locally before installing it.
 Source modules retain their `memcastle-source.toml` and `source.wasm` contract;
 integration modules retain their `memcastle-integration.toml` and agent assets.
-An embedding-provider module may be declared for discovery, but its execution contract and selection belong to #256.
+Embedding modules use `embeddings/<id>/memcastle-embedding.toml` and `embeddings/<id>/embedding.wasm`
+(the legacy `modules/<id>/` root is also accepted).
+Their manifests declare a version, `contract = "0.1.0"`, one or more `[[models]]` with `id` and `dimensions`,
+optional `network` and `credential` permissions, and an optional restricted `config_schema`.
+For example, a plugin project can add this module to its root `plugin.toml`:
+
+```toml
+[[modules]]
+id = "vendor-embeddings"
+type = "embedding_provider"
+manifest = "embeddings/vendor-embeddings/memcastle-embedding.toml"
+entry = "embeddings/vendor-embeddings/embedding.wasm"
+contract = "0.1.0"
+
+[modules.config_schema]
+type = "object"
+required = ["region"]
+additionalProperties = false
+
+[modules.config_schema.properties.region]
+type = "string"
+```
+
+The module's `memcastle-embedding.toml` then describes what that particular component supports:
+
+```toml
+id = "vendor-embeddings"
+version = "0.1.0"
+contract = "0.1.0"
+network = true
+credential = true
+
+[[models]]
+id = "vendor-embedding-v2"
+dimensions = [768, 1536]
+
+[config_schema]
+type = "object"
+required = ["region"]
+additionalProperties = false
+
+[config_schema.properties.region]
+type = "string"
+```
+
+Compile the `memcastle:embedding@0.1.0` world in `wit/embedding/memcastle-embedding.wit` as a
+`wasm32-wasip2` component before `plugin package`; the packager does not compile module code.
+`models` must return the same models and dimensions as the manifest; `embed` receives a model, dimension,
+JSON settings object and ordered text batch, returning one vector per input.
+The host checks counts, lengths and finite coordinates, limits calls to 64 MiB and each connection's timeout,
+and grants only the permissions the preview showed.
+The supported settings schema accepts an object with typed scalar `properties`, `required` keys and
+`additionalProperties = false`; credentials must be connection references rather than schema settings.
+The parent module agrees on its contract, version and schema; the daemon verifies its Wasm component and advertised
+models before installation and selects it through a named embedding connection, not a source or integration.
+See [ADR-051](adr/051-embedding-provider-modules.md) and [embedding configuration](configuration.md#named-connections-and-profiles).
 
 The tar.gz release archive contains generated `manifest.toml` and the declared module files, **not** `plugin.toml`.
 The generated manifest combines the descriptor's metadata with release versions and SHA-256 for every other archive
@@ -74,9 +129,12 @@ each module's own permissions and each miner's scope remain separate.
 `memcastle source enable/disable` controls its mining availability independently of other modules.
 `memcastle integration install/remove` copies and registers an integration from an installed plugin's local files;
 it never fetches a standalone module or needs a daemon to reach its agent.
-Embedding-provider selection and runtime execution belong to #256; declaring the type does not activate it.
+Embedding providers become active only when a configured embedding profile selects their module.
+The plugin preview asks separately for any embedding module's network or selected-credential permissions;
+approve its `embedding:ID` digest with `--consent embedding:ID=DIGEST` or the interactive confirmation.
+Installing or updating a plugin never enables a source or installs an agent integration on its behalf.
 Plugin removal must preserve drawers, mined source records and cursors.
-Module configuration and dependent installations must be resolved before removal.
+Module configuration, active pinned embedding jobs and dependent installations must be resolved before removal.
 The daemon checks agent integration receipts in its own agents directory, not on other machines.
 A copy installed on another machine and its agent configuration are not deleted by a plugin uninstall;
 it can still use MCP/HTTP, but updating it from that plugin requires reinstalling the plugin first.

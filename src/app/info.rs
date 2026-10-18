@@ -133,6 +133,7 @@ impl ConfigReport {
                     EmbeddingProvider::Http => "http",
                     EmbeddingProvider::Openai => "openai",
                     EmbeddingProvider::External => "external",
+                    EmbeddingProvider::Plugin => "plugin",
                 }
                 .to_string(),
                 model: config

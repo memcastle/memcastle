@@ -198,3 +198,6 @@ The history is the value.
 - [ADR-050](050-embedding-spaces-and-provenance.md) — model and pipeline provenance define immutable vector spaces;
   legacy vectors are quarantined, jobs pin their provider, and dedicated dimension-tier HNSW slots never mix spaces
   (amends ADR-021)
+- [ADR-051](051-embedding-provider-modules.md) — independently selectable embedding modules run as bounded Wasm
+  components under the existing plugin lifecycle and named embedding profiles
+  (builds on ADR-049 and ADR-050)

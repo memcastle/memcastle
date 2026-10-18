@@ -441,6 +441,20 @@ fn providers(report: &mut Report, config: &Config) {
         ),
     ];
     for (name, command, http, args, credential) in checks {
+        if name == "embeddings"
+            && config
+                .embeddings
+                .default
+                .as_ref()
+                .and_then(|selected| config.embeddings.profiles.get(selected))
+                .and_then(|profile| config.embeddings.providers.get(&profile.provider))
+                .is_some_and(|connection| connection.provider == EmbeddingProvider::Plugin)
+        {
+            // Doctor runs without a daemon, so it can inspect a selected profile but not the installed ledger.
+            report.add("Providers", name, CheckStatus::Ok,
+                "Plugin embedding profile is configured; installation and model availability not tested.", None);
+            continue;
+        }
         if command {
             let found = args
                 .first()
@@ -1180,6 +1194,38 @@ mod tests {
                 .findings
                 .iter()
                 .any(|f| f.check == "extraction API key" && f.status == CheckStatus::Skipped)
+        );
+    }
+
+    #[test]
+    fn a_named_plugin_profile_is_reported_without_opening_a_plugin_or_contacting_a_model() {
+        let mut config = Config::default();
+        config.embeddings.default = Some("vendor".into());
+        config.embeddings.providers.insert(
+            "vendor".into(),
+            crate::config::EmbeddingConnection {
+                provider: EmbeddingProvider::Plugin,
+                plugin: Some("vendor-plugin".into()),
+                module: Some("vendor-embeddings".into()),
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "vendor".into(),
+            crate::config::EmbeddingProfileConfig {
+                provider: "vendor".into(),
+                model: "v2".into(),
+                dimensions: 768,
+            },
+        );
+        let mut report = Report::default();
+        providers(&mut report, &config);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.check == "embeddings"
+                    && finding.summary.contains("Plugin embedding profile"))
         );
     }
 

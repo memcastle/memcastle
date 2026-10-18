@@ -730,6 +730,21 @@ pub enum Error {
     )]
     EmbeddingsNotConfigured,
 
+    /// A configured profile selects a plugin capability that is not installed.
+    #[error(
+        "embedding profile `{name}` needs its installed plugin module; install the plugin and retry"
+    )]
+    #[diagnostic(
+        code(memcastle::embed::profile_unavailable),
+        help(
+            "install the plugin and embedding_provider module named by this profile's connection, or select another profile"
+        )
+    )]
+    EmbeddingProfileUnavailable {
+        /// Selected profile alias.
+        name: String,
+    },
+
     /// The embedding provider was configured but did not return usable vectors.
     #[error("the embedding provider failed: {message}")]
     #[diagnostic(
@@ -850,7 +865,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::plugin::blocked),
         help(
-            "disable the affected source, remove its miner/trigger configuration or uninstall its integration, then retry"
+            "disable the affected source, remove its miner/embedding profile configuration, finish active jobs or uninstall its integration, then retry"
         )
     )]
     PluginBlocked {
@@ -858,6 +873,25 @@ pub enum Error {
         name: String,
         /// The specific reference that blocks this operation.
         reason: String,
+    },
+
+    /// Installing a provider component with network or credential permissions needs explicit agreement.
+    #[error(
+        "embedding module `{name}` asks for permissions that were not agreed to: {permissions}"
+    )]
+    #[diagnostic(
+        code(memcastle::plugin::embedding_consent_required),
+        help(
+            "review the permissions, then install again with `--consent embedding:{name}={digest}` or confirm interactively"
+        )
+    )]
+    EmbeddingConsentRequired {
+        /// The embedding module's ID, without its consent-map prefix.
+        name: String,
+        /// Which authority the module requests.
+        permissions: String,
+        /// Digest of the reviewed permission set.
+        digest: String,
     },
 
     /// No installed plugin has this ID.
@@ -1936,6 +1970,9 @@ mod tests {
                 actual: 2,
             },
             Error::EmbeddingsNotConfigured,
+            Error::EmbeddingProfileUnavailable {
+                name: "vendor".into(),
+            },
             Error::EmbeddingFailed {
                 message: "timeout".to_string(),
             },
@@ -1965,6 +2002,11 @@ mod tests {
             Error::PluginBlocked {
                 name: "acme".to_string(),
                 reason: "source enabled".to_string(),
+            },
+            Error::EmbeddingConsentRequired {
+                name: "embeddings".to_string(),
+                permissions: "network access".to_string(),
+                digest: "abcdef".to_string(),
             },
             Error::PluginNotFound {
                 name: "acme".to_string(),
@@ -2190,6 +2232,7 @@ mod tests {
             | Error::DrawerSuperseded { .. }
             | Error::EmbeddingDimension { .. }
             | Error::EmbeddingsNotConfigured
+            | Error::EmbeddingProfileUnavailable { .. }
             | Error::EmbeddingFailed { .. }
             | Error::ExtractionNotConfigured
             | Error::ExtractionFailed { .. }
@@ -2200,6 +2243,7 @@ mod tests {
             | Error::PluginManifestInvalid { .. }
             | Error::PluginPackageInvalid { .. }
             | Error::PluginBlocked { .. }
+            | Error::EmbeddingConsentRequired { .. }
             | Error::PluginNotFound { .. }
             | Error::PluginRegistryUnavailable { .. }
             | Error::PluginNotInRegistry { .. }

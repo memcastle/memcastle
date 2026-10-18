@@ -123,7 +123,7 @@ An invariant nothing checks is a comment, and it will be violated.
    `src/mining/adapters/`, and the pipeline, the chunker and the domain model know no source by name and read no file.
    An adapter never touches the store or the jobs, and only the pipeline writes a source's cursor and document records,
    after the drawers they describe (see `docs/adr/023-unified-source-model-for-mining.md`).
-   A source is built in or an installed WebAssembly component (`src/mining/wasm/`, the only module that names the
+   A source is built in or an installed WebAssembly component (`src/mining/wasm/`, the only source module that names the
    runtime), behind the same contract, and the pipeline cannot tell which
    (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
    Sources arrive from a registry through `src/distribution/`, which only `app` calls
@@ -141,8 +141,8 @@ An invariant nothing checks is a comment, and it will be violated.
    Deduplication is called by the pipeline for every chunk it stores, so `src/dedup` obeys the same rule: it names no
    source, reads no file and writes no source record, and the matching policy in `domain/fingerprint.rs` and
    `domain/resolution.rs` stays pure (see `docs/adr/025-memory-deduplication-and-entity-resolution.md`).
-   The host, the adapters and `src/source/` reaching `store` or `jobs`, and any module but `src/mining/wasm/` naming the
-   runtime, fail the same test.
+   The host, the adapters and `src/source/` reaching `store` or `jobs`, and any module but `src/mining/wasm/` or
+   `src/embed/wasm.rs` naming the runtime, fail the same test.
 
 10. **An installed source has no ambient authority, and installing one is administrative** —
     a WebAssembly source starts with no filesystem, environment, network or programs, and the host grants exactly what its
@@ -301,7 +301,8 @@ src/
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
 ├── search/     the retrieval contract and ranking policy (lexical, semantic, hybrid, temporal, graph expansion)
-├── embed/      embedding providers (command, OpenAI-compatible HTTP) behind one trait, and the `Embed` job handler
+├── embed/      embedding providers (command, OpenAI-compatible HTTP, installed Wasm modules) behind one trait,
+│               and the `Embed` job handler; only `embed/wasm.rs` runs embedding components
 ├── dedup/      drawer deduplication: assess what a new drawer duplicates or resembles, link it, skip an exact copy
 ├── extract/    entity extraction providers (heuristic, command, OpenAI-compatible HTTP) behind one trait, and the `Extract` job handler
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`);

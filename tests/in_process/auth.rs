@@ -148,6 +148,7 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         // Installing, enabling and removing sources decides what code the daemon runs: every method is guarded.
         (Method::POST, "/api/source-packages"),
         (Method::GET, "/api/plugins"),
+        (Method::GET, "/api/embedding-providers"),
         (Method::POST, "/api/plugins"),
         (Method::GET, "/api/plugins/example"),
         (Method::DELETE, "/api/plugins/example"),

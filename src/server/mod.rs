@@ -98,6 +98,11 @@ pub async fn run(config: Config) -> Result<()> {
     // query vectors. Built before anything serves so a bad `[embeddings]`
     // section fails startup, not the first search.
     let embeddings = Embeddings::from_config(&config.embeddings)?;
+    embeddings.load_plugins(
+        &config.embeddings,
+        &store.list_plugins().await?,
+        &config.plugins.dir(),
+    )?;
     // Likewise for `[extraction]`: a half-written section fails startup.
     let extraction = Extraction::from_config(&config.extraction)?;
     // One handle for the scheduler's mining jobs (which ask for access tokens) and the services (which sign sources in
@@ -154,6 +159,7 @@ pub async fn run(config: Config) -> Result<()> {
         .with_mining(config.effective_mining())
         .with_plugins(config.plugins.clone())
         .with_embeddings(embeddings)
+        .with_embedding_config(config.embeddings.clone())
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())
         .with_preferences(config.effective_preferences())

@@ -125,6 +125,9 @@ flowchart LR
 `registry.json` continues to serve legacy single-source packages; it is never interpreted as a plugin catalogue.
 For example, `memcastle-openai` supplies the separate `codex` and `chatgpt` source modules plus a `codex` agent integration.
 The shared OpenAI-compatible embeddings HTTP protocol stays in Core and needs no OpenAI product plugin.
+Installed `embedding_provider` modules use a separate bounded Wasm contract behind the same `Embedder` interface.
+Named connections and profiles resolve their component generation through the installed plugin ledger, while miners
+and explicit embed jobs pin the resulting embedding space (see [ADR-051](adr/051-embedding-provider-modules.md)).
 
 ## Change notices: a bus, not a database feature
 

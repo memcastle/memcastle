@@ -199,11 +199,14 @@ fn pack_with_version(files: &BTreeMap<String, Vec<u8>>, version: Option<&str>) -
                     .integration
                     .version
             }
-            PluginModuleKind::EmbeddingProvider => seed
-                .modules
-                .iter()
-                .find(|entry| entry.kind == module.kind && entry.id == module.id)
-                .map_or_else(|| module.version.clone(), |entry| entry.version.clone()),
+            PluginModuleKind::EmbeddingProvider => {
+                let text = std::str::from_utf8(
+                    all.get(&module.manifest)
+                        .ok_or_else(|| invalid(format!("missing `{}`", module.manifest)))?,
+                )
+                .map_err(|_| invalid(format!("module `{}` manifest is not UTF-8", module.id)))?;
+                crate::plugin::embedding::parse(text)?.version
+            }
         };
         module.manifest_sha256 = sha256_hex(
             all.get(&module.manifest)
@@ -544,7 +547,23 @@ fn validate_files(files: &BTreeMap<String, Vec<u8>>) -> Result<PluginPackage> {
                 }
             }
             PluginModuleKind::EmbeddingProvider => {
-                // The metadata can be discovered, but #256 defines how its code is run.
+                let provider = crate::plugin::embedding::parse(text)?;
+                if provider.id != module.id
+                    || provider.version != module.version
+                    || module.contract.as_deref() != Some(provider.contract.as_str())
+                    || module.config_schema != provider.config_schema
+                {
+                    return Err(invalid(format!(
+                        "embedding module `{}` identity, version, contract or schema differs from its manifest",
+                        module.id
+                    )));
+                }
+                if !files[&module.entry].starts_with(b"\0asm") {
+                    return Err(invalid(format!(
+                        "embedding module `{}` is not WebAssembly",
+                        module.id
+                    )));
+                }
             }
         }
     }
@@ -1035,26 +1054,29 @@ mod tests {
     }
 
     #[test]
-    fn an_embedding_module_is_discoverable_without_pretending_to_be_a_source_adapter() {
+    fn an_embedding_module_is_packaged_with_its_independent_contract() {
         let mut files = fixture();
         let mut manifest =
             manifest::parse(std::str::from_utf8(&files[MANIFEST_FILE]).unwrap()).unwrap();
-        let entry = b"future embedding contract";
-        let config = b"{\"format\":1}";
+        let entry = b"\0asm\x0d\0\x01\0";
+        let config = b"id = 'embeddings'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'demo'\ndimensions = [768]\n";
         manifest.modules.push(PluginModule {
             id: "embeddings".into(),
             kind: PluginModuleKind::EmbeddingProvider,
             version: "0.1.0".into(),
-            manifest: "modules/embeddings/manifest.json".into(),
+            manifest: "modules/embeddings/memcastle-embedding.toml".into(),
             manifest_sha256: sha256_hex(config),
-            entry: "modules/embeddings/provider.bin".into(),
+            entry: "modules/embeddings/embedding.wasm".into(),
             sha256: sha256_hex(entry),
             optional: true,
-            contract: None,
+            contract: Some("0.1.0".into()),
             config_schema: None,
         });
-        files.insert("modules/embeddings/manifest.json".into(), config.to_vec());
-        files.insert("modules/embeddings/provider.bin".into(), entry.to_vec());
+        files.insert(
+            "modules/embeddings/memcastle-embedding.toml".into(),
+            config.to_vec(),
+        );
+        files.insert("modules/embeddings/embedding.wasm".into(), entry.to_vec());
         files.insert(
             MANIFEST_FILE.into(),
             toml::to_string(&manifest).unwrap().into_bytes(),

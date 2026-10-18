@@ -1,0 +1,27 @@
+// A provider implements embeddings independently of source mining and text generation.
+// The host owns profile selection, vector validation, persistence and credentials.
+package memcastle:embedding@0.1.0;
+
+interface host {
+    // Only available to a selected module whose connection declared a credential reference.
+    access-token: func() -> result<string, string>;
+}
+
+interface provider {
+    record model {
+        id: string,
+        dimensions: list<u32>,
+    }
+
+    // The component cannot advertise a model or dimension its manifest did not declare.
+    models: func() -> list<model>;
+
+    // Settings are a JSON object validated against the module's schema by the host.
+    // One vector per input, in input order. The host checks counts, dimensions and finiteness.
+    embed: func(model: string, dimensions: u32, settings: string, texts: list<string>) -> result<list<list<f32>>, string>;
+}
+
+world embedding-provider {
+    import host;
+    export provider;
+}

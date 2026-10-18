@@ -308,8 +308,9 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `embeddings.command` (a list) | none | none |
 | `embeddings.dimensions` (positive integer, legacy single-provider form) | none | `768` |
 | `embeddings.default` (named profile) | none | legacy `default` when a single provider is configured |
-| `embeddings.providers.<name>.type` (`command`, `openai`, `http` or `external`) | none | none |
+| `embeddings.providers.<name>.type` (`command`, `openai`, `http`, `plugin` or `external`) | none | none |
 | `embeddings.providers.<name>.url` (`base_url` is an alias) | none | none |
+| `embeddings.providers.<name>.plugin`, `.module`, `.settings`, `.credential` (plugin connections) | none | none |
 | `embeddings.profiles.<name>.provider`, `.model`, `.dimensions` | none | none |
 | `extraction.provider` (`none`, `heuristic`, `command` or `http`) | `MEMCASTLE_EXTRACTION_PROVIDER` | `none` |
 | `extraction.url` (an `http://` or `https://` URL) | `MEMCASTLE_EXTRACTION_URL` | none |
@@ -422,7 +423,7 @@ and has not created the palace, migrated it or touched its jobs.
 ## Embeddings
 
 Semantic and hybrid search rank by vectors, and a vector has to come from a model.
-MemCastle links no model and does not want your API keys, so the `[embeddings]` section only says how to reach one.
+MemCastle links no model; `[embeddings]` selects how to reach one and keeps credentials out of profile settings.
 Without it the palace works exactly as before and `search` is lexical.
 A vector is *derived* data: it is stored beside the drawer, never replaces its content, and can be recomputed at any time.
 
@@ -468,6 +469,38 @@ dimensions = 1536
 
 The `openai` type implements the OpenAI embeddings protocol, including compatible endpoints.
 `http` remains available for the legacy single-provider form.
+No OpenAI product plugin is needed to call OpenAI or an OpenAI-compatible service such as OpenRouter.
+An installed plugin with an explicit `embedding_provider` module can instead be selected through the same named
+connection/profile model:
+
+```toml
+[embeddings]
+default = "vendor"
+
+[embeddings.providers.vendor-api]
+type = "plugin"
+plugin = "vendor-plugin"
+module = "vendor-embeddings"
+timeout_secs = 30
+batch_size = 16
+credential = { type = "env", name = "VENDOR_EMBED_TOKEN" }
+settings = { region = "eu" }
+
+[embeddings.profiles.vendor]
+provider = "vendor-api"
+model = "vendor-embedding-v2"
+dimensions = 1536
+```
+
+The plugin's module manifest must advertise the exact model and dimensions and declare credential permission;
+its configuration schema validates `settings` once installed.
+Only non-secret settings go into `settings`: the host resolves an `env` or `file` credential reference when a selected
+component requests it, never from an unrelated source, integration or profile.
+The component runs with bounded memory and time and receives network access only after explicit plugin-install consent.
+An uninstalled module leaves its profile unavailable but does not prevent the daemon or other profiles from working.
+Install it through `memcastle plugin install`, then select it with `memcastle embed --profile vendor`, a miner's
+`embedding_profile = "vendor"`, or a profile-aware search; the global default is used when no override was given.
+Changing a module's component or non-secret settings creates a new space: run a new embedding job to populate it.
 For caller-computed vectors without a daemon provider, use `type = "external"` for a named connection and select its
 profile explicitly on upload and query; the declared model and dimensions identify the space.
 Do not use one external profile for vectors from different models.
@@ -496,8 +529,9 @@ and reads one from its standard output:
 
 The program returns one vector per text, in order, and exits `0`.
 A non-zero exit, output that is not that JSON, or no answer within `timeout_secs` fails the call, and the program is killed.
-This is the provider to use when the model needs a credential or a client library: the program owns them, MemCastle never
-sees them, and the daemon's own `MEMCASTLE_*` variables (its auth token included) are removed from the program's environment.
+This is a lightweight generic provider for a local program with its own client library or credential handling:
+the program owns those credentials, MemCastle never sees them, and the daemon's own `MEMCASTLE_*` variables
+(its auth token included) are removed from the program's environment.
 Everything else is inherited, so `PATH` and the program's own variables work.
 
 ### The `http` provider
