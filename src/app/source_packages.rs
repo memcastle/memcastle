@@ -196,12 +196,16 @@ impl AppServices {
             .into_iter()
             .find(|source| source.name == name)
         {
+            let mut builtin = builtin;
+            builtin.configurations = self.source_configuration_ids(name).await?;
             return Ok(builtin);
         }
         let record = self.installed(name).await?;
-        Ok(self
+        let mut info = self
             .with_sign_in(describe_installed(&record, &self.mining))
-            .await)
+            .await;
+        info.configurations = self.source_configuration_ids(name).await?;
+        Ok(info)
     }
 
     /// Turn the installed source `name` on or off.

@@ -1,5 +1,13 @@
 # ADR-037: Miners are `[[miners]]` in the configuration file, edited in place by the daemon, read-only over MCP
 
+> **Amended by #268–#272 (2026-10-18).**
+> This ADR records the initial single-file decision.
+> The current contract also permits one miner per TOML file, named source configurations with their own sign-ins,
+> source-agnostic destination mappings, per-job document limits and miner-owned opt-in schedules.
+> The cursor remains a source record, but distinct input/configuration/destination mappings may have separate source
+> identities so filing into a different Wing or Room cannot be skipped as an unchanged document.
+> See [Configuration](../configuration.md#miners) and [Mining sources](../mining-sources.md) for current behavior.
+
 ## Status
 
 Accepted.

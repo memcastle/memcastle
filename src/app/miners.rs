@@ -1,13 +1,14 @@
-//! Miner configuration: the `[[miners]]` of the configuration file, listed, changed and run.
+//! Miner configuration: global `[[miners]]` and per-miner TOML files, listed, changed and run.
 //!
-//! One definition per miner, kept in the file the daemon was started from and read back from it, never held in a
-//! second place (`docs/adr/037-persistent-miner-configuration.md`). The CLI, REST and the read-only MCP tools all call
+//! One definition per miner, read back from its own file or the daemon's global file, never held in a
+//! second datastore (`docs/adr/037-persistent-miner-configuration.md`). The CLI, REST and read-only MCP tools all call
 //! the functions here, so there is one set of rules.
 //!
 //! Changing miners is administrative like installing a source: it is not gated by the memory mode, and no MCP tool
 //! does it, so an agent can read the miners but cannot configure what the daemon mines. Running one is a memory
 //! write, because it files drawers, and is gated as one.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -17,11 +18,12 @@ use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use super::{AppServices, MiningSubmission};
+use super::AppServices;
 use crate::config::miners_file::{self, FileStamp};
 use crate::domain::{
-    CredentialRef, Job, JobKind, JobStatus, MemoryMode, MinerDefinition, MiningSource, NameKind,
-    SourceId, SourceRecord, option_broadening, validate_name,
+    CredentialRef, Job, JobKind, JobStatus, MemoryMode, MinerDefinition, MinerMapping,
+    MinerSchedule, MiningSource, NameKind, SourceId, SourceRecord, option_broadening,
+    validate_name,
 };
 use crate::error::{Error, Result};
 
@@ -33,12 +35,17 @@ use crate::error::{Error, Result};
 pub struct MinerRegistry {
     /// The configuration file. `None` for a configuration built in code, where changing miners is refused.
     path: Option<PathBuf>,
+    default_dir: Option<PathBuf>,
+    extra_dirs: Vec<PathBuf>,
     state: Mutex<RegistryState>,
 }
 
 struct RegistryState {
     /// The last miners that parsed and validated.
     miners: Vec<MinerDefinition>,
+    /// Origin for each loaded ID; `None` is the global `[[miners]]` section.
+    origins: BTreeMap<String, Option<PathBuf>>,
+    file_stamps: BTreeMap<PathBuf, Option<FileStamp>>,
     /// What the file looked like when `miners` was read; `None` before the first read.
     stamp: Option<Option<FileStamp>>,
     /// Why the file could not be read the last time it changed.
@@ -51,12 +58,28 @@ impl MinerRegistry {
     pub fn new(path: Option<PathBuf>, initial: Vec<MinerDefinition>) -> Self {
         Self {
             path,
+            default_dir: None,
+            extra_dirs: Vec::new(),
             state: Mutex::new(RegistryState {
+                origins: initial.iter().map(|m| (m.name.clone(), None)).collect(),
                 miners: initial,
+                file_stamps: BTreeMap::new(),
                 stamp: None,
                 error: None,
             }),
         }
+    }
+
+    /// Add directories after the global file; missing default directory is an empty collection.
+    #[must_use]
+    pub fn with_directories(
+        mut self,
+        default_dir: Option<PathBuf>,
+        extra_dirs: Vec<PathBuf>,
+    ) -> Self {
+        self.default_dir = default_dir;
+        self.extra_dirs = extra_dirs;
+        self
     }
 
     /// The miners as they are now: a hand edit made since the last look is picked up first, and an invalid file leaves
@@ -86,34 +109,123 @@ impl MinerRegistry {
             return Ok(MinersDiff::default());
         };
         let current = miners_file::stamp(path).inspect_err(|e| state.error = Some(problem(e)))?;
-        if !force && state.stamp == Some(current) {
+        if !force
+            && self.default_dir.is_none()
+            && self.extra_dirs.is_empty()
+            && state.stamp == Some(current)
+        {
             return Ok(MinersDiff::default());
         }
-        match miners_file::read(path) {
-            Ok(loaded) => {
-                let diff = MinersDiff::between(&state.miners, &loaded.miners);
-                for name in &diff.broadened {
-                    warn!(miner = %name, "the configuration file may have broadened this miner's options; applied as written");
-                }
-                if !diff.is_empty() {
-                    info!(
-                        added = ?diff.added, removed = ?diff.removed, changed = ?diff.changed,
-                        "miner configuration reloaded"
-                    );
-                }
-                state.miners = loaded.miners;
-                state.stamp = Some(loaded.stamp);
-                state.error = None;
-                Ok(diff)
-            }
+        // A bad file preserves only its own last-good miner; other files can still be changed or run.
+        let mut errors = Vec::new();
+        let (global, stamp) = match miners_file::read(path) {
+            Ok(loaded) => (loaded.miners, loaded.stamp),
             Err(error) => {
-                // Remembered so the next request does not read the same broken file again; a further edit changes
-                // the stamp and tries again.
-                state.stamp = Some(current);
-                state.error = Some(problem(&error));
-                warn!(error = %error, "the miner configuration is invalid; keeping the last good miners");
-                Err(error)
+                if self.default_dir.is_none() && self.extra_dirs.is_empty() {
+                    state.stamp = Some(current);
+                    state.error = Some(problem(&error));
+                    return Err(error);
+                }
+                errors.push(format!("{}: {}", path.display(), problem(&error)));
+                (
+                    state
+                        .miners
+                        .iter()
+                        .filter(|m| state.origins.get(&m.name) == Some(&None))
+                        .cloned()
+                        .collect(),
+                    current,
+                )
             }
+        };
+        let mut loaded = Vec::new();
+        let mut origins: BTreeMap<String, Option<PathBuf>> = BTreeMap::new();
+        let mut file_stamps = BTreeMap::new();
+        for miner in global {
+            origins.insert(miner.name.clone(), None);
+            loaded.push(miner);
+        }
+        for (dir, optional) in self
+            .default_dir
+            .iter()
+            .map(|dir| (dir, true))
+            .chain(self.extra_dirs.iter().map(|dir| (dir, false)))
+        {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(entries) => entries,
+                Err(error) if optional && error.kind() == std::io::ErrorKind::NotFound => {
+                    continue;
+                }
+                Err(error) => {
+                    errors.push(format!(
+                        "{}: {error}; check mining.miner_dirs",
+                        dir.display()
+                    ));
+                    continue;
+                }
+            };
+            let mut paths: Vec<PathBuf> = entries
+                .filter_map(|entry| match entry {
+                    Ok(entry) if entry.path().extension().is_some_and(|ext| ext == "toml") => {
+                        Some(entry.path())
+                    }
+                    Ok(_) => None,
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", dir.display()));
+                        None
+                    }
+                })
+                .collect();
+            paths.sort();
+            for file in paths {
+                let miner = match miners_file::read_one(&file) {
+                    Ok((miner, stamp)) => {
+                        file_stamps.insert(file.clone(), stamp);
+                        miner
+                    }
+                    Err(error) => {
+                        errors.push(format!("{}: {}", file.display(), problem(&error)));
+                        let Some(previous) = state
+                            .miners
+                            .iter()
+                            .find(|m| state.origins.get(&m.name) == Some(&Some(file.clone())))
+                        else {
+                            continue;
+                        };
+                        previous.clone()
+                    }
+                };
+                if let Some(previous) = origins.get(&miner.name) {
+                    let first = previous.as_deref().unwrap_or(path);
+                    errors.push(format!(
+                        "miner `{}` is defined in both {} and {}; rename one",
+                        miner.name,
+                        first.display(),
+                        file.display()
+                    ));
+                    continue;
+                }
+                origins.insert(miner.name.clone(), Some(file));
+                loaded.push(miner);
+            }
+        }
+        {
+            let diff = MinersDiff::between(&state.miners, &loaded);
+            for name in &diff.broadened {
+                warn!(miner = %name, "the configuration file may have broadened this miner's options; applied as written");
+            }
+            if !diff.is_empty() {
+                info!(
+                    added = ?diff.added, removed = ?diff.removed, changed = ?diff.changed,
+                    "miner configuration reloaded"
+                );
+            }
+            state.miners = loaded;
+            state.origins = origins;
+            state.file_stamps = file_stamps;
+            state.stamp = Some(stamp);
+            state.error = (!errors.is_empty()).then(|| errors.join("; "));
+            Ok(diff)
         }
     }
 }
@@ -169,6 +281,8 @@ impl MinersDiff {
             // A file reload has no source metadata in this synchronous path: unknown changes are reported conservatively.
             if before.source != miner.source
                 || before.locator != miner.locator
+                || before.source_config != miner.source_config
+                || before.mapping != miner.mapping
                 || !option_broadening(
                     &before.options().unwrap_or_default(),
                     &miner.options().unwrap_or_default(),
@@ -247,6 +361,24 @@ pub struct MinerView {
     /// Saved source options.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub options: Map<String, Value>,
+    /// The source configuration selected, or the source's default when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_config: Option<String>,
+    /// A fixed room override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+    /// Dynamic Wing/Room mapping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mapping: Option<MinerMapping>,
+    /// Maximum documents for one job.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_documents: Option<usize>,
+    /// The miner's optional schedule; off until explicitly enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<MinerSchedule>,
+    /// The file this miner is edited in; absent for an entry in the global config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_file: Option<String>,
     /// The mined source this miner's cursor lives on, once something has been mined from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_id: Option<SourceId>,
@@ -280,14 +412,24 @@ pub struct MinersReport {
 pub struct MinerPatch {
     /// The source adapter.
     pub source: Option<String>,
+    /// A named configuration of the selected source.
+    pub source_config: Option<String>,
     /// Switch it on or off.
     pub enabled: Option<bool>,
     /// The part of the source to read.
     pub locator: Option<String>,
     /// The wing for its drawers.
     pub wing: Option<String>,
-    /// Named profile to set; clear with `unset = ["embedding_profile"]`.
+    /// A fixed destination room.
+    pub room: Option<String>,
+    /// Dynamic Wing/Room mapping.
+    pub mapping: Option<MinerMapping>,
+    /// Per-run document limit.
+    pub max_documents: Option<usize>,
+    /// An embedding profile supplied by the profile subsystem.
     pub embedding_profile: Option<String>,
+    /// Optional timetable, disabled until explicitly enabled.
+    pub schedule: Option<MinerSchedule>,
     /// Where its credential comes from.
     pub credential: Option<CredentialRef>,
     /// Source options to set.
@@ -328,6 +470,9 @@ pub struct MinersReload {
     /// What differs from what the daemon had.
     #[serde(flatten)]
     pub diff: MinersDiff,
+    /// Invalid files leave their last good definitions in place; name every affected file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl AppServices {
@@ -349,16 +494,25 @@ impl AppServices {
     /// [`Error::ModeForbidden`] if `mode` forbids reads, or a store error.
     pub async fn list_miners(&self, mode: MemoryMode) -> Result<MinersReport> {
         Self::require_read(mode, "miner_list")?;
-        let (miners, error) = {
+        let (miners, origins, error) = {
             let mut state = self.miners.state.lock().await;
             // The error is in `state.error`; a failed refresh must not turn a read into a failure.
             let _ = self.miners.refresh(&mut state, false);
-            (state.miners.clone(), state.error.clone())
+            (
+                state.miners.clone(),
+                state.origins.clone(),
+                state.error.clone(),
+            )
         };
         let sources = self.store.list_sources().await?;
         let mut views = Vec::with_capacity(miners.len());
         for miner in &miners {
-            views.push(self.miner_view(miner, &sources).await?);
+            let mut view = self.miner_view(miner, &sources).await?;
+            view.config_file = origins
+                .get(&miner.name)
+                .and_then(|p| p.as_ref())
+                .map(|p| p.display().to_string());
+            views.push(view);
         }
         Ok(MinersReport {
             miners: views,
@@ -374,13 +528,18 @@ impl AppServices {
     /// [`Error::MinerNotFound`], [`Error::ModeForbidden`] if `mode` forbids reads, or a store error.
     pub async fn show_miner(&self, name: &str, mode: MemoryMode) -> Result<MinerView> {
         Self::require_read(mode, "miner_get")?;
-        let miner = {
+        let (miner, origin) = {
             let mut state = self.miners.state.lock().await;
             let _ = self.miners.refresh(&mut state, false);
-            find(&state.miners, name)?.clone()
+            (
+                find(&state.miners, name)?.clone(),
+                state.origins.get(name).cloned().flatten(),
+            )
         };
         let sources = self.store.list_sources().await?;
-        self.miner_view(&miner, &sources).await
+        let mut view = self.miner_view(&miner, &sources).await?;
+        view.config_file = origin.map(|p| p.display().to_string());
+        Ok(view)
     }
 
     /// Create a miner, or change one: the same call for both, so `miner set` is idempotent.
@@ -412,6 +571,41 @@ impl AppServices {
         self.apply_patch(name, patch, true).await
     }
 
+    /// Enable or disable only this miner's timetable; creating it never starts it.
+    pub async fn set_miner_schedule_enabled(
+        &self,
+        name: &str,
+        enabled: bool,
+    ) -> Result<MinerChange> {
+        let miner = {
+            let mut state = self.miners.state.lock().await;
+            self.miners.refresh(&mut state, false)?;
+            find(&state.miners, name)?.clone()
+        };
+        let Some(mut schedule) = miner.schedule else {
+            return Err(invalid(
+                name,
+                "this miner has no schedule; set `schedule.every` first",
+            ));
+        };
+        if enabled && !miner.enabled {
+            return Err(invalid(
+                name,
+                "enable the miner before enabling its schedule",
+            ));
+        }
+        schedule.enabled = enabled;
+        self.apply_patch(
+            name,
+            MinerPatch {
+                schedule: Some(schedule),
+                ..MinerPatch::default()
+            },
+            true,
+        )
+        .await
+    }
+
     /// Remove a miner's definition. What it mined, and the source's cursor, stay.
     ///
     /// # Errors
@@ -428,9 +622,17 @@ impl AppServices {
             .filter(|m| m.name != name)
             .cloned()
             .collect();
-        let stamp = miners_file::write(path, state.stamp.flatten(), &remaining)?;
-        state.miners = remaining;
-        state.stamp = Some(stamp);
+        if let Some(Some(file)) = state.origins.get(name) {
+            miners_file::write_one(file, state.file_stamps.get(file).copied().flatten(), None)?;
+        } else {
+            let global: Vec<_> = remaining
+                .iter()
+                .filter(|m| state.origins.get(&m.name) == Some(&None))
+                .cloned()
+                .collect();
+            state.stamp = Some(miners_file::write(path, state.stamp.flatten(), &global)?);
+        }
+        self.miners.refresh(&mut state, true)?;
         info!(miner = %name, "miner removed");
         Ok(())
     }
@@ -448,6 +650,7 @@ impl AppServices {
         Ok(MinersReload {
             miners: state.miners.len(),
             diff,
+            error: state.error.clone(),
         })
     }
 
@@ -558,7 +761,15 @@ impl AppServices {
         }
         // The saved options are the run's options; `check_activation` has already checked their keys against
         // what the source declares, so what reaches the source is what the miner says.
-        let saved = miner.options().map_err(not_runnable)?;
+        let configuration = self
+            .source_config(
+                miner.source_config.as_deref().unwrap_or(&miner.source),
+                Some(&miner.source),
+            )
+            .await
+            .map_err(|e| not_runnable(e.to_string()))?;
+        let mut saved = configuration.options().map_err(not_runnable)?;
+        saved.extend(miner.options().map_err(not_runnable)?);
         let mut options = saved.clone();
         options.extend(overrides.options);
         let mut checked = miner.clone();
@@ -580,6 +791,14 @@ impl AppServices {
                 reasons: reasons.join("; "),
             });
         }
+        let preset = crate::domain::MiningPreset {
+            miner: Some(miner.name.clone()),
+            configuration: Some(configuration.id),
+            room: miner.room.clone(),
+            mapping: miner.mapping.clone(),
+            max_documents: Some(miner.max_documents.unwrap_or(self.mining.max_documents)),
+            embedding_profile: miner.embedding_profile.clone(),
+        };
         if join_waiting && !full {
             let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?;
             let waiting = queued.into_iter().find(|job| match &job.kind {
@@ -587,6 +806,7 @@ impl AppServices {
                     source,
                     wing,
                     options: waiting_options,
+                    preset: waiting_preset,
                     ..
                 } => {
                     let same_source = match source {
@@ -599,7 +819,10 @@ impl AppServices {
                                 && miner.locator.as_deref() == Some(&*path.to_string_lossy())
                         }
                     };
-                    same_source && *wing == miner.wing && *waiting_options == options
+                    same_source
+                        && *wing == miner.wing
+                        && *waiting_options == options
+                        && waiting_preset.as_deref() == Some(&preset)
                 }
                 _ => false,
             });
@@ -608,29 +831,16 @@ impl AppServices {
             }
         }
         let job = self
-            .submit_mine_with_embedding(
-                MiningSubmission {
-                    source: MiningSource::Named {
-                        source: miner.source.clone(),
-                        // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
-                        locator: miner.locator.clone(),
-                    },
-                    wing: miner.wing.clone(),
-                    full,
-                    options,
-                    embedding_space: miner
-                        .embedding_profile
-                        .as_deref()
-                        .map(|profile| {
-                            self.embeddings.select(Some(profile)).map(|handle| {
-                                handle
-                                    .space()
-                                    .expect("activation verified the profile")
-                                    .clone()
-                            })
-                        })
-                        .transpose()?,
+            .submit_mine_preset(
+                MiningSource::Named {
+                    source: miner.source.clone(),
+                    // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
+                    locator: miner.locator.clone(),
                 },
+                miner.wing.clone(),
+                full,
+                options,
+                Some(preset),
                 requested_by,
                 mode,
             )
@@ -642,7 +852,10 @@ impl AppServices {
     fn refresh_for_write(&self, state: &mut RegistryState) -> Result<()> {
         // A hand edit since the last request is applied first, so the write is built on what is in the file.
         self.miners.refresh(state, false)?;
-        if let Some(reason) = &state.error {
+        if let Some(reason) = &state.error
+            && self.miners.default_dir.is_none()
+            && self.miners.extra_dirs.is_empty()
+        {
             // Writing would overwrite whatever the user was in the middle of fixing.
             return Err(Error::MinerConfigFile {
                 path: self.miners.path()?.display().to_string(),
@@ -673,6 +886,9 @@ impl AppServices {
         if let Some(wing) = &candidate.wing {
             validate_name(NameKind::Wing, wing).map_err(|e| invalid(name, e.to_string()))?;
         }
+        if let Some(room) = &candidate.room {
+            validate_name(NameKind::Room, room).map_err(|e| invalid(name, e.to_string()))?;
+        }
         if let Some(before) = &existing {
             let specs = crate::mining::registry::option_specs_for(
                 &self.store,
@@ -683,8 +899,10 @@ impl AppServices {
             .unwrap_or_default();
             let reasons = if before.source != candidate.source
                 || before.locator != candidate.locator
+                || before.source_config != candidate.source_config
+                || before.mapping != candidate.mapping
             {
-                vec!["source or locator changed; the miner may read a different place".to_string()]
+                vec!["source, source configuration, locator or mapping changed; the miner may read a different place".to_string()]
             } else {
                 option_broadening(
                     &before.options().map_err(|r| invalid(name, r))?,
@@ -708,9 +926,13 @@ impl AppServices {
         }
 
         let created = existing.is_none();
-        let identity_changed = existing
-            .as_ref()
-            .is_some_and(|b| b.source != candidate.source || b.locator != candidate.locator);
+        let identity_changed = existing.as_ref().is_some_and(|b| {
+            b.source != candidate.source
+                || b.locator != candidate.locator
+                || b.source_config != candidate.source_config
+                || b.room != candidate.room
+                || b.mapping != candidate.mapping
+        });
         let changed = existing.as_ref() != Some(&candidate);
         if changed {
             let mut all = state.miners.clone();
@@ -718,9 +940,32 @@ impl AppServices {
                 Some(slot) => *slot = candidate.clone(),
                 None => all.push(candidate.clone()),
             }
-            let stamp = miners_file::write(path, state.stamp.flatten(), &all)?;
-            state.miners = all;
-            state.stamp = Some(stamp);
+            let file = state.origins.get(name).cloned().flatten().or_else(|| {
+                (!state.origins.contains_key(name))
+                    .then(|| self.miners.default_dir.clone())
+                    .flatten()
+                    .map(|dir| dir.join(format!("{name}.toml")))
+            });
+            if let Some(file) = file {
+                let expected = state.file_stamps.get(&file).copied().flatten();
+                if state.origins.get(name).and_then(|path| path.as_ref()) == Some(&file)
+                    && !state.file_stamps.contains_key(&file)
+                {
+                    return Err(Error::MinerConfigFile {
+                        path: file.display().to_string(),
+                        reason: "the file is invalid; fix it and reload before editing this miner"
+                            .into(),
+                    });
+                }
+                miners_file::write_one(&file, expected, Some(&candidate))?;
+            } else {
+                let global: Vec<_> = all
+                    .into_iter()
+                    .filter(|m| state.origins.get(&m.name) == Some(&None) || m.name == name)
+                    .collect();
+                state.stamp = Some(miners_file::write(path, state.stamp.flatten(), &global)?);
+            }
+            self.miners.refresh(&mut state, true)?;
             info!(miner = %name, created, "miner configuration written");
         }
         drop(state);
@@ -751,8 +996,19 @@ impl AppServices {
                 ));
             }
         }
+        if let Some(room) = &miner.room {
+            validate_name(NameKind::Room, room).map_err(|error| error.to_string())?;
+        }
         // The saved options are what a run passes to its source, so their keys are the source's to accept.
-        let options = miner.options()?;
+        let config = self
+            .source_config(
+                miner.source_config.as_deref().unwrap_or(&miner.source),
+                Some(&miner.source),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut options = config.options()?;
+        options.extend(miner.options()?);
         crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source, &options)
             .await
             .map_err(|e| e.to_string())?;
@@ -782,7 +1038,31 @@ impl AppServices {
         miner: &MinerDefinition,
     ) -> std::result::Result<(), String> {
         let requirement = self.oauth_requirement(&miner.source).await;
-        match &miner.credential {
+        let config = self
+            .source_config(
+                miner.source_config.as_deref().unwrap_or(&miner.source),
+                Some(&miner.source),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        if config.id != miner.source
+            && requirement.is_some()
+            && miner.locator.is_none()
+            && self
+                .store
+                .get_source_package(&miner.source)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|record| record.manifest.capabilities.single_account_auth)
+        {
+            return Err(format!(
+                "`{}` supports one default web account; use its default configuration or an offline export locator",
+                miner.source
+            ));
+        }
+        let credential = miner.credential.as_ref().or(config.credential.as_ref());
+        match credential {
             Some(CredentialRef::Env { name })
                 if !credential_available(&CredentialRef::Env { name: name.clone() }) =>
             {
@@ -808,8 +1088,8 @@ impl AppServices {
         if let Some(requirement) = requirement
             // An on-demand OAuth source may mine offline exports or use its explicitly granted manual-session
             // fallback; an explicit `oauth` miner reference still promises that this particular miner is signed in.
-            && (!requirement.on_demand || matches!(miner.credential.as_ref(), Some(CredentialRef::Oauth)))
-            && !self.signed_in(&miner.source, requirement).await
+            && (!requirement.on_demand || matches!(credential, Some(CredentialRef::Oauth)))
+            && !self.signed_in(&config.id, requirement).await
         {
             return Err(format!(
                 "the source `{0}` is not signed in; run `memcastle source auth {0}`",
@@ -820,7 +1100,10 @@ impl AppServices {
     }
 
     /// What the installed source `name` declares under `[permissions.oauth]`, if it is installed and declares it.
-    async fn oauth_requirement(&self, name: &str) -> Option<crate::domain::OAuthRequirement> {
+    pub(super) async fn oauth_requirement(
+        &self,
+        name: &str,
+    ) -> Option<crate::domain::OAuthRequirement> {
         self.store
             .get_source_package(name)
             .await
@@ -831,7 +1114,11 @@ impl AppServices {
 
     /// Whether `source` has a credential it could use, asked off the async runtime because the store may be a system
     /// service.
-    async fn signed_in(&self, source: &str, requirement: crate::domain::OAuthRequirement) -> bool {
+    pub(super) async fn signed_in(
+        &self,
+        source: &str,
+        requirement: crate::domain::OAuthRequirement,
+    ) -> bool {
         use crate::domain::AccessTokens as _;
         let credentials = self.credentials.clone();
         let source = source.to_string();
@@ -856,21 +1143,47 @@ impl AppServices {
         };
         // The record the adapter keeps the cursor on: same source and the miner's locator (a directory's is
         // canonicalised when it is mined, so a symlinked locator still finds it).
-        let record = miner.locator.as_deref().and_then(|locator| {
-            let canonical = (miner.source == "directory")
-                .then(|| std::fs::canonicalize(locator).ok())
-                .flatten()
-                .map(|p| p.to_string_lossy().into_owned());
-            sources.iter().find(|s| {
-                s.source == miner.source
-                    && (s.locator == locator || canonical.as_deref() == Some(s.locator.as_str()))
+        let record = miner
+            .locator
+            .as_deref()
+            .filter(|_| {
+                miner.mapping.is_none()
+                    && miner.wing.is_none()
+                    && miner.room.is_none()
+                    && miner
+                        .source_config
+                        .as_deref()
+                        .is_none_or(|id| id == miner.source)
             })
-        });
+            .and_then(|locator| {
+                let canonical = (miner.source == "directory")
+                    .then(|| std::fs::canonicalize(locator).ok())
+                    .flatten()
+                    .map(|p| p.to_string_lossy().into_owned());
+                sources.iter().find(|s| {
+                    s.source == miner.source
+                        && (s.locator == locator
+                            || canonical.as_deref() == Some(s.locator.as_str()))
+                })
+            });
         let documents = match record {
             Some(record) => self.store.count_source_documents(record.id).await?,
             None => 0,
         };
-        let credential = match &miner.credential {
+        let config = self
+            .source_config(
+                miner.source_config.as_deref().unwrap_or(&miner.source),
+                Some(&miner.source),
+            )
+            .await
+            .ok();
+        let requirement = self.oauth_requirement(&miner.source).await;
+        let effective = miner.credential.as_ref().or_else(|| {
+            config
+                .as_ref()
+                .and_then(|config| config.credential.as_ref())
+        });
+        let credential = match effective {
             Some(c) => Some(CredentialView {
                 kind: match c {
                     CredentialRef::Env { .. } => "env",
@@ -879,15 +1192,34 @@ impl AppServices {
                 }
                 .to_string(),
                 // For `oauth`, "resolves" means signed in: the same question the activation check asks.
-                available: match (c, self.oauth_requirement(&miner.source).await) {
+                available: match (c, requirement.clone()) {
                     (CredentialRef::Oauth, Some(requirement)) => {
-                        self.signed_in(&miner.source, requirement).await
+                        self.signed_in(
+                            config
+                                .as_ref()
+                                .map_or(miner.source.as_str(), |config| config.id.as_str()),
+                            requirement,
+                        )
+                        .await
                     }
                     (CredentialRef::Oauth, None) => false,
                     (other, _) => credential_available(other),
                 },
             }),
-            None => None,
+            None => match requirement {
+                Some(requirement) => Some(CredentialView {
+                    kind: "oauth".into(),
+                    available: self
+                        .signed_in(
+                            config
+                                .as_ref()
+                                .map_or(miner.source.as_str(), |config| config.id.as_str()),
+                            requirement,
+                        )
+                        .await,
+                }),
+                None => None,
+            },
         };
         Ok(MinerView {
             name: miner.name.clone(),
@@ -897,9 +1229,15 @@ impl AppServices {
             reason,
             locator: miner.locator.clone(),
             wing: miner.wing.clone(),
+            room: miner.room.clone(),
+            mapping: miner.mapping.clone(),
+            source_config: miner.source_config.clone(),
+            max_documents: miner.max_documents,
             embedding_profile: miner.embedding_profile.clone(),
+            schedule: miner.schedule.clone(),
             credential,
             options: miner.options.clone(),
+            config_file: None,
             source_id: record.map(|r| r.id),
             last_run_at: record.and_then(|r| r.last_run_at),
             documents,
@@ -954,10 +1292,15 @@ fn apply(
             MinerDefinition {
                 name: name.to_string(),
                 source,
+                source_config: None,
                 enabled: true,
                 locator: None,
                 wing: None,
+                room: None,
+                mapping: None,
+                max_documents: None,
                 embedding_profile: None,
+                schedule: None,
                 credential: None,
                 options: Map::new(),
             }
@@ -967,8 +1310,13 @@ fn apply(
         match field.as_str() {
             "locator" => miner.locator = None,
             "wing" => miner.wing = None,
-            "embedding_profile" => miner.embedding_profile = None,
             "credential" => miner.credential = None,
+            "room" => miner.room = None,
+            "mapping" => miner.mapping = None,
+            "source_config" => miner.source_config = None,
+            "max_documents" => miner.max_documents = None,
+            "embedding_profile" => miner.embedding_profile = None,
+            "schedule" => miner.schedule = None,
             other => {
                 return Err(invalid(
                     name,
@@ -982,6 +1330,9 @@ fn apply(
     if let Some(source) = patch.source {
         miner.source = source;
     }
+    if patch.source_config.is_some() {
+        miner.source_config = patch.source_config;
+    }
     if let Some(enabled) = patch.enabled {
         miner.enabled = enabled;
     }
@@ -991,8 +1342,20 @@ fn apply(
     if patch.wing.is_some() {
         miner.wing = patch.wing;
     }
+    if patch.room.is_some() {
+        miner.room = patch.room;
+    }
+    if patch.mapping.is_some() {
+        miner.mapping = patch.mapping;
+    }
+    if patch.max_documents.is_some() {
+        miner.max_documents = patch.max_documents;
+    }
     if patch.embedding_profile.is_some() {
         miner.embedding_profile = patch.embedding_profile;
+    }
+    if patch.schedule.is_some() {
+        miner.schedule = patch.schedule;
     }
     if patch.credential.is_some() {
         miner.credential = patch.credential;

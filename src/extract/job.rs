@@ -306,6 +306,7 @@ mod tests {
                 full: false,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             "test",
@@ -323,6 +324,7 @@ mod tests {
                 wing: Some("docs".to_string()),
                 full: false,
                 options: Default::default(),
+                preset: None,
             },
         )
         .await

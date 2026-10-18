@@ -117,6 +117,24 @@ pub enum MiningSource {
     },
 }
 
+/// A resolved mining preset pinned to the durable job; a config reload cannot silently reroute a retry.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MiningPreset {
+    /// Which configured miner requested this run, when there was one.
+    pub miner: Option<String>,
+    /// The source configuration used to resolve this run's options and credentials.
+    pub configuration: Option<String>,
+    /// Fixed destination room, or the adapter's room when absent.
+    pub room: Option<String>,
+    /// Dynamic destination mapping pinned with the job.
+    #[serde(default)]
+    pub mapping: Option<super::MinerMapping>,
+    /// Positive per-run cap; `None` inherits the common policy.
+    pub max_documents: Option<usize>,
+    /// Existing embedding profile identity, resolved by the embedding subsystem.
+    pub embedding_profile: Option<String>,
+}
+
 /// What kind of work a job performs, and its parameters.
 ///
 /// `serde(tag = "type")` gives each variant a stable, greppable name in
@@ -154,6 +172,9 @@ pub enum JobKind {
         /// Resolved embedding pipeline for this miner run; kept separate from source options.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         embedding_space: Option<super::EmbeddingSpace>,
+        /// The resolved miner-specific routing and limits, absent on older jobs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preset: Option<Box<MiningPreset>>,
     },
     /// Persist an already-classified batch of checkpoint items — durable,
     /// resumable writes only; classification into destination buckets
@@ -889,6 +910,7 @@ mod tests {
                 ("dir".to_string(), "/work/app".to_string()),
             ]),
             embedding_space: None,
+            preset: None,
         };
         let json = serde_json::to_value(&kind).unwrap();
         assert_eq!(
@@ -950,6 +972,7 @@ mod tests {
             full: false,
             options: Default::default(),
             embedding_space: None,
+            preset: None,
         };
 
         // `MiningSource` must stay invisible on the wire: existing callers
@@ -1012,6 +1035,7 @@ mod tests {
             full: true,
             options: Default::default(),
             embedding_space: None,
+            preset: None,
         };
         let json = serde_json::to_value(&kind).unwrap();
         assert_eq!(

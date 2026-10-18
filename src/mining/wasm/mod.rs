@@ -76,6 +76,8 @@ pub struct WasmAdapter {
 
 struct Inner {
     name: String,
+    /// Credential key selected by the durable job; absent is the legacy source-keyed default.
+    token_key: Option<String>,
     description: String,
     capabilities: SourceCapabilities,
     permissions: Permissions,
@@ -124,6 +126,17 @@ impl WasmAdapter {
         mining: &MiningConfig,
         tokens: Option<Arc<dyn AccessTokens>>,
     ) -> Result<Self> {
+        Self::load_with_key(manifest, bytes, mining, tokens, None)
+    }
+
+    /// Load using exactly the source configuration selected when the durable job was submitted.
+    pub fn load_with_key(
+        manifest: &SourceManifest,
+        bytes: &[u8],
+        mining: &MiningConfig,
+        tokens: Option<Arc<dyn AccessTokens>>,
+        configuration: Option<String>,
+    ) -> Result<Self> {
         check_compatible(manifest)?;
         let name = manifest.source.name.clone();
         let incompatible = |reason: String| Error::SourceIncompatible {
@@ -171,6 +184,7 @@ impl WasmAdapter {
                 }),
         );
         let mut inner = Inner {
+            token_key: configuration,
             name,
             description: manifest.source.description.clone(),
             capabilities: manifest.capabilities,
@@ -224,7 +238,7 @@ impl Inner {
         // declares: `normalize` is pure, and a source that declared none has nothing to ask for.
         let grant = match (granted, &self.permissions.oauth, &self.tokens) {
             (true, Some(requirement), Some(provider)) => Some(TokenGrant {
-                source: self.name.clone(),
+                source: self.token_key.clone().unwrap_or_else(|| self.name.clone()),
                 requirement: requirement.clone(),
                 provider: Arc::clone(provider),
             }),
@@ -431,6 +445,7 @@ impl SourceAdapter for WasmAdapter {
             Ok(Discovery {
                 candidates,
                 exhausted: found.exhausted,
+                filtered: 0,
             })
         })
         .await

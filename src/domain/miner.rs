@@ -1,9 +1,9 @@
-//! A miner: a named, persistent definition of *what to mine and how*, kept as `[[miners]]` in `memcastle.toml`.
+//! A miner: a named, persistent definition of *what to mine and how*, in global `[[miners]]` or a miner TOML file.
 //!
 //! Pure types and rules, no I/O. A miner is configuration, not mined data: the cursor and the documents stay on the
-//! source (`crate::domain::SourceRef`), which the adapter derives from the miner's `source` and `locator`.
-//! That is what lets a miner be renamed, disabled or re-scoped without losing where its
-//! source stopped. See `docs/adr/037-persistent-miner-configuration.md`.
+//! effective source (`crate::domain::SourceRef` plus destination mapping), not in the miner file.
+//! That lets a miner be renamed or disabled without losing its cursor, while a new destination gets its own source
+//! document history. See `docs/adr/037-persistent-miner-configuration.md`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -42,7 +42,33 @@ pub fn is_valid_miner_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// One `[[miners]]` entry.
+/// A timetable owned by a miner. Merely declaring it never enables unattended runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MinerSchedule {
+    /// Interval in the same syntax as a schedule trigger (`1h`, `1d`).
+    pub every: String,
+    /// UTC time of day, only with whole-day intervals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// Explicit opt-in; a newly written schedule is always off.
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// Source-independent destination selection from safe, scalar raw-document metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MinerMapping {
+    /// Metadata key whose string value is used as a Wing, falling back to `wing` or the source default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wing_from: Option<String>,
+    /// Metadata key whose string value is used as a Room, falling back to `room` or the source default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_from: Option<String>,
+}
+
+/// One `[[miners]]` entry or one miner TOML file.
 ///
 /// Unknown top-level keys are an error (a typo in `enable` must not silently leave a miner enabled);
 /// `options` is open, so a source can define its own keys.
@@ -53,6 +79,9 @@ pub struct MinerDefinition {
     pub name: String,
     /// The source adapter this miner runs (`directory`, or an installed source's name).
     pub source: String,
+    /// A named configuration for `source`; absent means the source's default configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_config: Option<String>,
     /// Whether the miner may run.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -62,9 +91,21 @@ pub struct MinerDefinition {
     /// The wing the mined drawers go to, when it should not be the adapter's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wing: Option<String>,
-    /// The embedding profile used for the drawers mined by this miner; absent uses the global default.
+    /// An explicit destination room rather than the source's default room.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+    /// Dynamic Wing/Room selection using metadata keys, without naming any adapter in Core.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mapping: Option<MinerMapping>,
+    /// A deliberate per-run document limit; omitted inherits the common default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_documents: Option<usize>,
+    /// The embedding profile used for this miner's drawers; absent uses the global default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_profile: Option<String>,
+    /// Optional schedule owned by this miner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<MinerSchedule>,
     /// Where the source's credential is read from; never the credential itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<CredentialRef>,
@@ -127,13 +168,59 @@ impl MinerDefinition {
         if self.source.trim().is_empty() {
             return Err("`source` is empty; name the source adapter this miner runs".to_string());
         }
+        if self.source_config.is_some() && self.credential.is_some() {
+            return Err("a named `source_config` owns its credential; move the miner's `credential` to `[[source_configs]]`".into());
+        }
+        if let Some(id) = &self.source_config
+            && !is_valid_miner_name(id)
+        {
+            return Err(format!(
+                "`source_config` `{id}` must be a lowercase slug ID"
+            ));
+        }
         for (field, value) in [
             ("locator", &self.locator),
             ("wing", &self.wing),
+            ("room", &self.room),
+            ("source_config", &self.source_config),
             ("embedding_profile", &self.embedding_profile),
         ] {
             if value.as_deref().is_some_and(|v| v.trim().is_empty()) {
                 return Err(format!("`{field}` is empty; remove it or give it a value"));
+            }
+        }
+        if self
+            .max_documents
+            .is_some_and(|limit| !(1..=1_000_000).contains(&limit))
+        {
+            return Err("`max_documents` must be between 1 and 1000000; omit it to inherit the common limit".into());
+        }
+        if let Some(schedule) = &self.schedule {
+            // Use the existing schedule parser, so miner and standalone trigger syntax cannot drift.
+            let mut settings = Map::new();
+            settings.insert("every".into(), Value::String(schedule.every.clone()));
+            if let Some(at) = &schedule.at {
+                settings.insert("at".into(), Value::String(at.clone()));
+            }
+            super::TriggerDefinition {
+                name: self.name.clone(),
+                miner: self.name.clone(),
+                kind: super::TriggerMechanism::Schedule,
+                enabled: schedule.enabled,
+                credential: None,
+                settings,
+            }
+            .plan()
+            .map_err(|reason| format!("`schedule`: {reason}"))?;
+        }
+        if let Some(mapping) = &self.mapping {
+            for (field, value) in [
+                ("wing_from", &mapping.wing_from),
+                ("room_from", &mapping.room_from),
+            ] {
+                if value.as_deref().is_some_and(|key| key.trim().is_empty()) {
+                    return Err(format!("`mapping.{field}` needs a metadata field name"));
+                }
             }
         }
         match &self.credential {
@@ -191,7 +278,7 @@ fn scope_value_is_valid(value: &Value) -> bool {
 
 /// The options table may hold anything TOML can, except a key that reads like a
 /// secret, and never a null (TOML has none, so it could not be written back).
-fn check_open_table(table: &str, map: &Map<String, Value>) -> Result<(), String> {
+pub(super) fn check_open_table(table: &str, map: &Map<String, Value>) -> Result<(), String> {
     for (key, value) in map {
         let lower = key.to_ascii_lowercase();
         if SECRET_WORDS.iter().any(|word| lower.contains(word)) {

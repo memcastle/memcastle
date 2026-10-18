@@ -29,6 +29,8 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
 | `memcastle_mine` | `path` or `source`, `locator?`, `options?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
 | `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, saved options and last run. Read-only. |
+| `memcastle_source_config_list` | none | Reusable source configurations and safe credential availability. Read-only. |
+| `memcastle_source_config_get` | `id` | One named source configuration, without a credential's location or contents. Read-only. |
 | `memcastle_miner_get` | `name` | One configured miner, and why it cannot run when it cannot. Read-only. |
 | `memcastle_trigger_list` | none | The configured [triggers](triggers.md): miner, type, whether the user enabled them, whether they work, last fired and last error. Read-only. |
 | `memcastle_trigger_get` | `name` | One configured trigger, and what it still needs when it cannot be enabled yet. Read-only. |
@@ -63,7 +65,7 @@ and some directories reject a tool whose hint is missing.
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
-| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get`, `memcastle_trigger_list`, `memcastle_trigger_get` | true | false | true | false |
+| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get`, `memcastle_source_config_list`, `memcastle_source_config_get`, `memcastle_trigger_list`, `memcastle_trigger_get` | true | false | true | false |
 | `memcastle_search`, `memcastle_recall` | true | false | true | true |
 | `memcastle_set_mode` | false | false | true | false |
 | `memcastle_mine` | false | false | true | true |
@@ -180,10 +182,18 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/miners` | The configured [miners](configuration.md#miners): `{miners, config_file?, error?}`. `error` says why the configuration file cannot be read, and `miners` is then the last good copy. A read. | none |
 | `GET /api/miners/{name}` | One miner with its state (`ready`, `disabled`, `unavailable` and why), its credential as a kind and an availability, and the source it has mined. A read. | none |
 | `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that may broaden its options is a `409` unless `allow_broaden` is set. | JSON body, all optional once the miner exists: `source`, `enabled`, `locator`, `wing`, `credential`, `options`, `unset_options`, `unset`, `allow_broaden` |
+| `GET /api/source-configs` | Explicit and implicit source configurations with token-free credential status. | none |
+| `GET /api/source-configs/{id}` | One configuration, or a source's implicit default. | none |
+| `PUT /api/source-configs/{id}` | Save source-native defaults and a credential reference. | JSON body: `source` (required for new IDs), `options`, `credential`, `unset_options`, `unset_credential` |
+| `DELETE /api/source-configs/{id}` | Remove an explicit configuration without deleting mined memories. | none |
+| `POST /api/source-configs/{id}/auth` | Start an OAuth sign-in using this configuration's credential key. | none |
+| `GET /api/source-configs/{id}/auth?flow=<id>` | Wait for its sign-in to finish. | query: `flow`, optional `seconds` (max 30) |
 | `POST /api/miners/{name}/enable` | Switch a miner on, after checking that it can run. Idempotent. | none |
 | `POST /api/miners/{name}/disable` | Switch a miner off. Idempotent. | none |
+| `POST /api/miners/{name}/schedule/enable` | Opt into the miner's configured schedule after validating readiness. | none |
+| `POST /api/miners/{name}/schedule/disable` | Stop the miner's timetable without removing it. | none |
 | `DELETE /api/miners/{name}` | Remove a miner's definition; what it mined stays: `{"removed": name}`. | none |
-| `POST /api/miners/reload` | Read the configuration file again now: `{miners, added, removed, changed, enabled, disabled, broadened}`. | none |
+| `POST /api/miners/reload` | Read global and per-miner files again now: `{miners, added, removed, changed, enabled, disabled, broadened, error?}`; bad files leave their last good definitions. | none |
 | `POST /api/miners/{name}/run` | Submit the miner's mining job, from the cursor its source already has. `options` replaces/adds keys for this run only; possibly broader changes require `allow_broaden`. Answers the job. A write, so a read-only session is refused. | optional JSON body: `full`, `requested_by`, `options` (string map), `allow_broaden` |
 | `GET /api/triggers` | The configured [triggers](triggers.md): `{triggers, webhook, config_file?, error?}`. `webhook` is the listener's state (`enabled`, `bind`, `port`, `allow_remote`, `listening?`). A read. | none |
 | `GET /api/triggers/{name}` | One trigger: `status` (`disabled`, `active`, `failing`, `unavailable`), `reason`, `setup` (what enabling still needs), `running`, `endpoint` (a listening webhook's URL), counters, `next_due`, `last_error`. A read. | none |

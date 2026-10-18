@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 use crate::app::{
     AppServices, AuthPolicy, ConfigReport, DbEndpoint, MinerRegistry, RuntimeContext,
-    TriggerRegistry,
+    SourceConfigRegistry, TriggerRegistry,
 };
 use crate::config::{Config, Secret};
 use crate::credential::Credentials;
@@ -157,12 +157,22 @@ pub async fn run(config: Config) -> Result<()> {
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())
         .with_preferences(config.effective_preferences())
+        .with_source_configs(SourceConfigRegistry::new(
+            config.config_file.clone(),
+            config.source_configs.clone(),
+        ))
         // Starts from what the file held at startup and reads the file again whenever it changes, so the daemon
         // and a hand edit never disagree for long (`docs/adr/037`).
-        .with_miners(MinerRegistry::new(
-            config.config_file.clone(),
-            config.miners.clone(),
-        ))
+        .with_miners(
+            MinerRegistry::new(config.config_file.clone(), config.miners.clone()).with_directories(
+                // An explicit --config is a self-contained environment (especially in tests); never pick up
+                // someone else's XDG miners while serving a separate palace.
+                (config.config_file == crate::config::paths::default_config_file())
+                    .then(crate::config::paths::default_miners_dir)
+                    .flatten(),
+                config.mining.miner_dirs.clone(),
+            ),
+        )
         // Every trigger is off until the user enables it, so a daemon with none enabled runs no task, opens no port and
         // watches no file here (`docs/adr/043`); the supervisor below only starts what is.
         .with_triggers(TriggerRegistry::new(

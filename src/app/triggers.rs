@@ -124,6 +124,28 @@ impl TriggerRegistry {
     }
 }
 
+/// A stable, bounded namespace for schedules declared by miners. The definition (including whether it is enabled)
+/// comes from the miner file on every refresh; the palace only keeps firing progress under this ID.
+fn miner_schedule(miner: &MinerDefinition) -> Option<TriggerDefinition> {
+    let schedule = miner.schedule.as_ref()?;
+    let mut settings = Map::new();
+    settings.insert("every".into(), Value::String(schedule.every.clone()));
+    if let Some(at) = &schedule.at {
+        settings.insert("at".into(), Value::String(at.clone()));
+    }
+    Some(TriggerDefinition {
+        name: format!(
+            "miner-{}",
+            &crate::domain::sha256_hex(miner.name.as_bytes())[..32]
+        ),
+        miner: miner.name.clone(),
+        kind: TriggerMechanism::Schedule,
+        enabled: schedule.enabled && miner.enabled,
+        credential: None,
+        settings,
+    })
+}
+
 impl Default for TriggerRegistry {
     fn default() -> Self {
         Self::new(
@@ -867,10 +889,29 @@ impl AppServices {
         name: &str,
         via: Option<TriggerMechanism>,
     ) -> Result<(JobId, bool)> {
-        let miner = {
+        let stored = {
             let mut state = self.triggers.state.lock().await;
             let _ = self.triggers.refresh(&mut state, false);
-            find_trigger(&state.triggers, name)?.miner.clone()
+            state
+                .triggers
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| t.miner.clone())
+        };
+        let miner = match stored {
+            Some(miner) => miner,
+            None => {
+                self.miners
+                    .snapshot()
+                    .await
+                    .iter()
+                    .filter_map(miner_schedule)
+                    .find(|t| t.name == name && t.enabled)
+                    .ok_or_else(|| Error::TriggerNotFound {
+                        name: name.to_string(),
+                    })?
+                    .miner
+            }
         };
         let requested_by = match via {
             Some(_) => format!("trigger:{name}"),
@@ -891,10 +932,23 @@ impl AppServices {
         delivery: Option<String>,
     ) -> Result<FireOutcome> {
         let _guard = self.triggers.fire_lock.lock().await;
-        let trigger = {
+        let stored = {
             let mut state = self.triggers.state.lock().await;
             let _ = self.triggers.refresh(&mut state, false);
-            find_trigger(&state.triggers, name)?.clone()
+            state.triggers.iter().find(|t| t.name == name).cloned()
+        };
+        let trigger = match stored {
+            Some(trigger) => trigger,
+            None => self
+                .miners
+                .snapshot()
+                .await
+                .iter()
+                .filter_map(miner_schedule)
+                .find(|t| t.name == name)
+                .ok_or_else(|| Error::TriggerNotFound {
+                    name: name.to_string(),
+                })?,
         };
         if !trigger.enabled {
             return Err(Error::TriggerDisabled {
@@ -990,7 +1044,7 @@ pub struct TriggerHost {
 impl trigger::Host for TriggerHost {
     async fn desired(&self) -> Desired {
         let app = &self.app;
-        let enabled: Vec<TriggerDefinition> = {
+        let mut enabled: Vec<TriggerDefinition> = {
             let mut state = app.triggers.state.lock().await;
             let _ = app.triggers.refresh(&mut state, false);
             state
@@ -1000,14 +1054,20 @@ impl trigger::Host for TriggerHost {
                 .cloned()
                 .collect()
         };
-        if enabled.is_empty() {
-            return Desired::default();
-        }
         let Ok((miners, adapters)) = app.activation_context().await else {
             // The store could not be read: keep what is running rather than stop everything on a hiccup. An empty
             // answer would stop it, so retry on the next tick through the caller's loop.
             return Desired::default();
         };
+        enabled.extend(
+            miners
+                .iter()
+                .filter_map(miner_schedule)
+                .filter(|t| t.enabled),
+        );
+        if enabled.is_empty() {
+            return Desired::default();
+        }
         let mut triggers = Vec::new();
         for trigger in enabled {
             match app.trigger_activation(&trigger, &miners, &adapters).await {

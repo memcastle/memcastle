@@ -251,6 +251,51 @@ export interface TriggersReport {
   error?: string
 }
 
+/** A reusable source instance; the daemon never sends credential contents or their location. */
+export interface SourceConfiguration {
+  id: string
+  source: string
+  options: Record<string, string | boolean | number | string[]>
+  credential_kind: string | null
+  credential_available: boolean
+}
+
+export interface MinerSchedule { every: string; at?: string; enabled: boolean }
+
+export interface Miner {
+  name: string
+  source: string
+  source_config?: string
+  state: string
+  reason?: string
+  enabled: boolean
+  locator?: string
+  wing?: string
+  room?: string
+  mapping?: { wing_from?: string; room_from?: string }
+  max_documents?: number
+  embedding_profile?: string
+  schedule?: MinerSchedule
+  options: Record<string, string | number | boolean | string[]>
+  config_file?: string
+}
+
+export interface MinersReport { miners: Miner[]; config_file?: string; error?: string }
+
+export interface MinerPatch {
+  source?: string
+  source_config?: string
+  locator?: string
+  wing?: string
+  room?: string
+  mapping?: { wing_from?: string; room_from?: string }
+  max_documents?: number
+  schedule?: MinerSchedule
+  options?: Record<string, string | number | boolean | string[]>
+  unset?: string[]
+  allow_broaden?: boolean
+}
+
 export interface ErrorBody {
   code?: string
   help?: string

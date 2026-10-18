@@ -540,6 +540,7 @@ mod tests {
             let none = crate::mining::adapter::Discovery {
                 candidates: vec![],
                 exhausted: true,
+                filtered: 0,
             };
             match self.fault {
                 Fault::AcceptsAForeignCursor if foreign => Ok(none),
@@ -553,6 +554,7 @@ mod tests {
                 Fault::EmptyPageNotExhausted if !foreign => Ok(crate::mining::adapter::Discovery {
                     candidates: vec![],
                     exhausted: false,
+                    filtered: 0,
                 }),
                 Fault::PageOverTheLimit if !foreign => {
                     self.inner.discover(source, cursor, limit + 5).await
@@ -570,6 +572,7 @@ mod tests {
                         handle: String::new(),
                     }],
                     exhausted: false,
+                    filtered: 0,
                 }),
                 Fault::TailNotEmpty if !foreign && !cursor.is_null() => {
                     Ok(crate::mining::adapter::Discovery {
@@ -579,6 +582,7 @@ mod tests {
                             handle: "extra".to_string(),
                         }],
                         exhausted: false,
+                        filtered: 0,
                     })
                 }
                 _ => self.inner.discover(source, cursor, limit).await,

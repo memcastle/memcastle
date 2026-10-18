@@ -16,7 +16,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
-use crate::domain::{MinerDefinition, TriggerDefinition, validate_miners, validate_triggers};
+use crate::domain::{
+    MinerDefinition, SourceConfiguration, TriggerDefinition, validate_miners,
+    validate_source_configs, validate_triggers,
+};
 use crate::error::{Error, Result};
 
 /// Serialises the daemon's own writes to the file: two registries (miners, triggers) edit the same text, and the
@@ -76,6 +79,16 @@ impl Section for TriggerDefinition {
     }
     fn validate_all(entries: &[Self]) -> std::result::Result<(), String> {
         validate_triggers(entries)
+    }
+}
+
+impl Section for SourceConfiguration {
+    const KEY: &'static str = "source_configs";
+    fn name(&self) -> &str {
+        &self.id
+    }
+    fn validate_all(entries: &[Self]) -> std::result::Result<(), String> {
+        validate_source_configs(entries)
     }
 }
 
@@ -159,6 +172,72 @@ pub fn read(path: &Path) -> Result<Loaded> {
     Ok(Loaded { miners, stamp })
 }
 
+/// A filename-derived ID is a slug, rather than accepting spaces in API path segments.
+/// An explicit `name` in the file wins over this derivation.
+pub fn filename_id(path: &Path) -> Result<String> {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| file_error(path, "use a UTF-8 .toml filename to derive the miner ID"))?;
+    let id = stem
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
+    if !crate::domain::is_valid_miner_name(&id) {
+        return Err(file_error(
+            path,
+            format!(
+                "the filename derives invalid miner ID `{id}`; use a slug filename or set an explicit `name`"
+            ),
+        ));
+    }
+    Ok(id)
+}
+
+/// Read one miner file, filling an omitted name from its filename.
+pub fn read_one(path: &Path) -> Result<(MinerDefinition, Option<FileStamp>)> {
+    let before = stamp(path)?;
+    let text = std::fs::read_to_string(path).map_err(|source| file_error(path, source))?;
+    let mut table: toml::Table = toml::from_str(&text).map_err(|error| file_error(path, error))?;
+    if !table.contains_key("name") {
+        table.insert("name".into(), toml::Value::String(filename_id(path)?));
+    }
+    let miner: MinerDefinition = table.try_into().map_err(|error| file_error(path, error))?;
+    miner
+        .validate()
+        .map_err(|reason| file_error(path, reason))?;
+    Ok((miner, before))
+}
+
+/// Replace only the selected miner file after verifying it has not changed.
+pub fn write_one(
+    path: &Path,
+    expected: Option<FileStamp>,
+    miner: Option<&MinerDefinition>,
+) -> Result<()> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if stamp(path)? != expected {
+        return Err(file_error(
+            path,
+            "it changed during the edit; reload miners and retry",
+        ));
+    }
+    if let Some(miner) = miner {
+        miner
+            .validate()
+            .map_err(|reason| file_error(path, reason))?;
+        // Never use a raw user-supplied ID as a path: the caller chooses an origin or a validated slug.
+        let text = toml::to_string_pretty(miner).map_err(|error| file_error(path, error))?;
+        replace_atomically(path, &text)
+    } else {
+        std::fs::remove_file(path).map_err(|source| file_error(path, source))
+    }
+}
+
 /// Read the triggers from `path`. A file that does not exist has none.
 ///
 /// # Errors
@@ -168,6 +247,20 @@ pub fn read(path: &Path) -> Result<Loaded> {
 pub fn read_triggers(path: &Path) -> Result<LoadedTriggers> {
     let (triggers, stamp) = read_section(path)?;
     Ok(LoadedTriggers { triggers, stamp })
+}
+
+/// Read named source configurations from the daemon's file.
+pub fn read_source_configs(path: &Path) -> Result<(Vec<SourceConfiguration>, Option<FileStamp>)> {
+    read_section(path)
+}
+
+/// Edit just the named source configurations, preserving other TOML sections and comments.
+pub fn write_source_configs(
+    path: &Path,
+    expected: Option<FileStamp>,
+    configs: &[SourceConfiguration],
+) -> Result<Option<FileStamp>> {
+    write_section(path, expected, configs)
 }
 
 /// Render one entry the way the serialiser writes it, as a table ready to sit in its array.
@@ -364,6 +457,53 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_file_derives_a_slug_unless_an_explicit_name_is_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ChatGPT Dev.toml");
+        std::fs::write(&path, "source = \"directory\"\nlocator = \"/tmp\"\n").unwrap();
+        let (miner, stamp) = read_one(&path).unwrap();
+        assert_eq!(miner.name, "chatgpt-dev");
+        write_one(&path, stamp, Some(&miner)).unwrap();
+        assert_eq!(read_one(&path).unwrap().0, miner);
+        std::fs::write(&path, "name = \"personal\"\nsource = \"directory\"\n").unwrap();
+        assert_eq!(read_one(&path).unwrap().0.name, "personal");
+    }
+
+    #[test]
+    fn a_changed_miner_file_cannot_be_overwritten_using_an_old_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docs.toml");
+        let miner = miner("docs");
+        write_one(&path, None, Some(&miner)).unwrap();
+        let (_, stamp) = read_one(&path).unwrap();
+        std::fs::write(
+            &path,
+            "source = \"directory\"\nlocator = \"/tmp/changed\"\n",
+        )
+        .unwrap();
+        assert!(write_one(&path, stamp, Some(&miner)).is_err());
+    }
+
+    #[test]
+    fn source_configurations_are_edited_without_rewriting_miners_or_their_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep this comment\n[[miners]]\nname = \"docs\"\nsource = \"directory\"\n";
+        std::fs::write(&path, original).unwrap();
+        let (_, stamp) = read_source_configs(&path).unwrap();
+        let config = SourceConfiguration {
+            id: "work".into(),
+            source: "directory".into(),
+            credential: None,
+            options: serde_json::Map::from_iter([("include".into(), json!("docs/**"))]),
+        };
+        write_source_configs(&path, stamp, std::slice::from_ref(&config)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(original), "{text}");
+        assert_eq!(read_source_configs(&path).unwrap().0, [config]);
+    }
 
     fn miner(name: &str) -> MinerDefinition {
         toml::from_str(&format!(

@@ -400,6 +400,73 @@ async fn source_auth_signs_a_source_in_and_a_run_is_given_the_token_and_no_secre
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_named_source_configuration_signs_in_once_and_its_miners_use_only_its_token() {
+    let fixture = Fixture::start().await;
+    fixture.install().await;
+    let (ok, stdout, stderr) = fixture
+        .cli(&["source", "config", "set", "work", "--source", NAME])
+        .await;
+    assert!(ok, "{stderr} {stdout}");
+    let (ok, stdout, stderr) = fixture.cli(&["source", "config", "auth", "work"]).await;
+    assert!(ok, "{stderr} {stdout}");
+    assert!(fixture.credentials_dir.join("work.json").is_file());
+    assert!(
+        !fixture
+            .credentials_dir
+            .join(format!("{NAME}.json"))
+            .exists()
+    );
+    let tree = tree();
+    let (ok, stdout, stderr) = fixture
+        .cli(&[
+            "miner",
+            "set",
+            "work-a",
+            "--source",
+            NAME,
+            "--source-config",
+            "work",
+            "--locator",
+            tree.path().to_str().unwrap(),
+        ])
+        .await;
+    assert!(ok, "{stderr} {stdout}");
+    let (ok, stdout, stderr) = fixture
+        .cli(&[
+            "miner",
+            "set",
+            "work-b",
+            "--source",
+            NAME,
+            "--source-config",
+            "work",
+            "--locator",
+            tree.path().to_str().unwrap(),
+        ])
+        .await;
+    assert!(ok, "{stderr} {stdout}");
+    for name in ["work-a", "work-b"] {
+        let (ok, stdout, stderr) = fixture.cli(&["miner", "run", name]).await;
+        assert!(ok, "{stderr} {stdout}");
+        let submitted: Job = serde_json::from_str(&stdout).unwrap();
+        let done = common::wait_for_job_status(
+            &fixture.client,
+            &fixture.daemon.base_url,
+            submitted.id,
+            JobStatus::Completed,
+        )
+        .await;
+        assert_eq!(done.status, JobStatus::Completed);
+    }
+    let shown = fixture.source().await;
+    assert_eq!(
+        shown["auth"]["signed_in"], false,
+        "the source default remains separate"
+    );
+    fixture.daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_token_about_to_expire_is_renewed_for_the_run_that_needs_it_and_signing_in_again_replaces_it()
  {
     let fixture = Fixture::start().await;

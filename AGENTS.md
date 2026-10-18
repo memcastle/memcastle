@@ -202,25 +202,27 @@ An invariant nothing checks is a comment, and it will be violated.
     and from the checkout through the same lookup)
     and by `web/test` (the login, the route guard and the client, with a real daemon).
 
-12. **Changing a miner is administrative, and the daemon is the only writer of the `[[miners]]` section** —
-    miner definitions live in the configuration file the daemon was started from, and adding, changing, enabling,
+12. **Changing a miner is administrative, and the daemon is the only writer of miner configuration** —
+    miner definitions live in the configuration file the daemon was started from or in individual XDG miner TOML files,
+    and adding, changing, enabling,
     disabling, removing, reloading and running one are REST and CLI only, so an agent can read the miners
     (`memcastle_miner_list`, `memcastle_miner_get`) but cannot decide what the daemon mines.
     A secret is never written to the file (`credential` is a reference, and a secret-looking key is refused) nor returned
     (a credential is shown as a kind (`env`, `file` or `oauth`) and whether it resolves), and a change made through the
     daemon never broadens the miner's effective source options without being told to.
-    The rest of the file is never rewritten, only that section, in place (see
+    The rest of the global file is never rewritten, only that section, in place; a miner file is edited separately (see
     `docs/adr/037-persistent-miner-configuration.md`).
     Enforced by `tests/in_process/auth.rs` (every `/api/miners` route guarded, and the only miner MCP tools are the two
     read-only ones), by `tests/in_process/miners.rs` (validation before anything is written, option changes never
     broaden silently, a credential never leaks, a cursor survives every change, REST, CLI and MCP agree)
     and by `config::miners_file`'s tests (comments and other tables survive an edit, a stale write is refused).
 
-13. **Triggers are opt-in, administrative, and only ask for a run** —
+13. **Triggers and miner-owned schedules are opt-in, administrative, and only ask for a run** —
     a trigger decides *when* a miner is run and nothing else: it ends in the one request `memcastle miner run` makes
     (`app::miners`'s `request_miner_run`), so it can cause nothing a person could not, and it acquires, normalises and
     stores nothing and carries no payload to a source.
     Every trigger is disabled until the user enables it in the configuration file or with `memcastle trigger`:
+    a miner-owned schedule is disabled until the user explicitly enables it in its miner file or with `miner schedule-enable`:
     installing a source, defining or enabling a miner, writing a trigger, recovering after a crash and re-installing never
     enable one, and what the palace remembers about a trigger (progress, accepted deliveries) never says whether it is
     enabled, so a restart cannot override the user's choice.

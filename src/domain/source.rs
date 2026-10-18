@@ -254,6 +254,8 @@ pub struct SourceCapabilities {
     pub retains_raw: bool,
     /// Whether the adapter needs a [`CredentialRef`] to acquire anything.
     pub needs_credentials: bool,
+    /// Its OAuth provider can sign in only one default web account (other named configurations may still be offline).
+    pub single_account_auth: bool,
 }
 
 /// A document the adapter found, before it is read.

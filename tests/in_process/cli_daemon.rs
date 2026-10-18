@@ -441,7 +441,9 @@ async fn a_word_that_is_neither_a_source_nor_a_directory_lists_the_sources() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("neither a source nor a directory") && stderr.contains("directory"),
+        stderr.contains("neither a configured miner, a source")
+            && stderr.contains("memcastle miner list")
+            && stderr.contains("directory"),
         "{stderr}"
     );
     daemon.shutdown().await;

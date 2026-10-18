@@ -265,6 +265,12 @@ pub fn render_source(source: &crate::mining::AdapterInfo, painter: Painter) -> S
             ));
         }
     }
+    if !source.configurations.is_empty() {
+        lines.push(format!(
+            "  configurations: {} (inspect with `memcastle source config get <id>`)",
+            source.configurations.join(", ")
+        ));
+    }
     if let Some(reason) = &source.unavailable_reason {
         lines.push(format!(
             "  {}",
@@ -838,6 +844,7 @@ mod tests {
                 incremental: true,
                 retains_raw: false,
                 needs_credentials: false,
+                single_account_auth: false,
             },
             origin,
             version: None,
@@ -847,6 +854,7 @@ mod tests {
             registry: None,
             signed_by: None,
             auth: None,
+            configurations: Vec::new(),
             options: Vec::new(),
             triggers: Vec::new(),
         }

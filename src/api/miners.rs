@@ -57,6 +57,24 @@ pub(super) async fn disable(
     Ok(Json(state.app.set_miner_enabled(&name, false).await?))
 }
 
+pub(super) async fn enable_schedule(
+    State(state): State<ApiState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state.app.set_miner_schedule_enabled(&name, true).await?,
+    ))
+}
+
+pub(super) async fn disable_schedule(
+    State(state): State<ApiState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state.app.set_miner_schedule_enabled(&name, false).await?,
+    ))
+}
+
 /// `DELETE /api/miners/{name}`.
 pub(super) async fn remove(
     State(state): State<ApiState>,

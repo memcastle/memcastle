@@ -386,6 +386,12 @@ impl TriggerDefinition {
     ///
     /// Returns what is wrong, as a sentence that names the field and the fix.
     pub fn validate(&self) -> Result<(), String> {
+        if self.name.starts_with("miner-")
+            && self.name.len() == 38
+            && self.name[6..].bytes().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err("`miner-<digest>` is reserved for schedules owned by miners; choose another trigger name".into());
+        }
         if !is_valid_trigger_name(&self.name) {
             return Err(format!(
                 "`{}` is not a valid trigger name; use 1-{MAX_TRIGGER_NAME_LEN} lowercase letters, digits, `-` or `_`, \

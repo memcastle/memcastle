@@ -8,6 +8,7 @@ import { createAppRouter } from "../src/router.ts"
 import { createSession, SESSION } from "../src/session.ts"
 import JobsView from "../src/views/JobsView.vue"
 import LaunchView from "../src/views/LaunchView.vue"
+import MinersView from "../src/views/MinersView.vue"
 import AppShell from "../src/layout/AppShell.vue"
 import GraphView from "../src/views/GraphView.vue"
 import OverviewView from "../src/views/OverviewView.vue"
@@ -479,6 +480,82 @@ describe("the launch page", () => {
 
     expect(wrapper.find("input#mine-path").exists()).toBe(true)
     expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Installed source")!.attributes("disabled")).toBeDefined()
+  })
+})
+
+describe("the miners page", () => {
+  const miner = { name: "docs", source: "directory", enabled: true, state: "ready", options: {}, schedule: { every: "1d", enabled: false } }
+  const answer = (request: Recorded): Answer => path(request) === "/api/miners"
+    ? { body: { miners: [miner] } }
+    : path(request) === "/api/source-configs"
+      ? { body: [{ id: "directory", source: "directory", options: {}, credential_kind: null, credential_available: false }] }
+      : { body: { miner } }
+
+  it("keeps a miner's schedule off until its explicit enable action", async () => {
+    const { wrapper, requests } = await show(MinersView, answer)
+    expect(requests.every((request) => request.method === "GET")).toBe(true)
+    expect(wrapper.text()).toContain("every 1d (off)")
+
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Enable schedule")!.trigger("click")
+    await flushPromises()
+    expect(requests.find((request) => request.method === "POST")?.url).toBe("/api/miners/docs/schedule/enable")
+  })
+
+  it("cannot enable an unattended schedule from a read-only session", async () => {
+    const { wrapper, requests } = await show(MinersView, answer, "read_only")
+    const enable = wrapper.findAll("button").find((candidate) => candidate.text() === "Enable schedule")!
+    expect(enable.attributes("disabled")).toBeDefined()
+    await enable.trigger("click")
+    expect(requests.every((request) => request.method === "GET")).toBe(true)
+  })
+
+  it("saves reusable source defaults separately from a disabled miner schedule and its destination", async () => {
+    const { wrapper, requests } = await show(MinersView, answer)
+
+    await wrapper.find("input#config-id").setValue("directory-work")
+    await wrapper.find("input#config-source").setValue("directory")
+    await wrapper.find("textarea#config-options").setValue("include=docs/**\nexclude=target/**")
+    await wrapper.find("select#config-credential").setValue("env")
+    await wrapper.find("input#config-credential-location").setValue("WORK_TOKEN")
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Save configuration")!.trigger("click")
+    await flushPromises()
+
+    const configWrite = requests.find((request) => request.method === "PUT" && path(request) === "/api/source-configs/directory-work")
+    expect(configWrite?.body).toMatchObject({
+      source: "directory", options: { include: "docs/**", exclude: "target/**" },
+      credential: { type: "env", name: "WORK_TOKEN" },
+    })
+
+    await wrapper.find("input#miner-id").setValue("work-docs")
+    await wrapper.find("input#miner-source").setValue("directory")
+    await wrapper.find("input#miner-config").setValue("directory-work")
+    await wrapper.find("input#miner-locator").setValue("/workspace")
+    await wrapper.find("input#miner-wing").setValue("work")
+    await wrapper.find("input#miner-room-from").setValue("project")
+    await wrapper.find("input#miner-limit").setValue("100")
+    await wrapper.find("input#miner-every").setValue("1d")
+    await wrapper.find("textarea#miner-options").setValue("since=2026-01")
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Save miner")!.trigger("click")
+    await flushPromises()
+
+    const minerWrite = requests.find((request) => request.method === "PUT" && path(request) === "/api/miners/work-docs")
+    expect(minerWrite?.body).toMatchObject({
+      source: "directory", source_config: "directory-work", locator: "/workspace", wing: "work",
+      mapping: { room_from: "project" }, max_documents: 100,
+      schedule: { every: "1d", enabled: false }, options: { since: "2026-01" },
+    })
+  })
+
+  it("refuses an invalid source option before sending a configuration write", async () => {
+    const { wrapper, requests } = await show(MinersView, answer)
+    await wrapper.find("input#config-id").setValue("work")
+    await wrapper.find("input#config-source").setValue("directory")
+    await wrapper.find("textarea#config-options").setValue("not-a-pair")
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Save configuration")!.trigger("click")
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("Give KEY=VALUE")
+    expect(requests.some((request) => request.method === "PUT")).toBe(false)
   })
 })
 

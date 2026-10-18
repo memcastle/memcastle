@@ -48,7 +48,7 @@ const config = useLoad(() => client.config())
         <div><dt>Entity extraction</dt><dd>{{ config.data.value.extraction.provider }} <span class="muted">{{ config.data.value.extraction.model ?? "" }}</span></dd></div>
         <div><dt>Deduplication</dt><dd>{{ config.data.value.mining.dedup_enabled ? "on" : "off" }}</dd></div>
         <div><dt>Chunk size</dt><dd>{{ config.data.value.mining.chunk_chars }} characters</dd></div>
-        <div><dt>Documents per mining job</dt><dd>{{ config.data.value.mining.max_documents }}</dd></div>
+        <div><dt>Documents per mining job</dt><dd>{{ config.data.value.mining.max_documents || "Unlimited (bounded pages)" }}</dd></div>
         <div><dt>Source registries</dt><dd>{{ config.data.value.mining.registries }}</dd></div>
       </dl>
     </section>

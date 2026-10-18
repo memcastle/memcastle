@@ -122,9 +122,9 @@ For a directory:
 - It skips files larger than 2 MiB (`mining.max_file_bytes`), empty files, and files that are not valid UTF-8.
 - A file that fits in one chunk (6000 characters by default, `mining.chunk_chars`) is one drawer, verbatim;
   a longer one is cut into several, and only the first carries the name.
-- It stops at 2000 documents (`mining.max_documents`), and says so: the job's progress message says to run it again and
-  its result records `"truncated": true`.
-  The next job continues where this one stopped.
+- It discovers bounded pages until exhausted by default (`mining.max_documents = 0`).
+  Set a positive common or per-miner limit to stop after that many documents; the progress message says to run it again,
+  the result records `"truncated": true`, and the next job continues where this one stopped.
 
 Mining is idempotent.
 The palace remembers each mined source, where its last run stopped, and which version of each document it filed, in the

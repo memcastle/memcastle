@@ -584,7 +584,7 @@ pub const DEFAULT_MINING_CHUNK_CHARS: usize = 6_000;
 /// The default largest file a directory mine reads, in bytes. Chunking is what makes a large file mineable.
 pub const DEFAULT_MINING_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// The default number of documents one mining run ingests before stopping to be run again.
-pub const DEFAULT_MINING_MAX_DOCUMENTS: usize = 2_000;
+pub const DEFAULT_MINING_MAX_DOCUMENTS: usize = 0;
 /// The default ceiling on a WebAssembly source's linear memory, in MiB.
 pub const DEFAULT_MINING_SOURCE_MEMORY_MIB: u32 = 256;
 /// The default ceiling on one call into a WebAssembly source, in seconds.
@@ -633,9 +633,11 @@ pub struct MiningConfig {
     pub chunk_chars: usize,
     /// Files larger than this many bytes are skipped by directory mining.
     pub max_file_bytes: u64,
-    /// How many documents one job ingests. A source with more is mined across runs: the cursor continues where the
-    /// last one stopped, and the job's result says `truncated`.
+    /// Optional common cap per job; zero (the default) means no cap, using bounded discovery pages.
     pub max_documents: usize,
+    /// Ordered extra directories holding one miner per TOML file, after the default XDG directory.
+    #[serde(default)]
+    pub miner_dirs: Vec<PathBuf>,
     /// Where installed WebAssembly sources live (docs/adr/026). Unset means `$XDG_DATA_HOME/memcastle/sources`.
     pub sources_dir: Option<PathBuf>,
     /// Plugin artifact root supplied by `Config::effective_mining`; not a second `[mining]` setting.
@@ -694,6 +696,7 @@ impl Default for MiningConfig {
             chunk_chars: DEFAULT_MINING_CHUNK_CHARS,
             max_file_bytes: DEFAULT_MINING_MAX_FILE_BYTES,
             max_documents: DEFAULT_MINING_MAX_DOCUMENTS,
+            miner_dirs: Vec::new(),
             sources_dir: None,
             plugin_dir: None,
             source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
@@ -1009,6 +1012,9 @@ pub struct Config {
     /// the daemon itself rewrites that section when a miner is added or changed.
     #[serde(default)]
     pub miners: Vec<MinerDefinition>,
+    /// Named source settings and credential references; the implicit default ID equals each source ID.
+    #[serde(default)]
+    pub source_configs: Vec<crate::domain::SourceConfiguration>,
     /// The `[[triggers]]` definitions as they were when the file was loaded: a startup snapshot like `miners`, read
     /// from the file again while the daemon runs. Every trigger is off until the user enables it.
     #[serde(default)]
@@ -1519,6 +1525,7 @@ impl Config {
         self.validate_credentials()?;
         self.validate_dedup()?;
         validate_miners(&self.miners)?;
+        crate::domain::validate_source_configs(&self.source_configs).map_err(Error::config)?;
         validate_triggers(&self.triggers)?;
         self.validate_webhook()?;
         Ok(())
@@ -1669,10 +1676,18 @@ impl Config {
                 "mining.max_file_bytes (or MEMCASTLE_MINING_MAX_FILE_BYTES) must be between 1 and 67108864",
             ));
         }
-        if !(1..=1_000_000).contains(&mining.max_documents) {
+        if mining.max_documents > 1_000_000 {
             return Err(Error::config(
-                "mining.max_documents (or MEMCASTLE_MINING_MAX_DOCUMENTS) must be between 1 and 1000000",
+                "mining.max_documents (or MEMCASTLE_MINING_MAX_DOCUMENTS) must be 0 (unlimited) or between 1 and 1000000",
             ));
+        }
+        for dir in &mining.miner_dirs {
+            if !dir.is_absolute() {
+                return Err(Error::config(format!(
+                    "mining.miner_dirs entry {} must be an absolute path",
+                    dir.display()
+                )));
+            }
         }
         // Relative to whatever directory the daemon started in, like `palace.path` and `assets.dir`.
         if let Some(dir) = mining.sources_dir.as_ref().filter(|dir| !dir.is_absolute()) {
@@ -2574,11 +2589,18 @@ mod tests {
                 (|c: &mut Config| c.mining.chunk_chars = 10) as fn(&mut Config),
                 "mining.chunk_chars",
             ),
-            (|c| c.mining.max_documents = 0, "mining.max_documents"),
+            (
+                |c| c.mining.max_documents = 1_000_001,
+                "mining.max_documents",
+            ),
             (|c| c.mining.max_file_bytes = 0, "mining.max_file_bytes"),
             (
                 |c| c.mining.sources_dir = Some(PathBuf::from("relative")),
                 "mining.sources_dir",
+            ),
+            (
+                |c| c.mining.miner_dirs = vec![PathBuf::from("relative")],
+                "mining.miner_dirs",
             ),
             (
                 |c| c.mining.source_memory_mib = 1,

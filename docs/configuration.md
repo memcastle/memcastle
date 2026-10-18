@@ -158,7 +158,7 @@ entity_fuzzy = true        # a unique one-character typo converges on the entity
 [mining]
 chunk_chars = 6000          # characters per drawer; a longer document becomes several drawers
 max_file_bytes = 2097152    # directory mining skips files larger than this
-max_documents = 2000        # documents one job files; the next job continues from the cursor
+max_documents = 0           # 0 means unlimited; a positive value caps one job, whose next run resumes the cursor
 # Installed WebAssembly sources (see "Writing a mining source"): where they live, and what each call may use.
 # sources_dir = "/home/alice/.local/share/memcastle/sources"
 source_memory_mib = 256     # the most memory one call into an installed source may use
@@ -326,7 +326,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `dedup.entity_fuzzy` (`true` or `false`) | `MEMCASTLE_DEDUP_ENTITY_FUZZY` | `true` |
 | `mining.chunk_chars` (200 to 100000) | `MEMCASTLE_MINING_CHUNK_CHARS` | `6000` |
 | `mining.max_file_bytes` (1 to 67108864) | `MEMCASTLE_MINING_MAX_FILE_BYTES` | `2097152` |
-| `mining.max_documents` (1 to 1000000) | `MEMCASTLE_MINING_MAX_DOCUMENTS` | `2000` |
+| `mining.max_documents` (0 or 1 to 1000000) | `MEMCASTLE_MINING_MAX_DOCUMENTS` | `0` (unlimited) |
 | `mining.sources_dir` (an absolute path) | `MEMCASTLE_MINING_SOURCES_DIR` | `$XDG_DATA_HOME/memcastle/sources` |
 | `mining.source_memory_mib` (16 to 4096) | `MEMCASTLE_MINING_SOURCE_MEMORY_MIB` | `256` |
 | `mining.source_timeout_secs` (1 to 3600) | `MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS` | `60` |
@@ -738,9 +738,77 @@ leaves the sources to the installed assets.
 
 ## Miners
 
-A miner is a named, persistent definition of what to mine and how: a source, where in it to read, saved options and a credential.
-They are the `[[miners]]` entries of the configuration file, so they are declarative and survive a restart,
-and they are managed from the file, from [`memcastle miner`](cli.md#miner) and, read-only, from MCP
+### Source configurations
+
+A source configuration names reusable source-native defaults and a credential reference; it has no destination or schedule.
+The default ID is the source ID (`chatgpt` for `chatgpt`), even when nothing is written in TOML.
+Additional configurations live in the global file and have unique IDs:
+
+```toml
+[[source_configs]]
+id = "github-work"
+source = "github"
+credential = { type = "env", name = "GH_TOKEN" }
+
+[source_configs.options]
+include = ["my-team/*"]
+
+[[miners]]
+name = "work-wiki"
+source = "github"
+source_config = "github-work"
+wing = "work"
+
+[miners.options]
+wiki_include = ["my-team/wiki"]
+```
+
+`memcastle source config list|get|set|remove` and authenticated `/api/source-configs` manage this section.
+MCP can list configuration summaries but cannot edit or authenticate them.
+A miner selects its source's default configuration when `source_config` is absent.
+Source configuration options are applied first and matching miner options replace them;
+one-off `miner run` options replace matching saved options without rewriting either definition.
+A change to shared source defaults that may read more material needs `--allow-broaden` in the CLI
+or `allow_broaden = true` in the REST body; the UI asks for the same explicit choice.
+The common `mining.max_documents` default (zero for unlimited) is overridden by a miner's positive `max_documents`.
+`embedding_profile` selects a runnable named embedding profile for drawers this miner files.
+The resolved vector space is pinned to its durable job; an explicit embedding-job profile outranks the miner override,
+which outranks the global default.
+Credentials and their paths are never returned by a configuration view; OAuth sign-ins for the default configuration
+retain the existing source-keyed credential so upgrades do not lose them.
+ChatGPT's current web authorization can select only the default account: an additional named ChatGPT web configuration
+cannot authenticate yet; export-import miners remain usable without an account.
+Legacy miner `credential` references still load, but put new reusable credentials on the source configuration.
+
+### Miner definitions
+
+A miner is a named, persistent definition of what to mine and how: a source or reusable source configuration,
+input locator, options, destination, per-job limit and optional schedule.
+Definitions live in global `[[miners]]` entries or one file per miner under `$XDG_CONFIG_HOME/memcastle/miners/`.
+An explicit `--config` in another directory keeps new miners in that global file and does not load unrelated XDG miners.
+Additional directories can be listed under `[mining]` as `miner_dirs = ["/path/to/team/miners"]`.
+Files are read in filename order, after the global section and default directory.
+A file contains the same fields as a `[[miners]]` entry, at its top level rather than inside a table.
+For example, `~/.config/memcastle/miners/ChatGPT Dev.toml` may contain:
+
+```toml
+source = "chatgpt"
+locator = "/exports/latest.zip"
+wing = "personal"
+room = "conversations"
+max_documents = 300
+
+[schedule]
+every = "1d"
+at = "03:30"
+enabled = false
+```
+
+When `name` is absent its filename stem is trimmed, lowercased and spaces become hyphens:
+`ChatGPT Dev.toml` defines `chatgpt-dev`, invoked with `memcastle mine chatgpt-dev`.
+An explicit `name` takes precedence, and duplicate IDs are reported with both paths rather than silently overridden.
+Existing definitions are edited at their originating file; files are checked for concurrent edits and replaced atomically.
+They are managed from the file, from [`memcastle miner`](cli.md#miner) and, read-only, from MCP
 ([ADR-037](adr/037-persistent-miner-configuration.md)).
 
 ```toml
@@ -750,6 +818,9 @@ source = "signal"                 # the source adapter: `directory`, or an insta
 enabled = true                    # default true
 locator = "+336..."               # where in the source to read; the source decides what it means
 wing = "signal"                   # the wing its drawers go to, when it should not be the source's default
+room = "conversations"            # optional fixed room
+max_documents = 500               # overrides the common per-job cap; omit to inherit it
+mapping = { wing_from = "project_name", room_from = "conversation_group" } # optional source-independent metadata routing
 credential = { type = "env", name = "SIGNAL_TOKEN" }   # or { type = "file", path = "/run/secrets/signal" }, or { type = "oauth" }
 
 [miners.options]                  # source options: strings, numbers, booleans, lists of strings
@@ -766,10 +837,17 @@ Likewise REST callers must replace `scope` and `config` with `options`, and `uns
 `unset_options`.
 
 - **Identity.** A miner's cursor and documents belong to the *source* it points at, and not to its name.
-  Renaming, enabling, disabling or changing the wing or credential keeps its cursor.
+  Renaming, enabling, disabling or changing a credential keeps its cursor
+  when the acquisition scope and mapping stay the same.
   Pointing it at another source or locator creates a different source with its own cursor.
   A source such as `chatgpt` can also give different selected project scopes separate identities and cursors.
   Removing a miner, or disabling it, never deletes what it mined.
+  A configured Wing, Room or named source configuration gives a different destination
+  an independent cursor and document set.
+  A `mapping.wing_from` or `mapping.room_from` key reads a string from each document's metadata.
+  Missing or invalid names fall back to the fixed `wing`/`room` or source defaults.
+  Different mapping definitions have independent cursor and document records, so two miners can reuse one sign-in
+  without treating a differently filed conversation as already ingested.
 - **Secrets.** A secret is never written in the file.
   `credential` names where it comes from: an environment variable of the daemon, a file,
   or `{ type = "oauth" }` for a source that signs in with OAuth (see [Credentials](#credentials)), which names nothing
@@ -788,8 +866,11 @@ Likewise REST callers must replace `scope` and `config` with `options`, and `uns
   installed and enabled, the credential resolves, every `options` key is one the source declares as an option,
   and for `directory` the `locator` is an absolute path.
   A disabled miner may name a source that is not installed yet, so a configuration can be written ahead of the install.
-- **Trigger.** A miner runs when asked: `memcastle miner run <name>`.
-  What asks on its own is a [trigger](#triggers), which is a separate `[[triggers]]` entry and starts disabled.
+- **Schedule.** A miner runs when asked with `memcastle miner run <name>` or `memcastle mine <name>`.
+  Add `[miners.schedule] every = "1d"` and optionally `at = "03:30"` (UTC), or `[schedule]` in a miner file.
+  The timetable remains disabled until `memcastle miner schedule-enable <name>` (or REST/UI) explicitly enables it.
+  The daemon reconciles it through the same trigger supervisor as [standalone triggers](#triggers);
+  removal, a disabled miner or a disabled schedule stops the task without discarding mined data.
 - **Options.** The `options` table holds saved source options: `miner run` passes them to the source
   exactly as `memcastle mine <source> key=value` would ([ADR-042](adr/042-mine-takes-a-source-and-its-options.md)).
   A scalar is its text and a list of strings is comma-joined; an undeclared key or nested table makes the miner not
@@ -798,7 +879,8 @@ Likewise REST callers must replace `scope` and `config` with `options`, and `uns
   A change that may include more material, whether persistent or temporary, requires `--allow-broaden`.
   Sources can declare include/exclude/date comparisons; an option without declared comparison semantics requires
   approval whenever its value changes.
-  `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
+  `directory` declares `since`, `include` and `exclude` (comma-separated relative-path globs);
+  `pi`, `opencode` and `claude` declare `since` and `dir`.
   `chatgpt` declares a web-only `projects` filter in addition to `mode` and `account` options.
   The external `memcastle-github` plugin's source requires `include` repository patterns; `exclude` and separate wiki
   patterns can narrow them further.
@@ -838,7 +920,6 @@ source = "chatgpt"
 [miners.options]
 projects = ["name:Work", "id:g-p-example"]
 mode = "web"
-account = "personal"
 ```
 
 The miner joins the `projects` list with commas and the source resolves names to unique project IDs.
@@ -890,7 +971,7 @@ Set it through `memcastle miner set NAME --embedding-profile bulk --wing WING` o
 
 ### Changing miners while the daemon runs
 
-The file is the one source of truth, and the daemon is the one tool that rewrites it.
+The configured global file and individual miner files are the source of truth, and the daemon is their only writer.
 `miner set`, `enable`, `disable` and `remove` edit only the `[[miners]]` section, in place:
 comments, the other tables and every entry that did not change are left exactly as they were,
 and the file is replaced atomically with its permissions kept.
@@ -904,8 +985,8 @@ The environment and command-line overrides are not part of the file, so they are
   The daemon keeps the last miners that were valid, reports the error beside them (`miner list`, `GET /api/miners`),
   and refuses to change miners until the file is fixed, because writing would overwrite what is being repaired.
   A file that is invalid at startup stops the daemon, like the rest of the configuration.
-- **Nothing runs because of a reload.**
-  There is nothing to start or stop: a miner runs when `miner run` submits its job.
+- **Reload reconciles enabled schedules.**
+  A miner with no explicitly enabled schedule remains manual; a configured timetable starts, changes or stops idempotently.
   A job that is already queued or running when a miner is disabled or removed finishes,
   because a job carries the source and locator and not the miner's name.
 - **Option changes never broaden silently.**

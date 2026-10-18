@@ -909,6 +909,7 @@ impl Scheduler {
                 full,
                 options,
                 embedding_space: _,
+                preset,
             } => {
                 crate::mining::run(
                     &ctx,
@@ -918,6 +919,7 @@ impl Scheduler {
                         wing,
                         full,
                         options,
+                        preset,
                     },
                 )
                 .await
@@ -1109,6 +1111,7 @@ mod tests {
             full: false,
             options: Default::default(),
             embedding_space: None,
+            preset: None,
         }
     }
 

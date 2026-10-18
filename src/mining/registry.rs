@@ -134,6 +134,7 @@ fn describe(
         registry: None,
         signed_by: None,
         auth: None,
+        configurations: Vec::new(),
         options,
         triggers,
     }
@@ -196,6 +197,7 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Ada
         registry: record.registry.clone(),
         signed_by: record.signed_by.clone(),
         auth: None,
+        configurations: Vec::new(),
         options: record.manifest.option_specs(),
         triggers: record.manifest.trigger_specs(),
     }
@@ -425,6 +427,7 @@ pub async fn resolve(
     mining: &MiningConfig,
     credentials: Option<&Arc<dyn AccessTokens>>,
     source: &str,
+    configuration: Option<&str>,
 ) -> Result<AnySource> {
     match source {
         directory::NAME => Ok(AnySource::Directory(DirectoryAdapter::new(
@@ -438,12 +441,18 @@ pub async fn resolve(
             minable_package(&record, &dir)?;
             let bytes = read_installed_component(&dir, &record.name)?;
             let manifest = record.manifest;
-            ensure_signed_in(&record.name, &manifest.permissions, credentials).await?;
+            ensure_signed_in(
+                configuration.unwrap_or(&record.name),
+                &manifest.permissions,
+                credentials,
+            )
+            .await?;
             let mining = mining.clone();
             let credentials = credentials.cloned();
+            let configuration = configuration.map(str::to_string);
             // Compiling a component is CPU-bound and takes noticeable time on first use.
             let adapter = tokio::task::spawn_blocking(move || {
-                WasmAdapter::load_with(&manifest, &bytes, &mining, credentials)
+                WasmAdapter::load_with_key(&manifest, &bytes, &mining, credentials, configuration)
             })
             .await
             .map_err(|e| Error::SourceFailed {

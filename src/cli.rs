@@ -330,6 +330,11 @@ pub struct IntegrationRemoveArgs {
 /// `memcastle source` subcommands: the lifecycle of a mining source, from a new project to an installed package.
 #[derive(Debug, Subcommand)]
 pub enum SourceCommand {
+    /// Inspect and edit reusable source settings, independently of miners.
+    Config {
+        #[command(subcommand)]
+        command: SourceConfigCommand,
+    },
     /// Create a new source project that builds, passes the conformance cases
     /// and can be packaged straight away. Local: needs no daemon.
     Init(SourceInitArgs),
@@ -379,6 +384,37 @@ pub enum SourceCommand {
     /// Remove an installed source and its files. What it mined stays in the
     /// palace.
     Remove(SourceRemoveArgs),
+}
+
+/// Named source-configuration management; credentials are references, not secrets.
+#[derive(Debug, Subcommand)]
+pub enum SourceConfigCommand {
+    /// Show explicitly configured source instances.
+    List,
+    /// Show a named instance, including an implicit source default.
+    Get { id: String },
+    /// Sign in a named source configuration without returning its token.
+    Auth { id: String },
+    /// Create or update an instance; source is required for a new ID.
+    Set {
+        id: String,
+        #[arg(long)]
+        source: Option<String>,
+        /// A source-native default (`KEY=VALUE`); repeatable.
+        #[arg(long = "option")]
+        options: Vec<String>,
+        #[arg(long)]
+        credential_env: Option<String>,
+        #[arg(long, conflicts_with = "credential_env")]
+        credential_file: Option<String>,
+        #[arg(long, conflicts_with_all = ["credential_env", "credential_file"])]
+        credential_oauth: bool,
+        /// Confirm a change that may broaden every miner using this configuration.
+        #[arg(long)]
+        allow_broaden: bool,
+    },
+    /// Remove an explicit instance, leaving already mined data alone.
+    Remove { id: String },
 }
 
 /// The installable package, not an individual source or agent integration module.
@@ -628,6 +664,10 @@ pub enum MinerCommand {
     Enable(MinerNameArgs),
     /// Switch a miner off. What it mined, and its cursor, stay.
     Disable(MinerNameArgs),
+    /// Enable this miner's configured timetable after validating its prerequisites.
+    ScheduleEnable(MinerNameArgs),
+    /// Stop this miner's timetable without removing the schedule.
+    ScheduleDisable(MinerNameArgs),
     /// Remove a miner's definition. What it mined, and its cursor, stay.
     Remove(MinerRemoveArgs),
     /// Read the configuration file again now, and say what changed. The daemon
@@ -762,6 +802,9 @@ pub struct MinerSetArgs {
     /// create a miner.
     #[arg(long)]
     pub source: Option<String>,
+    /// Select an existing named configuration of the source.
+    #[arg(long)]
+    pub source_config: Option<String>,
     /// The part of the source to read: an absolute path for `directory`, a
     /// channel or repository for others.
     #[arg(long)]
@@ -769,9 +812,27 @@ pub struct MinerSetArgs {
     /// The wing the mined drawers go to, when it should not be the source's default.
     #[arg(long)]
     pub wing: Option<String>,
+    /// Use this fixed room instead of the source's default room.
+    #[arg(long)]
+    pub room: Option<String>,
+    /// Use a raw-document metadata field to choose each document's destination Wing.
+    #[arg(long)]
+    pub wing_from: Option<String>,
+    /// Use a raw-document metadata field to choose each document's Room.
+    #[arg(long)]
+    pub room_from: Option<String>,
+    /// Maximum documents to process in one run; omitted inherits the common limit.
+    #[arg(long)]
+    pub max_documents: Option<usize>,
     /// Use this profile instead of the global default for this miner's drawers.
     #[arg(long)]
     pub embedding_profile: Option<String>,
+    /// Add or change the miner's timetable (`1h`, `1d`), initially disabled.
+    #[arg(long)]
+    pub schedule_every: Option<String>,
+    /// UTC time of day for a whole-day schedule (`03:30`).
+    #[arg(long, requires = "schedule_every")]
+    pub schedule_at: Option<String>,
     /// Read the source's credential from this environment variable of the
     /// daemon. The secret itself never goes in the configuration file.
     #[arg(long, value_name = "NAME", conflicts_with = "credential_file")]
@@ -790,8 +851,8 @@ pub struct MinerSetArgs {
     /// Remove a saved source option.
     #[arg(long, value_name = "KEY")]
     pub unset_option: Vec<String>,
-    /// Clear a field: one of `locator`, `wing`, `credential`, `embedding_profile`.
-    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential", "embedding_profile"]))]
+    /// Clear a saved miner field, including its embedding profile, mapping or schedule.
+    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential", "room", "mapping", "source_config", "max_documents", "embedding_profile", "schedule"]))]
     pub unset: Vec<String>,
     /// Create the miner switched off (or switch it off).
     #[arg(long)]
@@ -971,7 +1032,8 @@ pub struct WakeUpArgs {
 /// Arguments for `memcastle mine`.
 #[derive(Debug, Args)]
 #[command(
-    override_usage = "memcastle mine <SOURCE> [PLACE] [KEY=VALUE]... [--wing <WING>] [--full]\n       \
+    override_usage = "memcastle mine <MINER> [KEY=VALUE]... [--full]\n       \
+                      memcastle mine <SOURCE> [PLACE] [KEY=VALUE]... [--wing <WING>] [--full]\n       \
                       memcastle mine <PATH> [KEY=VALUE]... [--wing <WING>] [--full]",
     after_help = "Examples:\n  \
         memcastle mine directory /some/path\n  \
@@ -981,7 +1043,7 @@ pub struct WakeUpArgs {
         `memcastle sources` lists the sources and the options each accepts."
 )]
 pub struct MineArgs {
-    /// A source to mine (`directory`, `pi`, `opencode`, or an installed one;
+    /// An existing configured miner (takes precedence), a source to mine (`directory`, `pi`, `opencode`, or an installed one;
     /// `memcastle sources` lists them), or a directory, which is shorthand for
     /// `directory <PATH>`. A word with a `/`, or one that is not shaped like a
     /// source name (`.`, `~/x`), is always a directory.

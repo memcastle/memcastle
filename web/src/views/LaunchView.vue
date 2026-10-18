@@ -7,7 +7,7 @@ import Select from "openvue/select"
 import { useToast } from "openvue/usetoast"
 import { computed, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
-import type { AdapterInfo, JobRequest } from "../api/types.ts"
+import type { AdapterInfo, JobRequest, Miner } from "../api/types.ts"
 import PageHeader from "../components/PageHeader.vue"
 import { asApiError } from "../composables/useLoad.ts"
 import { shortId } from "../format.ts"
@@ -22,17 +22,19 @@ const writable = computed(() => session.mode === "full")
 const busy = ref<string | null>(null)
 
 // Mine a directory, or an installed source by name.
-const mineKind = ref<"directory" | "source">("directory")
+const mineKind = ref<"directory" | "source" | "miner">("directory")
 const path = ref("")
 const source = ref<string | null>(null)
 const locator = ref("")
 const mineWing = ref("")
 const full = ref(false)
 const adapters = ref<AdapterInfo[]>([])
+const miners = ref<Miner[]>([])
+const minerId = ref<string | null>(null)
 // What the source being mined declares it accepts (`since`, `dir`, ...): one text field each, empty when unused.
 const optionValues = reactive<Record<string, string>>({})
 const sourceNames = computed(() => adapters.value.map((adapter) => adapter.name))
-const acceptedOptions = computed(() => adapters.value.find((adapter) => adapter.name === (mineKind.value === "directory" ? "directory" : source.value))?.options ?? [])
+const acceptedOptions = computed(() => mineKind.value === "miner" ? [] : adapters.value.find((adapter) => adapter.name === (mineKind.value === "directory" ? "directory" : source.value))?.options ?? [])
 // A sweep over one wing, or the whole palace.
 const sweepWing = ref("")
 
@@ -41,6 +43,11 @@ onMounted(async () => {
     adapters.value = (await client.sources()).adapters.filter((adapter) => adapter.state === "enabled")
   } catch {
     // The directory form works without the list.
+  }
+  try {
+    miners.value = (await client.miners())?.miners ?? []
+  } catch {
+    // An older daemon may not expose configured miners; ad-hoc mining still works.
   }
 })
 
@@ -65,11 +72,23 @@ async function submit(label: string, request: JobRequest): Promise<void> {
   }
 }
 
-function mine(): Promise<void> {
+async function mine(): Promise<void> {
+  if (mineKind.value === "miner" && minerId.value) {
+    busy.value = "Mine job"
+    try {
+      const job = await client.runMiner(minerId.value, full.value)
+      toast.add({ severity: "success", summary: "Miner submitted", detail: `Job ${shortId(job.id)}`, life: 4000 })
+      await router.push({ name: "jobs" })
+    } catch (caught) {
+      const error = asApiError(caught)
+      toast.add({ severity: "error", summary: error.message, detail: error.help, life: 7000 })
+    } finally { busy.value = null }
+    return
+  }
   const form = { kind: mineKind.value, path: path.value, source: source.value, locator: locator.value, wing: mineWing.value, full: full.value, options: optionValues }
-  return submit("Mine job", mineRequest(form, acceptedOptions.value))
+  return submit("Mine job", mineRequest({ ...form, kind: mineKind.value === "miner" ? "directory" : mineKind.value }, acceptedOptions.value))
 }
-const canMine = computed(() => (mineKind.value === "directory" ? path.value.trim().startsWith("/") : !!source.value))
+const canMine = computed(() => (mineKind.value === "miner" ? !!minerId.value : mineKind.value === "directory" ? path.value.trim().startsWith("/") : !!source.value))
 </script>
 
 <template>
@@ -82,13 +101,15 @@ const canMine = computed(() => (mineKind.value === "directory" ? path.value.trim
     <div class="row" style="margin-bottom: 1rem">
       <Button label="Directory" size="small" :outlined="mineKind !== 'directory'" @click="mineKind = 'directory'" />
       <Button label="Installed source" size="small" :outlined="mineKind !== 'source'" :disabled="!sourceNames.length" @click="mineKind = 'source'" />
+      <Button label="Configured miner" size="small" :outlined="mineKind !== 'miner'" :disabled="!miners.length" @click="mineKind = 'miner'" />
     </div>
     <div class="field-grid">
       <div v-if="mineKind === 'directory'" class="field">
         <label for="mine-path">Directory (absolute path on the daemon's machine)</label>
         <InputText id="mine-path" v-model="path" placeholder="/absolute/path" fluid />
       </div>
-      <template v-else>
+      <div v-if="mineKind === 'miner'" class="field"><label for="mine-miner">Miner (saved settings and destination)</label><Select id="mine-miner" v-model="minerId" :options="miners.map((miner) => miner.name)" placeholder="Choose a miner" fluid /></div>
+      <template v-else-if="mineKind === 'source'">
         <div class="field"><label for="mine-source">Source</label><Select id="mine-source" v-model="source" :options="sourceNames" placeholder="Choose a source" fluid /></div>
         <div class="field"><label for="mine-locator">Place to read (the source's default when empty)</label><InputText id="mine-locator" v-model="locator" fluid /></div>
       </template>
@@ -96,7 +117,7 @@ const canMine = computed(() => (mineKind.value === "directory" ? path.value.trim
         <label :for="`mine-option-${spec.name}`">{{ spec.name }}: {{ spec.description }}</label>
         <InputText :id="`mine-option-${spec.name}`" v-model="optionValues[spec.name]" fluid />
       </div>
-      <div class="field"><label for="mine-wing">Wing (the source's default when empty)</label><InputText id="mine-wing" v-model="mineWing" fluid /></div>
+      <div v-if="mineKind !== 'miner'" class="field"><label for="mine-wing">Wing (the source's default when empty)</label><InputText id="mine-wing" v-model="mineWing" fluid /></div>
     </div>
     <div class="checks"><label><Checkbox v-model="full" binary /> Read everything again, ignoring the stored cursor</label></div>
     <Button label="Submit mine job" :disabled="!writable || !canMine" :loading="busy === 'Mine job'" @click="mine" />
