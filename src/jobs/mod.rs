@@ -278,12 +278,12 @@ impl Scheduler {
     /// derived data, so failing to schedule it must not fail the write that
     /// triggered it.
     pub async fn ensure_embedding_sweep(&self) {
-        let Some(space) = self.embeddings.space().cloned() else {
+        let Ok(selected) = self.embeddings.select(None) else {
             return;
         };
-        if !self.embeddings.is_configured() {
+        let Some(space) = selected.space().cloned() else {
             return;
-        }
+        };
         self.ensure_embedding_sweep_for(space, None, None).await;
     }
 

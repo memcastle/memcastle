@@ -233,9 +233,10 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/plugins/{id}` | Show one installed plugin, including its module inventory. | none |
 | `DELETE /api/plugins/{id}` | Uninstall a plugin only after its sources, integrations, miners, jobs and dependents are no longer active. Mined data stays. | none |
 | `GET /api/plugin-registry/search` | Search plugin catalogues without installing code; `registry` selects only one and an unreadable selection returns an error, while failures among configured catalogues are warnings. | query string: `q`, `registry?` |
+| `GET /api/embedding-providers` | List installed embedding modules, versions, contracts, supported models and dimensions, and their configured profile names independently of source/integration modules; never returns tokens. | none |
 | `GET /api/plugin-registry/plugins/{id}` | Fetch and verify a release, returning module-specific permission digests without installing it. | query string: `version?`, `registry?` |
-| `POST /api/plugin-registry/install` | Fetch, verify and install the selected plugin; modules remain inactive. | JSON body: `id`, `version?`, `registry?`, `consents?` (module ID to digest), `adopt_sources?` (explicit legacy IDs), `archive_digest?` (from preview) |
-| `POST /api/plugins/preview` | Validate a plugin `.tar.gz` and show per-source consent digests and legacy source IDs needing explicit adoption, without installing it. | archive bytes (at most 64 MiB) |
+| `POST /api/plugin-registry/install` | Fetch, verify and install the selected plugin; sources stay disabled and integrations uninstalled, while configured embedding profiles can select their module. | JSON body: `id`, `version?`, `registry?`, `consents?` (module ID or `embedding:MODULE` to digest), `adopt_sources?` (explicit legacy IDs), `archive_digest?` (from preview) |
+| `POST /api/plugins/preview` | Validate a plugin `.tar.gz` and show `source_consents`, `embedding_consents` (keys `embedding:MODULE`), and legacy source IDs needing explicit adoption, without installing it. | archive bytes (at most 64 MiB) |
 | `POST /api/source-packages` | Install a [source package](writing-sources.md): the body is the `.tar.gz` itself. Answers `{source, replaced}`. | query string: `consent` (the digest of the permissions agreed to), `enable` |
 | `GET /api/source-packages/{name}` | One source, built in or installed: capabilities, state, permissions. | none |
 | `POST /api/source-packages/{name}/enable` | Allow an installed source to be mined. Idempotent. | none |

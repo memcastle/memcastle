@@ -5,7 +5,7 @@
 //! environment, the network and programs available only as far as its manifest was agreed to, a memory ceiling, and
 //! a time limit enforced by the engine rather than by the source's good manners.
 //!
-//! This is the only module that names `wasmtime` (`tests/source_isolation.rs`), and like every adapter it never
+//! This is the only source module that names `wasmtime` (`tests/source_isolation.rs`), and like every adapter it never
 //! touches the store or the jobs.
 
 mod host;

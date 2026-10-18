@@ -283,17 +283,16 @@ fn the_matching_policy_is_pure_domain_code() {
 
 #[test]
 fn only_the_webassembly_host_names_the_runtime() {
-    // One module owns the engine, so swapping or sandboxing it again is one place, and nothing else can start
-    // running guest code with authority of its own.
+    // Sources and embedding providers have distinct contracts and sandboxes; no other layer executes guest code.
     for file in rust_files_recursive("src") {
-        if file.starts_with("src/mining/wasm/") {
+        if file.starts_with("src/mining/wasm/") || file == "src/embed/wasm.rs" {
             continue;
         }
         let source = shipped_code(&file);
         for forbidden in ["wasmtime", "wasmtime_wasi"] {
             assert!(
                 !source.contains(forbidden),
-                "{file} mentions `{forbidden}`: only src/mining/wasm/ may run WebAssembly (AGENTS.md invariant 9)"
+                "{file} mentions `{forbidden}`: only source and embedding hosts may run WebAssembly (AGENTS.md invariant 9)"
             );
         }
     }

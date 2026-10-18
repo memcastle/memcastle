@@ -149,6 +149,7 @@ pub async fn run(archive: &Path) -> Result<()> {
         let consents = preview
             .source_consents
             .iter()
+            .chain(&preview.embedding_consents)
             .map(|source| (source.source.clone(), source.digest.clone()))
             .collect::<BTreeMap<_, _>>();
         let installed = client.install_plugin(bytes, &consents, &[]).await?;

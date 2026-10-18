@@ -47,6 +47,7 @@ impl IntoResponse for ApiError {
             | Error::PluginUntrusted { .. }
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
+            | Error::EmbeddingConsentRequired { .. }
             | Error::SourceBuiltin { .. }
             | Error::SourceBundled { .. }
             // Asking a source that does not sign in to sign in.
@@ -92,6 +93,7 @@ impl IntoResponse for ApiError {
             // The source exists, but its state (disabled, unavailable) conflicts with the request.
             | Error::SourceNotEnabled { .. }
             | Error::PluginBlocked { .. }
+            | Error::EmbeddingProfileUnavailable { .. }
             // A name already taken, a change that needs confirming, or a miner whose state forbids the request.
             // A hand-edited file that no longer parses is also a conflict: the request is fine, the file is not.
             | Error::MinerExists { .. }

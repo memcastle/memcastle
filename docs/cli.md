@@ -161,6 +161,8 @@ Sources and miners
 ```
 
 `memcastle doctor --json` (also the default when piped) returns an object with `findings` in presentation order.
+A plugin-backed default embedding profile is reported as configured;
+doctor does not verify the installed component or contact its model without a daemon.
 An excerpt showing one finding:
 
 ```json
@@ -477,15 +479,20 @@ compatibility before any code becomes available.
 A local archive or already-built project is read by the CLI for a preview, then sent to that same daemon for validation.
 Each source module that asks for permissions needs its own reviewed consent digest; `--yes` explicitly approves the
 displayed permissions, while a non-interactive install without `--consent MODULE=DIGEST` is refused.
+An embedding module asking for network or host-scoped credential access has an independent digest, passed as
+`--consent embedding:MODULE=DIGEST` or confirmed interactively.
 Installing a plugin never enables a new source or installs its integrations.
 `source enable` and `integration install` are separate module lifecycle operations.
+Embedding modules are selected by named embedding connections/profiles, and a newly installed module can be used
+without restarting the daemon.
 `update` preserves each source's state and its existing permissions agreement, asking again only for changed grants.
 If a source ID has mined data from a removed legacy package, `plugin install` refuses to attach it silently;
 repeat with `--adopt-source SOURCE` after reviewing the source identity and its existing history.
 If the source was bundled by an older Core, first upgrade Core, run `source remove SOURCE` to clear its former package
 row, then install with `--adopt-source SOURCE` and enable it again; removing the row also clears its credential.
 `--yes` approves permissions, but never substitutes for this explicit adoption.
-`uninstall` refuses configured miners, active sources or jobs, installed integrations and dependent plugins,
+`uninstall` refuses configured miners or embedding profiles, active sources or jobs,
+installed integrations and dependent plugins,
 and preserves everything already mined.
 The existing `source install/search/update/remove` remain for format-1 source packages; they do not install a
 module out of a plugin package.
@@ -508,7 +515,7 @@ Use `--version` to override Git inference or package from a checkout without Git
 The archive does not contain `plugin.toml`; an `ID-VERSION.sha256sum` beside it verifies the entire archive.
 It never builds a module or writes `manifest.toml` beside the project; commit source locks before publishing.
 `plugin test` validates the exact archive and starts a disposable loopback daemon in an isolated temporary palace.
-It previews and installs with per-source consents, verifies integrations remain discoverable but uninstalled in agents,
+It previews and installs with per-module consents, verifies integrations remain discoverable but uninstalled in agents,
 then enables each newly installed source. Neither the configured palace nor any agent installation is touched.
 
 ### `source`
@@ -896,6 +903,8 @@ Submits a job that computes vectors missing from the selected profile (the confi
 selected scope, including vectors that were already up to date.
 It needs an [`[embeddings]` provider](configuration.md#embeddings) and is refused with `memcastle::embed::not_configured`
 without one.
+If the selected profile references an uninstalled plugin module, it returns `memcastle::embed::profile_unavailable`
+until that module is installed; other configured profiles remain usable.
 You rarely run it: the daemon queues the same job after anything that writes drawers, and once at startup, so this is for
 backfilling after you configure a provider and for forcing a sweep.
 It only changes derived vector records and never changes canonical content, graph links or temporal history.

@@ -27,23 +27,43 @@ pub struct PluginPreview {
     pub version: String,
     /// Names and permission digests of source modules that need consent.
     pub source_consents: Vec<SourceConsent>,
+    /// Provider components requesting network or token access, independently from sources.
+    #[serde(default)]
+    pub embedding_consents: Vec<SourceConsent>,
     /// Historic legacy source IDs that need an explicit adoption decision before their cursors can be reused.
     pub adoptions: Vec<String>,
     /// Modules exposed by this release, without activating them.
     pub modules: Vec<crate::domain::PluginModule>,
 }
 
-/// A permission request belongs to one source module, never the whole provider.
+/// A permission request belongs to one module, never the whole plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceConsent {
-    /// Stable source ID.
+    /// Stable source ID or `embedding:ID` for an embedding component.
     pub source: String,
     /// Permission digest needed at install.
     pub digest: String,
     /// What the host would grant.
     pub permissions: String,
-    /// This source already belongs to the same plugin with precisely these permissions.
+    /// This module already belongs to the same plugin with precisely these permissions.
     pub already_granted: bool,
+}
+
+/// An executable installed embedding capability and its configured profile aliases, without secrets.
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddingProviderInfo {
+    /// Stable installed plugin ID.
+    pub plugin: String,
+    /// Stable module ID within the plugin.
+    pub module: String,
+    /// Independently released module version.
+    pub version: String,
+    /// Component contract version.
+    pub contract: String,
+    /// Supported models and output dimensions.
+    pub models: Vec<crate::plugin::embedding::Model>,
+    /// Profiles whose named connection currently selects this module.
+    pub profiles: Vec<String>,
 }
 
 /// Reviewed plugin metadata available from configured catalogues.
@@ -264,6 +284,107 @@ fn restore_current(root: &Path, id: &str, parked: Option<&Path>) {
 }
 
 impl AppServices {
+    /// Enumerate embedding capabilities independently from sources and agent integrations.
+    pub async fn list_embedding_providers(&self) -> Result<Vec<EmbeddingProviderInfo>> {
+        let mut capabilities = Vec::new();
+        for record in self.store.list_plugins().await? {
+            for module in record
+                .manifest
+                .modules
+                .iter()
+                .filter(|module| module.kind == PluginModuleKind::EmbeddingProvider)
+            {
+                let path = self
+                    .plugins
+                    .dir()
+                    .join(&record.id)
+                    .join(&record.generation)
+                    .join(&module.manifest);
+                let bytes = std::fs::read(&path)
+                    .map_err(|error| Error::io(path.display().to_string(), error))?;
+                if sha256_hex(&bytes) != module.manifest_sha256 {
+                    return Err(Error::PluginIntegrity {
+                        name: record.id.clone(),
+                        reason: format!(
+                            "embedding module `{}` manifest changed; reinstall the plugin",
+                            module.id
+                        ),
+                    });
+                }
+                let descriptor = crate::plugin::embedding::parse(
+                    std::str::from_utf8(&bytes).map_err(|error| Error::PluginPackageInvalid {
+                        message: format!("embedding module manifest: {error}"),
+                    })?,
+                )?;
+                if descriptor.id != module.id || descriptor.version != module.version {
+                    return Err(Error::PluginIntegrity {
+                        name: record.id.clone(),
+                        reason: format!(
+                            "embedding module `{}` identity/version differs from its installed manifest",
+                            module.id
+                        ),
+                    });
+                }
+                let profiles = self
+                    .embedding_config
+                    .profiles
+                    .iter()
+                    .filter_map(|(name, profile)| {
+                        self.embedding_config
+                            .providers
+                            .get(&profile.provider)
+                            .filter(|connection| {
+                                connection.provider == crate::config::EmbeddingProvider::Plugin
+                                    && connection.plugin.as_deref() == Some(&record.id)
+                                    && connection.module.as_deref() == Some(&module.id)
+                            })
+                            .map(|_| name.clone())
+                    })
+                    .collect();
+                capabilities.push(EmbeddingProviderInfo {
+                    plugin: record.id.clone(),
+                    module: module.id.clone(),
+                    version: module.version.clone(),
+                    contract: descriptor.contract,
+                    models: descriptor.models,
+                    profiles,
+                });
+            }
+        }
+        Ok(capabilities)
+    }
+    /// Jobs pin an implementation, even when its profile is no longer in the current configuration.
+    async fn active_embedding_job_for_plugin(
+        &self,
+        plugin: &str,
+        module: Option<&str>,
+    ) -> Result<bool> {
+        let prefix = format!("plugin:{plugin}/");
+        for status in [
+            crate::domain::JobStatus::Queued,
+            crate::domain::JobStatus::Running,
+            crate::domain::JobStatus::Paused,
+        ] {
+            for job in self.store.list_jobs(Some(status)).await? {
+                let space = match &job.kind {
+                    crate::domain::JobKind::Embed { space, .. } => space.as_ref(),
+                    crate::domain::JobKind::Mine {
+                        embedding_space, ..
+                    } => embedding_space.as_ref(),
+                    _ => None,
+                };
+                if space.is_some_and(|space| {
+                    space
+                        .provider_type
+                        .strip_prefix(&prefix)
+                        .is_some_and(|id| module.is_none_or(|module| module == id))
+                }) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
     /// Rebuild local integration pointers from the committed plugin ledger after an interrupted install.
     pub async fn recover_plugin_pointers(&self) -> Result<()> {
         let root = self.plugins.dir();
@@ -533,6 +654,9 @@ impl AppServices {
     /// [`Error::PluginBlocked`] names the first reference to resolve before retrying.
     pub async fn uninstall_plugin(&self, id: &str) -> Result<()> {
         let record = self.show_plugin(id).await?;
+        if self.active_embedding_job_for_plugin(id, None).await? {
+            return Err(Error::PluginBlocked { name: id.into(), reason: "an active job still uses this plugin's embedding component; finish or cancel it first".into() });
+        }
         for dependent in self.store.list_plugins().await? {
             if dependent.id != id
                 && dependent
@@ -569,6 +693,28 @@ impl AppServices {
                     reason: format!("source `{name}` is enabled; disable it first"),
                 });
             }
+        }
+        if let Some(profile) = self
+            .embedding_config
+            .profiles
+            .iter()
+            .find(|(_, profile)| {
+                self.embedding_config
+                    .providers
+                    .get(&profile.provider)
+                    .is_some_and(|connection| {
+                        connection.provider == crate::config::EmbeddingProvider::Plugin
+                            && connection.plugin.as_deref() == Some(id)
+                    })
+            })
+            .map(|(name, _)| name)
+        {
+            return Err(Error::PluginBlocked {
+                name: id.to_string(),
+                reason: format!(
+                    "embedding profile `{profile}` still selects this plugin; remove the profile before uninstalling"
+                ),
+            });
         }
         for miner in self.miners.snapshot().await {
             if source_names.contains(&miner.source) {
@@ -631,6 +777,11 @@ impl AppServices {
         if dir.exists() {
             std::fs::remove_dir_all(&dir).map_err(|e| Error::io(dir.display().to_string(), e))?;
         }
+        self.embeddings.load_plugins(
+            &self.embedding_config,
+            &self.store.list_plugins().await?,
+            &root,
+        )?;
         Ok(())
     }
     /// Stage a complete plugin release, then publish all its source records in one transaction.
@@ -664,25 +815,40 @@ impl AppServices {
                 ),
             });
         }
-        for required in &preview.source_consents {
+        for required in preview
+            .source_consents
+            .iter()
+            .chain(&preview.embedding_consents)
+        {
             if !required.already_granted && consents.get(&required.source) != Some(&required.digest)
             {
-                return Err(Error::SourceConsentRequired {
-                    name: required.source.clone(),
-                    permissions: required.permissions.clone(),
-                    digest: required.digest.clone(),
-                });
+                return Err(
+                    if let Some(name) = required.source.strip_prefix("embedding:") {
+                        Error::EmbeddingConsentRequired {
+                            name: name.to_string(),
+                            permissions: required.permissions.clone(),
+                            digest: required.digest.clone(),
+                        }
+                    } else {
+                        Error::SourceConsentRequired {
+                            name: required.source.clone(),
+                            permissions: required.permissions.clone(),
+                            digest: required.digest.clone(),
+                        }
+                    },
+                );
             }
         }
         if let Some(name) = consents.keys().find(|name| {
             !preview
                 .source_consents
                 .iter()
+                .chain(&preview.embedding_consents)
                 .any(|source| source.source == **name)
         }) {
             return Err(Error::invalid_input(
                 "consents",
-                format!("source `{name}` does not ask for consent in this release"),
+                format!("module `{name}` does not ask for consent in this release"),
             ));
         }
         let package = package::unpack(&archive)?;
@@ -789,6 +955,11 @@ impl AppServices {
         if let Some(parked) = &parked {
             let _ = std::fs::remove_file(parked);
         }
+        self.embeddings.load_plugins(
+            &self.embedding_config,
+            &self.store.list_plugins().await?,
+            &root,
+        )?;
         for name in &retired_sources {
             self.forget_source_credential(name).await?;
         }
@@ -897,6 +1068,30 @@ impl AppServices {
                     ),
                 });
             }
+            for old in previous
+                .manifest
+                .modules
+                .iter()
+                .filter(|module| module.kind == PluginModuleKind::EmbeddingProvider)
+            {
+                let replacement = package.manifest.modules.iter().find(|module| {
+                    module.kind == PluginModuleKind::EmbeddingProvider && module.id == old.id
+                });
+                if replacement.is_none_or(|new| {
+                    new.sha256 != old.sha256 || new.manifest_sha256 != old.manifest_sha256
+                }) && self
+                    .active_embedding_job_for_plugin(name, Some(&old.id))
+                    .await?
+                {
+                    return Err(Error::PluginBlocked {
+                        name: name.clone(),
+                        reason: format!(
+                            "embedding module `{}` still has an active job pinned to its current component",
+                            old.id
+                        ),
+                    });
+                }
+            }
             for module in &previous.manifest.modules {
                 if !package
                     .manifest
@@ -964,7 +1159,31 @@ impl AppServices {
                             }
                         }
                         PluginModuleKind::EmbeddingProvider => {
-                            // #256 adds selection state; today this module is metadata only.
+                            if let Some(profile) = self
+                                .embedding_config
+                                .profiles
+                                .iter()
+                                .find(|(_, profile)| {
+                                    self.embedding_config
+                                        .providers
+                                        .get(&profile.provider)
+                                        .is_some_and(|connection| {
+                                            connection.provider
+                                                == crate::config::EmbeddingProvider::Plugin
+                                                && connection.plugin.as_deref() == Some(name)
+                                                && connection.module.as_deref() == Some(&module.id)
+                                        })
+                                })
+                                .map(|(name, _)| name)
+                            {
+                                return Err(Error::PluginBlocked {
+                                    name: name.clone(),
+                                    reason: format!(
+                                        "removed embedding module `{}` is selected by profile `{profile}`",
+                                        module.id
+                                    ),
+                                });
+                            }
                         }
                     }
                 }
@@ -1045,6 +1264,7 @@ impl AppServices {
             });
         }
         let mut source_consents = Vec::new();
+        let mut embedding_consents = Vec::new();
         let mut adoptions = Vec::new();
         for module in &package.manifest.modules {
             if installed.iter().any(|other| {
@@ -1053,7 +1273,7 @@ impl AppServices {
                         .manifest
                         .modules
                         .iter()
-                        .any(|owned| owned.id == module.id && owned.kind == module.kind)
+                        .any(|owned| owned.id == module.id)
             }) {
                 return Err(Error::PluginBlocked {
                     name: name.clone(),
@@ -1151,7 +1371,114 @@ impl AppServices {
                     // The archive validator checks its own manifest and every referenced asset.
                 }
                 PluginModuleKind::EmbeddingProvider => {
-                    // Its runtime belongs to #256; a manifest must not make it executable today.
+                    let text = std::str::from_utf8(&package.files[&module.manifest])
+                        .expect("validated manifest");
+                    let descriptor = crate::plugin::embedding::parse(text)?;
+                    if descriptor.network || descriptor.credential {
+                        let old =
+                            installed
+                                .iter()
+                                .find(|other| other.id == *name)
+                                .and_then(|old| {
+                                    old.manifest.modules.iter().find(|old| {
+                                        old.kind == PluginModuleKind::EmbeddingProvider
+                                            && old.id == module.id
+                                    })
+                                });
+                        let already_granted = if let Some(old) = old {
+                            let base = self.plugins.dir().join(name).join(
+                                &installed
+                                    .iter()
+                                    .find(|other| other.id == *name)
+                                    .expect("module belongs to plugin")
+                                    .generation,
+                            );
+                            std::fs::read(base.join(&old.manifest))
+                                .ok()
+                                .filter(|bytes| sha256_hex(bytes) == old.manifest_sha256)
+                                .and_then(|bytes| String::from_utf8(bytes).ok())
+                                .and_then(|text| crate::plugin::embedding::parse(&text).ok())
+                                .is_some_and(|previous| {
+                                    previous.consent_digest() == descriptor.consent_digest()
+                                })
+                        } else {
+                            false
+                        };
+                        embedding_consents.push(SourceConsent {
+                            source: format!("embedding:{}", module.id),
+                            digest: descriptor.consent_digest(),
+                            permissions: format!(
+                                "{}{}",
+                                if descriptor.network {
+                                    "network access"
+                                } else {
+                                    ""
+                                },
+                                if descriptor.credential {
+                                    if descriptor.network {
+                                        " and selected connection credential"
+                                    } else {
+                                        "selected connection credential"
+                                    }
+                                } else {
+                                    ""
+                                }
+                            ),
+                            already_granted,
+                        });
+                    }
+                    let bytes = &package.files[&module.entry];
+                    for (profile_name, profile) in &self.embedding_config.profiles {
+                        let Some(connection) =
+                            self.embedding_config.providers.get(&profile.provider)
+                        else {
+                            continue;
+                        };
+                        if connection.provider != crate::config::EmbeddingProvider::Plugin
+                            || connection.plugin.as_deref() != Some(name)
+                            || connection.module.as_deref() != Some(&module.id)
+                        {
+                            continue;
+                        }
+                        crate::plugin::embedding::validate_selection(
+                            &descriptor,
+                            &connection.settings,
+                            &profile.model,
+                            profile.dimensions,
+                        )?;
+                        if connection.credential.is_some() && !descriptor.credential {
+                            return Err(Error::PluginBlocked {
+                                name: name.clone(),
+                                reason: format!(
+                                    "embedding profile `{profile_name}` supplies a credential but module `{}` did not declare access",
+                                    module.id
+                                ),
+                            });
+                        }
+                    }
+                    let model = &descriptor.models[0];
+                    let dimensions = usize::try_from(model.dimensions[0]).unwrap_or(usize::MAX);
+                    let descriptor = descriptor.clone();
+                    let bytes = bytes.clone();
+                    let model = model.id.clone();
+                    tokio::task::spawn_blocking(move || {
+                        crate::embed::wasm::WasmEmbedder::load(
+                            descriptor,
+                            &bytes,
+                            model,
+                            dimensions,
+                            "{}".into(),
+                            None,
+                            std::time::Duration::from_secs(5),
+                        )
+                    })
+                    .await
+                    .map_err(|error| Error::PluginPackageInvalid {
+                        message: format!("embedding component preflight interrupted: {error}"),
+                    })?
+                    .map_err(|error| Error::PluginPackageInvalid {
+                        message: format!("embedding module cannot load: {error}"),
+                    })?;
                 }
             }
         }
@@ -1159,6 +1486,7 @@ impl AppServices {
             id: name.clone(),
             version: package.manifest.plugin.version,
             source_consents,
+            embedding_consents,
             adoptions,
             modules: package.manifest.modules,
         })
@@ -1168,6 +1496,47 @@ impl AppServices {
 #[cfg(test)]
 mod tests {
     use super::{park_current, restore_current};
+
+    #[tokio::test]
+    async fn an_active_pinned_embedding_job_blocks_its_module_even_after_its_profile_is_removed() {
+        use crate::domain::{EmbeddingRefresh, EmbeddingSpace, Job, JobKind, Priority};
+
+        let app = super::AppServices::for_tests().await;
+        let job = Job::new(
+            JobKind::Embed {
+                wing: None,
+                source_id: None,
+                profile: Some("retired".into()),
+                refresh: EmbeddingRefresh::Missing,
+                space: Some(EmbeddingSpace::new(
+                    "retired".into(),
+                    "gone".into(),
+                    "plugin:example/embeddings".into(),
+                    "digest".into(),
+                    "model".into(),
+                    3,
+                )),
+            },
+            Priority::Low,
+            "test",
+        );
+        app.store.save_job(&job).await.unwrap();
+        assert!(
+            app.active_embedding_job_for_plugin("example", Some("embeddings"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !app.active_embedding_job_for_plugin("example", Some("other"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !app.active_embedding_job_for_plugin("unrelated", None)
+                .await
+                .unwrap()
+        );
+    }
 
     #[test]
     fn a_failed_publication_restores_the_prior_integration_pointer() {

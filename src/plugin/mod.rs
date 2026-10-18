@@ -1,5 +1,6 @@
 //! Plugin authoring contracts and archive validation, independent of the daemon.
 
+pub mod embedding;
 pub mod manifest;
 pub mod package;
 pub mod signing;

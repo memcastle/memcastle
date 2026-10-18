@@ -72,6 +72,10 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/retry", post(retry_job))
         .route("/api/sources", get(list_sources))
         .route(
+            "/api/embedding-providers",
+            get(plugins::list_embedding_providers),
+        )
+        .route(
             "/api/plugins",
             get(plugins::list)
                 .post(plugins::install)

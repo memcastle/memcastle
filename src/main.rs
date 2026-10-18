@@ -694,15 +694,16 @@ fn plugin_consents(raw: &[String]) -> Result<std::collections::BTreeMap<String, 
         let (module, digest) = item
             .split_once('=')
             .ok_or_else(|| Error::invalid_input("--consent", "expected MODULE=DIGEST"))?;
-        if !memcastle::domain::is_valid_source_name(module)
-            || digest.len() != 64
+        if !memcastle::domain::is_valid_source_name(
+            module.strip_prefix("embedding:").unwrap_or(module),
+        ) || digest.len() != 64
             || !digest
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         {
             return Err(Error::invalid_input(
                 "--consent",
-                "expected a valid source module ID and 64 lowercase hexadecimal digest",
+                "expected a valid module ID (embedding:ID for an embedding module) and 64 lowercase hexadecimal digest",
             ));
         }
         if digests
@@ -724,13 +725,21 @@ fn agree_to_plugin(
     mut given: std::collections::BTreeMap<String, String>,
     yes: bool,
 ) -> Result<std::collections::BTreeMap<String, String>> {
-    for source in &preview.source_consents {
+    for source in preview
+        .source_consents
+        .iter()
+        .chain(&preview.embedding_consents)
+    {
         if source.already_granted || given.contains_key(&source.source) {
             continue;
         }
         eprintln!(
             "{} {} {} asks to: {}",
-            Painter::for_stderr().warn("Source"),
+            Painter::for_stderr().warn(if source.source.starts_with("embedding:") {
+                "Embedding provider"
+            } else {
+                "Source"
+            }),
             source.source,
             preview.version,
             source.permissions
@@ -743,11 +752,21 @@ fn agree_to_plugin(
             )?;
             given.insert(source.source.clone(), source.digest.clone());
         } else {
-            return Err(Error::SourceConsentRequired {
-                name: source.source.clone(),
-                permissions: source.permissions.clone(),
-                digest: source.digest.clone(),
-            });
+            return Err(
+                if let Some(name) = source.source.strip_prefix("embedding:") {
+                    Error::EmbeddingConsentRequired {
+                        name: name.to_string(),
+                        permissions: source.permissions.clone(),
+                        digest: source.digest.clone(),
+                    }
+                } else {
+                    Error::SourceConsentRequired {
+                        name: source.source.clone(),
+                        permissions: source.permissions.clone(),
+                        digest: source.digest.clone(),
+                    }
+                },
+            );
         }
     }
     Ok(given)

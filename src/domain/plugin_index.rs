@@ -219,8 +219,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_catalogue_can_list_a_source_and_integration_with_one_id_but_not_two_of_a_kind() {
-        let index = r#"{"format":1,"name":"test","plugins":[{"id":"acme","description":"test","repository":"acme/acme","modules":[{"id":"alpha","type":"source"},{"id":"alpha","type":"integration"}]}]}"#;
+    fn a_catalogue_discovers_all_three_independent_module_kinds_under_one_plugin() {
+        let index = r#"{"format":1,"name":"test","plugins":[{"id":"acme","description":"test","repository":"acme/acme","modules":[{"id":"alpha","type":"source"},{"id":"alpha","type":"integration"},{"id":"alpha","type":"embedding_provider"}]}]}"#;
         let mut parsed = PluginIndex::parse(index).unwrap();
         let inventory = parsed.plugins[0].modules.clone();
         parsed.plugins[0].versions.push(IndexedPluginVersion {
@@ -232,6 +232,10 @@ mod tests {
             yanked: false,
         });
         parsed.validate().unwrap();
+        assert_eq!(
+            parsed.plugins[0].modules[2].kind,
+            PluginModuleKind::EmbeddingProvider
+        );
         let duplicate = parsed.plugins[0].modules[0].clone();
         parsed.plugins[0].modules.push(duplicate);
         assert!(parsed.validate().unwrap_err().contains("duplicated module"));

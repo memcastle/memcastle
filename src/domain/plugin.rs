@@ -80,7 +80,7 @@ pub struct PluginAuthentication {
     pub credential: String,
 }
 
-/// Which contract a module implements; embedding execution is provided by #256.
+/// Which independently selectable contract a module implements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginModuleKind {
@@ -88,7 +88,7 @@ pub enum PluginModuleKind {
     Source,
     /// Existing agent integration contract.
     Integration,
-    /// Reserved for the separate embedding provider runtime.
+    /// Versioned Wasm embedding-provider contract.
     EmbeddingProvider,
 }
 
@@ -109,7 +109,7 @@ pub struct PluginModule {
     /// SHA-256 of the module-specific manifest, populated from manifest.toml when unpacked.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub manifest_sha256: String,
-    /// Path to the WASM component for a source, or an integration directory's entry file.
+    /// Path to the WASM component for a source or embedding provider, or an integration entry file.
     pub entry: String,
     /// SHA-256 of the entry file, populated from manifest.toml when unpacked.
     #[serde(default, skip_serializing_if = "String::is_empty")]

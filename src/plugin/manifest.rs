@@ -172,7 +172,7 @@ fn validate_fields(manifest: &PluginManifest, require_release_fields: bool) -> R
         let typed = match module.kind {
             PluginModuleKind::Source => format!("sources/{}/", module.id),
             PluginModuleKind::Integration => format!("integrations/{}/", module.id),
-            PluginModuleKind::EmbeddingProvider => legacy.clone(),
+            PluginModuleKind::EmbeddingProvider => format!("embeddings/{}/", module.id),
         };
         // The descriptor chooses one root per module; old archives retain modules/<id>.
         let prefix = if module.manifest.starts_with(&typed) {
@@ -223,6 +223,17 @@ fn validate_fields(manifest: &PluginManifest, require_release_fields: bool) -> R
                 return Err(invalid(format!(
                     "integration module `{}` must declare its integration manifest",
                     module.id
+                )));
+            }
+            PluginModuleKind::EmbeddingProvider
+                if !module.manifest.ends_with("/memcastle-embedding.toml")
+                    || !module.entry.ends_with("/embedding.wasm")
+                    || module.contract.as_deref() != Some(crate::plugin::embedding::CONTRACT) =>
+            {
+                return Err(invalid(format!(
+                    "embedding module `{}` needs memcastle-embedding.toml, embedding.wasm and contract {}",
+                    module.id,
+                    crate::plugin::embedding::CONTRACT
                 )));
             }
             _ => {}
