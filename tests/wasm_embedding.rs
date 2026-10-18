@@ -273,7 +273,7 @@ async fn an_installed_module_becomes_selectable_without_replacing_other_profiles
         },
     };
     embeddings
-        .load_plugins(&config, &[record.clone()], root.path())
+        .load_plugins(&config, std::slice::from_ref(&record), root.path())
         .unwrap();
     let selected = embeddings.select(None).unwrap();
     assert_eq!(
