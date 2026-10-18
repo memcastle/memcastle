@@ -1,5 +1,7 @@
 //! Per-space vectors, separate from immutable drawer and graph records.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 use crate::domain::{Drawer, DrawerId, EmbeddingSpace, SourceId};
@@ -26,6 +28,13 @@ struct Slot {
 
 #[derive(Deserialize)]
 struct ExistingEmbedding {
+    content_hash: String,
+    input_hash: String,
+}
+
+#[derive(Deserialize)]
+struct PageEmbedding {
+    drawer: String,
     content_hash: String,
     input_hash: String,
 }
@@ -96,6 +105,25 @@ impl SurrealStore {
             .into_iter()
             .next()
             .map(|row| (row.content_hash, row.input_hash)))
+    }
+
+    /// Read only the hashes for one bounded drawer page and exactly one space in a single query.
+    pub async fn embedding_hashes_for_page(
+        &self,
+        drawers: &[Drawer],
+        space: &str,
+    ) -> Result<HashMap<String, (String, String)>> {
+        if drawers.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let ids: Vec<String> = drawers.iter().map(|drawer| drawer.id.to_string()).collect();
+        let mut response = self.db.query("SELECT drawer, content_hash, input_hash FROM drawer_embedding WHERE space = $space AND drawer IN $ids")
+            .bind(("space", space.to_string())).bind(("ids", ids)).await?;
+        let rows: Vec<PageEmbedding> = super::take_rows(&mut response, 0)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.drawer, (row.content_hash, row.input_hash)))
+            .collect())
     }
 
     /// A bounded page in stable id order. Restarting at the first page is safe: writes are idempotent.

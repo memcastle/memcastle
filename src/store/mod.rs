@@ -608,6 +608,19 @@ mod tests {
             .set_drawer_embedding(drawer.id, &vector)
             .await
             .unwrap();
+        let entity = store
+            .get_or_create_entity("Castle", "project", serde_json::json!({}))
+            .await
+            .unwrap();
+        store
+            .link_drawer_entity(drawer.id, entity.id)
+            .await
+            .unwrap();
+        let replacement = test_drawer(room.id, "corrected content after the old belief");
+        store
+            .supersede_drawer(drawer.id, Some(&replacement), chrono::Utc::now())
+            .await
+            .unwrap();
         let indexes = |schema: surrealkit::typegen::SchemaTypes| {
             schema
                 .tables
@@ -639,7 +652,51 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .embedding,
-            Some(vector)
+            Some(vector.clone())
+        );
+        let history = store.drawer_lineage(replacement.id).await.unwrap().unwrap();
+        assert_eq!(
+            history.iter().map(|drawer| drawer.id).collect::<Vec<_>>(),
+            [drawer.id, replacement.id]
+        );
+        assert_eq!(history[0].content, drawer.content);
+        assert_eq!(history[1].content, replacement.content);
+        assert_eq!(
+            store.list_drawer_entities(drawer.id).await.unwrap(),
+            ["Castle"]
+        );
+        assert_eq!(
+            store.list_entity_mentions(entity.id).await.unwrap().len(),
+            1
+        );
+        assert!(
+            store
+                .get_drawer(replacement.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .embedding
+                .is_none()
+        );
+        let profile = crate::domain::EmbeddingSpace::new(
+            "recovered".into(),
+            "external".into(),
+            "external".into(),
+            "connection".into(),
+            "known-model".into(),
+            768,
+        );
+        let historical = crate::domain::SearchFilter {
+            temporal: crate::domain::Temporal::All,
+            ..Default::default()
+        };
+        assert!(
+            store
+                .search_vector_space(&vector, 10, &historical, &profile.fingerprint)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a legacy vector is retained for recovery, never claimed as the new profile's model"
         );
         crate::migrate::run(&store)
             .await

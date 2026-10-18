@@ -264,6 +264,30 @@ async fn caller_supplied_vectors_work_against_a_daemon_with_no_provider() {
     let drawer = write(base, "w", "r", "vectors supplied by the client").await;
     let id = drawer["id"].as_str().expect("drawer id");
 
+    // Old clients that omit a profile must get an actionable refusal, not contaminate an unknown space.
+    let unqualified = client()
+        .put(format!("{base}/api/drawers/{id}/embedding"))
+        .json(&json!({ "embedding": embed("client side model") }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unqualified.status().as_u16(), 400);
+    let error: Value = unqualified.json().await.unwrap();
+    assert!(
+        error["error"].as_str().unwrap().contains("profile"),
+        "{error}"
+    );
+    let unqualified = client()
+        .post(format!("{base}/api/search"))
+        .json(&json!({ "text": "anything", "ranking": "semantic", "query_embedding": embed("client side model") }))
+        .send().await.unwrap();
+    assert_eq!(unqualified.status().as_u16(), 400);
+    let error: Value = unqualified.json().await.unwrap();
+    assert!(
+        error["error"].as_str().unwrap().contains("profile"),
+        "{error}"
+    );
+
     let put = client()
         .put(format!("{base}/api/drawers/{id}/embedding"))
         .json(&json!({ "embedding": embed("client side model"), "profile": "client" }))

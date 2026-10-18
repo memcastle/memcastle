@@ -81,14 +81,19 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: EmbedParams) -> Result
         if drawers.is_empty() {
             break;
         }
+        let hashes = if refresh == EmbeddingRefresh::All {
+            Default::default()
+        } else {
+            store
+                .embedding_hashes_for_page(&drawers, &pinned.fingerprint)
+                .await?
+        };
         let mut selected = Vec::new();
         for drawer in &drawers {
-            let hashes = store
-                .embedding_hashes(drawer.id, &pinned.fingerprint)
-                .await?;
+            let existing = hashes.get(&drawer.id.to_string());
             let needed = match refresh {
-                EmbeddingRefresh::Missing => hashes.is_none(),
-                EmbeddingRefresh::Stale => hashes.as_ref().is_none_or(|(content, input)| {
+                EmbeddingRefresh::Missing => existing.is_none(),
+                EmbeddingRefresh::Stale => existing.is_none_or(|(content, input)| {
                     content != &drawer.content_hash
                         || input != &EmbeddingSpace::input_hash(&drawer.content)
                 }),
@@ -399,6 +404,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn page_hash_lookup_ignores_other_spaces_and_reports_only_stored_inputs() {
+        let (store, drawers) = seeded(&["one", "two", "three"]).await;
+        let selected = params(None).space.unwrap();
+        let other = EmbeddingSpace::new(
+            "other".into(),
+            "other".into(),
+            "external".into(),
+            "elsewhere".into(),
+            "other-model".into(),
+            768,
+        );
+        for (drawer, space) in [(&drawers[0], &selected), (&drawers[1], &other)] {
+            store
+                .set_profile_embedding(
+                    drawer,
+                    space,
+                    &EmbeddingSpace::input_hash(&drawer.content),
+                    &fake::vector_for(&drawer.content),
+                )
+                .await
+                .unwrap();
+        }
+        let hashes = store
+            .embedding_hashes_for_page(&drawers, &selected.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(
+            hashes[&drawers[0].id.to_string()],
+            (
+                drawers[0].content_hash.clone(),
+                EmbeddingSpace::input_hash(&drawers[0].content)
+            )
+        );
+        assert!(
+            store
+                .embedding_hashes_for_page(&[], &selected.fingerprint)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn indexed_and_exact_profile_search_apply_wing_scope_before_the_result_limit() {
         let (store, drawers) = seeded(&["gate"]).await;
         let other = store.get_or_create_wing("other", None).await.unwrap();
@@ -601,6 +650,90 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn supersession_never_uses_the_old_vectors_for_the_new_current_content() {
+        let (store, drawers) = seeded(&["original"]).await;
+        let old = &drawers[0];
+        let space = params(None).space.unwrap();
+        store
+            .set_profile_embedding(
+                old,
+                &space,
+                &EmbeddingSpace::input_hash(&old.content),
+                &fake::vector_for(&old.content),
+            )
+            .await
+            .unwrap();
+        let replacement = Drawer::new(
+            DrawerId::new(),
+            old.room,
+            "replacement".into(),
+            Source::new(SourceKind::Manual, None, None),
+            vec![],
+            Provenance {
+                requested_by: "test".into(),
+                job_id: None,
+            },
+        );
+        store
+            .supersede_drawer(old.id, Some(&replacement), chrono::Utc::now())
+            .await
+            .unwrap();
+        let query = fake::vector_for(&old.content);
+        let current = crate::domain::SearchFilter::default();
+        assert!(
+            store
+                .search_vector_space(&query, 10, &current, &space.fingerprint)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let hybrid = store
+            .search_hybrid_space("replacement", &query, 10, &current, &space.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(hybrid[0].drawer.id, replacement.id);
+        assert!(
+            hybrid[0].signals.semantic.is_none(),
+            "the old vector must not contribute to a current replacement"
+        );
+        let historical = crate::domain::SearchFilter {
+            temporal: crate::domain::Temporal::All,
+            ..Default::default()
+        };
+        let old_hits = store
+            .search_vector_space(&query, 10, &historical, &space.fingerprint)
+            .await
+            .unwrap();
+        assert_eq!(
+            old_hits[0].drawer.id, old.id,
+            "historical vector stays tied to its immutable content"
+        );
+        store
+            .set_profile_embedding(
+                &replacement,
+                &space,
+                &EmbeddingSpace::input_hash(&replacement.content),
+                &fake::vector_for(&replacement.content),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .search_vector_space(
+                    &fake::vector_for(&replacement.content),
+                    10,
+                    &current,
+                    &space.fingerprint
+                )
+                .await
+                .unwrap()[0]
+                .drawer
+                .id,
+            replacement.id
         );
     }
 

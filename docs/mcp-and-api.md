@@ -412,6 +412,8 @@ A hit never carries the embedding vector.
 `POST /api/search` takes the request as JSON, so it can carry a `query_embedding`.
 Set `profile` to select one compatible embedding space, in either JSON or the GET query string.
 Caller-supplied vectors require an explicit configured profile, including when the connection is `external`.
+Older callers that omit `profile` now receive `400 memcastle::input::invalid` instead of writing vectors of unknown
+provenance; configure an `external` profile with their model and dimensions, then send its name on both requests.
 Its text is `text` (or `query`, like everywhere else), and the scope is a nested `filter` rather than the flat
 `wing`, `room` and `tags` of the `GET` form:
 

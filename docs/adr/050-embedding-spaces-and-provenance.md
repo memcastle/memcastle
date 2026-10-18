@@ -26,6 +26,10 @@ SurrealKit's version-4 destructive rollout retires the old HNSW index while keep
 The `embedding-quarantine` data-migration watermark records that transition; re-embedding is a separately requested,
 resumable job and never happens during database migration.
 Canonical content, graph links and temporal validity do not depend on derived vectors.
+Supported writes never edit a drawer's content in place: a correction closes the old drawer and files a new one.
+Its existing vector stays with the old drawer for historical searches, while current semantic search ignores it until
+the replacement has its own embedding; a concurrent embedding write also checks the content hash before storing.
+Direct database-admin edits to canonical content bypass this contract and require a deliberate refresh/recovery.
 
 SurrealDB HNSW indexes have fixed dimensions and an index cannot contain two incompatible spaces merely because they
 have the same dimension.
@@ -34,7 +38,20 @@ drawer scope inside the database before ranking or limiting.
 Schema-declared 768/1536/3072 projection tables provide dedicated index tiers; a tier can only be assigned to one
 immutable space at a time.
 Other spaces of the same dimension use exact ranking instead of sharing its HNSW index.
+Each tier has **one slot for the lifetime of the palace**: the first embedding written at that dimension claims it,
+even if its profile is later disabled or removed.
+There is no automatic promotion of another profile into the slot, and exact ranking scans the matching space's
+vectors, so its cost grows with that profile's corpus size.
+An operator who needs a particular profile indexed must choose it before the first embedding at that dimension;
+multiple large profiles of one dimension may warrant additional bounded, schema-declared slots in a later decision.
 No vector from a provenance-free drawer is eligible for any profile-aware semantic result.
+
+The configured model identifier is part of the fingerprint, but Core cannot observe a provider silently changing the
+weights behind an unchanged alias at the same endpoint.
+Prefer a provider's immutable version or digest as the configured model identifier when it accepts one.
+If the provider exposes only a mutable alias, pin its revision in the provider's own deployment and deliberately change
+the profile/model setting (then re-embed) when that alias is repointed; otherwise provenance records the requested
+identifier, not an independently verified model revision.
 
 ## Alternatives rejected
 

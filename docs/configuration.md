@@ -435,6 +435,11 @@ Changing any of those settings creates a new space, rather than silently reusing
 The first space to claim a schema-declared 768-, 1536- or 3072-dimensional HNSW tier owns that tier permanently;
 other spaces, including models with the same dimensions, use slower exact profile-filtered ranking.
 Other positive dimensions also use exact ranking, so a model change never needs runtime schema DDL.
+The indexed tier cannot be reassigned by disabling a profile; choose the profile to index before the first embedding
+at that dimension (usually by setting it as the default), or plan for exact searches that grow with its corpus size.
+Use a versioned, immutable model identifier when the provider offers one.
+If an endpoint silently changes the model behind the *same* alias, MemCastle cannot detect that from configuration:
+pin the revision at the provider, or change the configured model/profile deliberately and re-embed.
 
 ### Named connections and profiles
 
