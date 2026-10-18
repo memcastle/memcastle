@@ -17,7 +17,7 @@ export function createAppRouter(session: Session): Router {
       { path: "/graph", name: "graph", component: () => import("./views/GraphView.vue"), meta: { title: "Graph", icon: "graph" } },
       { path: "/diary", name: "diary", component: () => import("./views/DiaryView.vue"), meta: { title: "Diary", icon: "book" } },
       { path: "/jobs", name: "jobs", component: () => import("./views/JobsView.vue"), meta: { title: "Jobs", icon: "list" } },
-      { path: "/launch", name: "launch", component: () => import("./views/LaunchView.vue"), meta: { title: "Launch", icon: "play" } },
+      { path: "/launch", redirect: { name: "jobs", query: { launch: "1" } } },
       { path: "/miners", name: "miners", component: () => import("./views/MinersView.vue"), meta: { title: "Miners", icon: "clock" } },
       { path: "/triggers", name: "triggers", component: () => import("./views/TriggersView.vue"), meta: { title: "Triggers", icon: "clock" } },
       { path: "/maintenance", name: "maintenance", component: () => import("./views/MaintenanceView.vue"), meta: { title: "Maintenance", icon: "wrench" } },

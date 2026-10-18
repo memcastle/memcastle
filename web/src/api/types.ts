@@ -310,7 +310,7 @@ export type JobRequest =
   | { type: "mine"; source: string; locator?: string; options?: MineOptions; wing?: string; full?: boolean }
   | { type: "audit"; wing?: string }
   | { type: "repair"; dry_run: boolean; based_on_job?: string }
-  | { type: "embed"; wing?: string }
+  | { type: "embed"; wing?: string; profile?: string; refresh?: "missing" | "stale" | "all" }
   | { type: "extract"; wing?: string }
 
 /** What a run of a source is asked beyond where to read (`since`, `dir`): strings, which the source parses. */
