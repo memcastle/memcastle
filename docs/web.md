@@ -38,6 +38,17 @@ The REST API and MCP are unaffected.
 | Maintenance | Run an audit or a repair (a dry run first), and see the last report of each. |
 | Settings | The configuration in effect, from `GET /api/config`: no secret, and nothing read from the files. |
 
+The app fills the available window width; reading surfaces such as dialogs keep their own sensible widths.
+On narrow screens the sidebar and split views stack,
+while wide tables scroll within their own region rather than widening the page.
+
+Job progress appears on active and finished jobs, in their details and beside Maintenance's latest audit and repair.
+When the daemon reports a meaningful total, the bar and its accessible text show the percentage and exact `current / total` count;
+hover or focus the indicator for the same detail, and the count remains visible without hover.
+When no meaningful total is known, a running job has an indeterminate bar and a count marked "total unknown";
+other job states keep that count without an animated bar.
+Progress messages remain visible, and no percentage is estimated for unknown totals.
+
 The dashboard does not poll, and it updates by itself.
 The daemon pushes small "something changed" notices over [`GET /api/events`](mcp-and-api.md#the-event-stream),
 and the Overview, Palace, Jobs, Triggers and Maintenance pages read again, quietly, a moment after a change they show:
