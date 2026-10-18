@@ -245,7 +245,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/source-packages/{name}/auth/{flow}/wait` | Wait, up to `timeout` seconds, for the sign-in `flow` to finish: `{"status": "pending"}` until it does, then `{"status": "signed_in", source, signed_in, expires_at, scopes, stored_in}`. A sign-in that was declined or expired is an error answer. | query string: `timeout` (seconds, at most 30) |
 | `GET /api/source-registry/search` | Search the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
 | `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{name, version, description, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
-| `POST /api/source-registry/install` | Install a source by name from a registry. Answers `{source, replaced}`; a name the release ships is refused (`memcastle::source::bundled`). | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
+| `POST /api/source-registry/install` | Install a source by name from a registry. Answers `{source, replaced}`; a name the release ships is refused (`memcastle::source::bundled`). A reviewed archive is refused if its digest changes between preview and install. | JSON body: `name`, `version?`, `registry?`, `archive_digest?` (from preview), `consent?`, `enable?` |
 | `GET /api/source-registry/updates` | The installed sources that have a newer version: `{updates, warnings}`. | none |
 | `POST /api/source-registry/update` | Update one source, or every source with an update. Answers a list of `{name, from, to, status}`, where `status` is `updated`, `current`, `needs_consent` (with `permissions` and `digest`) or `failed` (with `message`). | JSON body: `name?`, `consent?` |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
@@ -700,13 +700,15 @@ Each entry of `adapters` lists them as `options: [{name, description, type, brea
 ```json
 {
   "adapters": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
-                 "origin": "package", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
+                 "origin": "plugin", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
   "sources": [{"id": "...", "source": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
                "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
 }
 ```
 
-An adapter's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
+An adapter's `origin` is `builtin`, `package` (installed from a local archive or project), `bundled` (shipped with Core),
+`registry` (installed from a source registry), or `plugin` (provided by an installed plugin).
+An installed one also has a `version`, and a `state` of `installed`,
 `enabled`, `disabled` or `unavailable` (with an `unavailable_reason`).
 It is a read, so a `disabled` session is refused, and it is guarded like every route but the health check.
 There is no MCP tool for it, and none for credentials or for installing sources.

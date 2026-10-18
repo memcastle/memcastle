@@ -71,7 +71,7 @@ A skill you copied under the same name as one of the integration's is the one th
    The repository at a release tag holds the skills written for that release:
 
    ```sh
-   git clone --branch 0.2.0 --depth 1 https://github.com/memcastle/memcastle
+   git clone --branch "$(memcastle --version | cut -d ' ' -f 2)" --depth 1 https://github.com/memcastle/memcastle
    ```
 
    Use the tag matching `memcastle --version`.

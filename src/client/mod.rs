@@ -525,7 +525,8 @@ impl DaemonClient {
     ) -> Result<crate::app::PluginSearch> {
         let mut request = self
             .http
-            .get(format!("{}/api/plugin-registry/search", self.base_url));
+            .get(format!("{}/api/plugin-registry/search", self.base_url))
+            .timeout(REGISTRY_TIMEOUT);
         if let Some(query) = query {
             request = request.query(&[("q", query)]);
         }
@@ -544,7 +545,8 @@ impl DaemonClient {
     ) -> Result<crate::app::PluginRegistryPreview> {
         let mut request = self
             .http
-            .get(self.api_url(&["plugin-registry", "plugins", id], None)?);
+            .get(self.api_url(&["plugin-registry", "plugins", id], None)?)
+            .timeout(REGISTRY_TIMEOUT);
         if let Some(version) = version {
             request = request.query(&[("version", version)]);
         }
@@ -604,6 +606,7 @@ impl DaemonClient {
         self.send(
             self.http
                 .post(format!("{}/api/plugin-registry/install", self.base_url))
+                .timeout(REGISTRY_TIMEOUT)
                 .json(
                     &serde_json::json!({ "id": id, "version": version, "registry": registry,
                 "archive_digest": archive_digest, "consents": consents, "adopt_sources": adopt_sources }),

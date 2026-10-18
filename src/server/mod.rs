@@ -189,7 +189,9 @@ pub async fn run(config: Config) -> Result<()> {
     app.recover_plugin_pointers().await?;
     if config.auth.enabled {
         info!(
-            "authentication is enabled: every route except GET /api/health requires a bearer token"
+            web_enabled = config.web.enable,
+            "authentication is enabled: every route except GET /api/health requires a bearer token; when web_enabled, \
+             GET and HEAD under /ui are public static files"
         );
     } else if !config.server.bind.is_loopback() {
         // Not an error (the operator may front the daemon with something else)
@@ -203,6 +205,23 @@ pub async fn run(config: Config) -> Result<()> {
     }
     // Deliveries accepted before a crash but never queued are queued now, for the triggers that are still enabled.
     app.recover_triggers().await;
+    // A fast restart leaves fresh deliveries inside the grace window; revisit them once they are old enough or a
+    // sender's retry would remain a duplicate without ever having requested a run.
+    let recovery_app = app.clone();
+    let recovery_shutdown = shutdown.child_token();
+    let recovery_handle = tokio::spawn(async move {
+        tokio::select! {
+            biased;
+            () = recovery_shutdown.cancelled() => {},
+            () = tokio::time::sleep(Duration::from_secs(
+                crate::app::RECOVERY_GRACE_SECONDS as u64 + 1,
+            )) => {
+                if !recovery_shutdown.is_cancelled() {
+                    recovery_app.recover_triggers().await;
+                }
+            }
+        }
+    });
     // Stopped first on the way down (below), so nothing new is asked for while the jobs drain.
     let trigger_handle = tokio::spawn(
         crate::trigger::Supervisor::new(app.trigger_host(), trigger_runtime)
@@ -302,6 +321,7 @@ pub async fn run(config: Config) -> Result<()> {
     services.stop_db_endpoint().await;
     // Before the jobs drain: a trigger that is still asking for runs would only queue work the daemon is about to leave.
     let _ = trigger_handle.await;
+    let _ = recovery_handle.await;
 
     // The dispatch loop exits on the same `shutdown` token and then drains
     // in-flight jobs (`Scheduler::drain`); wait for it rather than aborting,

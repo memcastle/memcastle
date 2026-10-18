@@ -36,7 +36,7 @@ use crate::trigger::{self, Desired, FireRequest, ListenerSettings, Note, Runtime
 const DELIVERY_RETENTION_DAYS: i64 = 7;
 /// How long a delivery may sit accepted but not queued before recovery queues it: longer than any request takes, so
 /// recovery never races a delivery that is being handled right now.
-const RECOVERY_GRACE_SECONDS: i64 = 30;
+pub(crate) const RECOVERY_GRACE_SECONDS: i64 = 30;
 
 /// Where the triggers are, and the last good copy of them.
 ///
@@ -555,12 +555,19 @@ impl AppServices {
         self.fire_inner(name, None, None).await
     }
 
-    /// Queue the deliveries a crash left accepted but not queued. Called once at startup, after the scheduler recovered.
+    /// Queue the deliveries a crash left accepted but not queued, after the scheduler recovered.
     ///
     /// Idempotent and safe to repeat: the mining pipeline skips what has not changed, so a delivery that did reach a
     /// job before the crash costs a pass, not a duplicate. A trigger that is disabled now is *not* run (a restart never
     /// overrides the user's choice), and its pending deliveries are dropped.
     pub async fn recover_triggers(&self) {
+        self.recover_triggers_before(
+            Utc::now() - chrono::Duration::seconds(RECOVERY_GRACE_SECONDS),
+        )
+        .await;
+    }
+
+    async fn recover_triggers_before(&self, cutoff: DateTime<Utc>) {
         let pending = match self.store.list_unqueued_trigger_deliveries().await {
             Ok(pending) => pending,
             Err(error) => {
@@ -568,7 +575,6 @@ impl AppServices {
                 return;
             }
         };
-        let cutoff = Utc::now() - chrono::Duration::seconds(RECOVERY_GRACE_SECONDS);
         for delivery in pending.into_iter().filter(|d| d.received_at <= cutoff) {
             let _guard = self.triggers.fire_lock.lock().await;
             let enabled = {
@@ -1449,6 +1455,56 @@ mod tests {
         );
         app.recover_triggers().await;
         assert_eq!(queued_mines(&app).await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_fresh_delivery_is_recovered_after_the_grace_without_running_a_disabled_trigger() {
+        let (app, _dir) = app_with_a_miner().await;
+        app.set_trigger("kept", poll_patch(true))
+            .await
+            .expect("enabled");
+        app.set_trigger("off", poll_patch(false))
+            .await
+            .expect("disabled");
+        let received_at = Utc::now();
+        for trigger in ["kept", "off"] {
+            app.store
+                .create_trigger_delivery_once(&TriggerDelivery {
+                    trigger: trigger.to_string(),
+                    key: "fresh".to_string(),
+                    received_at,
+                    job: None,
+                })
+                .await
+                .expect("record delivery");
+        }
+        app.recover_triggers_before(received_at - chrono::Duration::seconds(1))
+            .await;
+        assert_eq!(queued_mines(&app).await, 0);
+
+        app.recover_triggers_before(received_at).await;
+        app.recover_triggers_before(received_at).await;
+        assert_eq!(
+            queued_mines(&app).await,
+            1,
+            "a second pass must not queue a second run"
+        );
+        assert!(
+            app.store
+                .get_trigger_delivery("kept", "fresh")
+                .await
+                .unwrap()
+                .unwrap()
+                .job
+                .is_some()
+        );
+        assert!(
+            app.store
+                .get_trigger_delivery("off", "fresh")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

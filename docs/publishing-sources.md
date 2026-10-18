@@ -171,11 +171,15 @@ The daemon does the fetching, so `mining.registries` and the trust settings are 
 `--registry <LOCATION>` consults one place only for a single command.
 Before anything is installed the daemon has downloaded and verified the package, and the CLI shows what that package
 asks for: you agree to the permissions of what was actually fetched.
+The CLI sends the previewed archive digest with the install request; if the registry serves a different archive before
+installation, the daemon refuses it and asks you to preview again.
 `source show` afterwards says where it came from, which registry and, when there is one, which key vouched for it.
 
 **Updating** installs the newest version from the index a registry source was installed from.
 A source you installed from a file has no upstream and is left alone, and a bundled source is updated with MemCastle:
-`update` leaves it out, and `update github` says so (`memcastle::source::bundled`).
+`source update` leaves it out, and naming a bundled source returns `memcastle::source::bundled`.
+A plugin-owned source such as `github` is updated through its provider plugin (`memcastle plugin update ID`), not through
+`source update github`.
 An update keeps the source's state.
 The consent you gave is to a set of permissions, not to a version, so an update that asks for the same permissions needs
 no new agreement, and one that asks for anything else is not installed until you agree to exactly those: the command says

@@ -44,7 +44,7 @@ The `mcp` line is the URL to give your agent, see [Connect an MCP client](mcp-cl
 
 ## 3. Give it something to remember
 
-Mining reads a directory into the palace, one memory per file.
+Mining reads a directory into the palace, one document per file, stored in one or more drawers depending on its length.
 It runs as a background job, so the command returns immediately:
 
 ```sh

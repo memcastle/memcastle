@@ -52,11 +52,13 @@ flowchart TB
 
 | Integration | Agent | Agent versions | MemCastle versions | Guide |
 |---|---|---|---|---|
-| `pi` (external plugin) | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.4 and later | [Pi](integrations-pi.md) |
-| `opencode` (external plugin) | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.4 and later | [OpenCode](integrations-opencode.md) |
-| `claude-code` (external plugin) | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.4 and later | [Claude Code](integrations-claude-code.md) |
-| `codex` (external plugin) | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | 0.4 and later | [Codex](integrations-codex.md) |
+| `pi` (external plugin) | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | Plugin-capable Core (0.5 or current prerelease) | [Pi](integrations-pi.md) |
+| `opencode` (external plugin) | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | Plugin-capable Core (0.5 or current prerelease) | [OpenCode](integrations-opencode.md) |
+| `claude-code` (external plugin) | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | Plugin-capable Core (0.5 or current prerelease) | [Claude Code](integrations-claude-code.md) |
+| `codex` (external plugin) | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | Plugin-capable Core (0.5 or current prerelease) | [Codex](integrations-codex.md) |
 
+The integration protocol supports 0.4 and later, but the installation steps below require a Core build with
+`plugin install` (for example, 0.5 or the current prerelease); stable 0.4.1 cannot install provider plugins.
 `memcastle integration list` shows installed plugin integrations alongside those Core ships, with their own version ranges.
 
 ## Requirements

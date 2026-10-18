@@ -18,6 +18,8 @@ mod source_packages;
 mod source_registry;
 mod triggers;
 
+pub(crate) use triggers::RECOVERY_GRACE_SECONDS;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

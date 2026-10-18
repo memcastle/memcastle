@@ -78,11 +78,12 @@ Nothing in `domain` knows SurrealDB exists, and nothing in `cli`, `mcp` or `api`
 The dotted line is the important one: the CLI is an HTTP client of the daemon, exactly as a script or dashboard would be.
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, the local `completions`, the local
-`source init`/`build`/`test`/`package`/`index`/`keygen` and the local `integration list`/`install`/`update`/`remove`
-is a thin `client::DaemonClient` call
+Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, offline `doctor`, local `completions`,
+local `source init`/`build`/`test`/`package`/`index`/`keygen`, local `plugin inspect`/`package`/`sign`/`test`, and
+local `integration list`/`install`/`update`/`remove` is a thin `client::DaemonClient` call
 (`note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon) —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
+`doctor` checks local prerequisites and uses the daemon client for runtime state when one is available.
 `daemon stop` is one of them: it only asks the daemon to shut down.
 `daemon start` and `daemon restart` add only process management:
 they read the daemon's registry file (`server::lifecycle`) to know when the old daemon is really gone,
@@ -601,8 +602,8 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
-- **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle, the agent integrations
-  and the skills they read, and the web UI.
+- **Installed** by a package manager under `share/memcastle`: shared skills and the web UI.
+  Core's sources and integrations directories are empty; provider plugins supply their own sources and agent integrations.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
@@ -656,7 +657,8 @@ and every MCP tool call is traced at `debug` (a failed one at `warn`).
 
 **One authentication layer.**
 When authentication is enabled, a single middleware on the merged router checks the bearer token before any REST
-handler or the MCP service sees the request, and only `GET /api/health` is exempt.
+handler or the MCP service sees the request.
+`GET /api/health` is exempt, as are `GET` and `HEAD` for static files under `/ui` when `web.enable` is set.
 It calls `AppServices::authenticate`, which checks a configured secret and the stored verifier in constant time.
 Generating and revoking a token are REST and CLI operations over `AppServices`, and MCP has no tool for either.
 The trace layer logs no headers, so the `Authorization` header never reaches the log.
@@ -670,7 +672,7 @@ it has no scheduler for an integration's timers and no session of its own beyond
 See the [Integration contract](integration-contract.md) and [ADR-019](adr/019-shared-integration-contract.md).
 
 **Installing an integration is local tooling, not a daemon operation.**
-`memcastle integration` finds an integration under the assets root, checks it against the running MemCastle and the
+`memcastle integration` finds an integration under the assets root, checks it against the local MemCastle version and the
 agent's version, copies it to the user's data directory, and registers it through the agent's own mechanism:
 `pi install` for Pi, one marked plugin file for OpenCode.
 It lives in `crate::integration`, which like `crate::source` touches neither the store nor the jobs and opens no network,
@@ -794,8 +796,9 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Handing a static credential (an environment variable or a file) to a source: the model stores a credential
   *reference* and never a secret, and the source contract takes no static credential yet.
   What exists is an OAuth sign-in a source can declare, which the daemon runs, keeps and renews, and hands over as an
-  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); the shipped `chatgpt` source uses it in
-  [experimental web mode](mining-sources.md#chatgpt), while importing an export needs no sign-in.
+  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); the separately installed `memcastle-openai`
+  plugin's `chatgpt` source uses it in [experimental web mode](mining-sources.md#chatgpt), while importing an export
+  needs no sign-in.
 - Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
   contract allows each, and neither is built.
 - A registry server and a search across registries beyond their names and descriptions: the official registry is a static
