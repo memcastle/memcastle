@@ -14,4 +14,5 @@ Layout: `src/api` is the typed client (the only place that calls `fetch`), `src/
 `src/views` one page per route, `dev/` the dev server's way of finding the daemon, `test/` the unit tests and `test/daemon`
 the tests against a real `memcastle serve`.
 
-It must reach MemCastle only over HTTP: no database, store or job code (the `web-http-only` hook).
+It must reach MemCastle only over HTTP: no database, store or job code (the `architecture` hook checks supported
+source files).

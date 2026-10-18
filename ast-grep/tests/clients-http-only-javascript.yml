@@ -1,0 +1,9 @@
+id: clients-http-only-javascript
+valid:
+  - 'fetch("/api/status")'
+  - '// fetch("/api/db")'
+invalid:
+  - 'const db = require("surrealdb")'
+  - 'const client = new SurrealStore()'
+  - 'fetch("/api/db")'
+  - 'const View = () => <a href="/api/db">admin</a>'

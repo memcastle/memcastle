@@ -1,0 +1,15 @@
+id: store-isolation-main
+valid:
+  - 'use memcastle::store::SurrealStore;'
+  - 'use memcastle::app::AppServices;'
+  - '// use crate::jobs::Scheduler;'
+invalid:
+  - 'use crate::store::SurrealStore;'
+  - 'use memcastle::store::Other;'
+  - 'use memcastle::store::SurrealStore as S;'
+  - |-
+    use memcastle::{
+      app::AppServices,
+      store::SurrealStore,
+    };
+  - 'let _ = memcastle::jobs::Scheduler;'

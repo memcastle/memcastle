@@ -29,9 +29,9 @@ tools. It must never:
   layer,
 - fork the memory model per ecosystem.
 
-The `integrations-http-only` hook enforces this: it fails on `surrealdb`,
-`surrealkv`, `SurrealStore`, a `store`/`jobs` path or `/api/db` anywhere under
-this directory (Markdown and `node_modules` excepted).
+The `architecture` hook's integration rules enforce this in supported source
+files: they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs`
+path or `/api/db` (Markdown and `node_modules` excepted).
 
 The one deliberate exception: **deciding what's worth remembering** (which
 words in a conversation become a checkpoint item, and which destination —

@@ -121,7 +121,8 @@ The tests are in `web/test/`: the client, the login, the route guard and the loa
 and `web/test/daemon` runs the same client and login against a real `memcastle serve`.
 The brand is `docs/images/icon.svg`, imported from there (alias `@brand`), so a new logo changes the documentation and the
 dashboard together.
-`web/` must stay a client of HTTP: the `web-http-only` hook fails on any path to the database, the store or the jobs.
+`web/` must stay a client of HTTP: the `architecture` hook checks supported source files for paths to the database,
+the store or the jobs.
 
 ## Troubleshooting
 

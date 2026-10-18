@@ -52,12 +52,14 @@ An invariant nothing checks is a comment, and it will be violated.
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
-   Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
+   Enforced by the `prek` `architecture` hook's `store-isolation` ast-grep rules: they inspect `main.rs`, `cli.rs`,
+   `client/`, `mcp/` and `api/`
    for any `crate::`/`memcastle::` `store` or `jobs` path, in code or in a string, allowing only `main.rs`'s `SurrealStore`
    import for `migrate`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
    Enforced by `domain::job`'s table-driven test over every (status, event) pair, including the rejected ones,
-   and by the prek `job-status-only-via-apply` hook, which fails on any `.status =` assignment outside `domain/job.rs`.
+   and by the prek `architecture` hook's `job-status-only-via-apply` rule, which fails on any `.status =` assignment
+   outside `domain/job.rs`.
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
    Enforced by `jobs::Scheduler::recover`, its per-state unit tests in `jobs::tests`,
@@ -67,13 +69,14 @@ An invariant nothing checks is a comment, and it will be violated.
    SurrealKV's file lock enforces the single writer for an embedded palace.
    A remote palace may be shared by several daemons; job leases and fencing keep that safe
    (see `docs/adr/006-job-leases.md`).
-   Enforced by the prek `single-writer` hook: `SurrealStore::connect` and the `surrealkv:` endpoint
+   Enforced by the prek `architecture` hook's `single-writer` rule: `SurrealStore::connect` and the `surrealkv:` endpoint
    may only appear under `server/`, `store/` and in `main.rs`.
 5. **Schema management is SurrealKit's, not MemCastle's** — `database/schema/*.surql` is applied through
    SurrealKit's `Sync`/`embed_schema!()` (`store::mod`), never a hand-rolled schema-diff/versioning engine.
    MemCastle owns only its own application data-migration steps and version watermark
    (`crate::migrate`, `store::migration_state`) — see `docs/adr/004-versioned-database-migrations.md`.
-   Enforced by the prek `no-hand-rolled-ddl` hook: no `DEFINE`/`REMOVE`/`ALTER` DDL or `INFO FOR` statement
+   Enforced by the prek `architecture` hook's `no-hand-rolled-ddl` rule: no `DEFINE`/`REMOVE`/`ALTER` DDL or `INFO FOR`
+   statement
    may appear in Rust code under `src/` (comments excepted).
 6. **Every route but `GET /api/health` passes the authentication layer, and MCP never touches credentials** —
    the layer wraps the merged router in `server::run`, so a route added later is guarded by default
@@ -108,8 +111,10 @@ An invariant nothing checks is a comment, and it will be violated.
    document unsupported lifecycle hooks and manual fallbacks
    (`docs/integration-contract.md`, `docs/adr/019-shared-integration-contract.md`).
    Client lifecycle logic does not move into MemCastle to make two clients look alike.
-   Enforced by the prek `integrations-http-only` hook: it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a
-   `store`/`jobs` path or `/api/db` anywhere under `integrations/` (Markdown and `node_modules` excepted),
+   Enforced by the prek `architecture` hook's `integrations-http-only-*` and shared `clients-http-only-*` rules: they
+   fail on `surrealdb`, `surrealkv`, `SurrealStore`, a
+   `store`/`jobs` path or `/api/db` in supported source files under `integrations/`
+   (Markdown and `node_modules` excepted),
    and by `tests/in_process/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon
    and fails when the contract page, the capability manifest and the test names disagree.
 
@@ -187,8 +192,10 @@ An invariant nothing checks is a comment, and it will be violated.
     Its login is the database console's (the user `memcastle`, the token as the password), checked by the same layer on
     every request; the token lives in `sessionStorage` and is never put in a URL, a cookie or a log
     (see `docs/adr/035-web-ui.md`).
-    Enforced by the `prek` `web-http-only` hook (it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs`
-    path or `/api/db` anywhere under `web/`, Markdown, `node_modules` and `dist` excepted),
+    Enforced by the `prek` `architecture` hook's `web-http-only-*` and shared `clients-http-only-*` rules
+    (they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs` path or `/api/db` in supported source files
+    under `web/`,
+    Markdown, `node_modules`, `dist` and `bun.lock` excepted),
     by `tests/in_process/web.rs` (off by default, no path leaves `web/dist`, the headers, a missing build is a 503 and
     never a failed start, `/api/config` carries no secret),
     by `tests/web_bundle.rs` (the package holds the build and nothing else, and a daemon serves it from an installed prefix

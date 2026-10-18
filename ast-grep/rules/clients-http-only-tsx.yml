@@ -1,0 +1,23 @@
+id: clients-http-only-tsx
+language: Tsx
+severity: error
+message: Web/integration TSX must use HTTP/MCP, never storage, jobs, or /api/db.
+files:
+  - web/**/*.tsx
+  - integrations/**/*.tsx
+ignores:
+  - web/node_modules/**
+  - web/dist/**
+  - integrations/node_modules/**
+rule:
+  any:
+    - kind: identifier
+      regex: '^(surrealdb|surrealkv|SurrealStore)$'
+    - kind: type_identifier
+      regex: '^SurrealStore$'
+    - kind: string
+      regex: 'surrealkv:|/api/db\b|^(?:"|''|`)(?:@[^/"''`]+/)?surrealdb(?:/[^"''`]*)?(?:"|''|`)$|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: template_string
+      regex: 'surrealkv:|/api/db\b|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: import_statement
+      regex: '(?i)\bsurrealdb\b'

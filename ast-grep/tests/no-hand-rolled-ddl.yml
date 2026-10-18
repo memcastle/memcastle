@@ -1,0 +1,10 @@
+id: no-hand-rolled-ddl
+valid:
+  - '// DEFINE TABLE item SCHEMAFULL;'
+  - 'let sql = "SELECT * FROM item";'
+  - 'let explanation = "we should DEFINE a better approach";'
+invalid:
+  - 'let sql = "DEFINE TABLE item SCHEMAFULL";'
+  - 'let sql = r#"REMOVE FIELD old ON item"#;'
+  - 'let sql = "ALTER TABLE item";'
+  - 'let sql = "INFO FOR DB";'

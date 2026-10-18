@@ -94,7 +94,8 @@ the same runner `serve` calls on every startup, because migration must work befo
 
 `app::AppServices` is the one seam every interface (`api`, `mcp` and `server::run` itself) calls through.
 The invariants that keep this true are listed in `AGENTS.md`, and each is enforced by a `prek` hook or a test:
-`store-isolation` greps for forbidden imports, and `single-writer` limits who may construct a store.
+The `architecture` prek hook runs ast-grep's `store-isolation` and `single-writer` rules over the checkout;
+the former checks forbidden Rust paths, and the latter limits who may construct a store.
 
 ## Provider plugins and module lifecycles
 

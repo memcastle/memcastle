@@ -1,0 +1,22 @@
+id: web-http-only-code
+language: TypeScript
+severity: error
+message: Web code must use the daemon HTTP API, never the database client, store, jobs, or /api/db.
+files:
+  - web/**/*.ts
+  - web/**/*.vue
+ignores:
+  - web/node_modules/**
+  - web/dist/**
+rule:
+  any:
+    - kind: identifier
+      regex: '^(surrealdb|surrealkv|SurrealStore)$'
+    - kind: type_identifier
+      regex: '^SurrealStore$'
+    - kind: string
+      regex: 'surrealkv:|/api/db\b|^(?:"|''|`)(?:@[^/"''`]+/)?surrealdb(?:/[^"''`]*)?(?:"|''|`)$|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: template_string
+      regex: 'surrealkv:|/api/db\b|(?:crate|memcastle)::(?:store|jobs)\b'
+    - kind: import_statement
+      regex: '(?i)\bsurrealdb\b'

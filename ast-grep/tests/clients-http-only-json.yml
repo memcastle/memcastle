@@ -1,0 +1,6 @@
+id: clients-http-only-json
+valid:
+  - '{"api": "/api/jobs"}'
+invalid:
+  - '{"api": "/api/db"}'
+  - '{"dependencies": {"surrealdb": "1.0"}}'

@@ -1,0 +1,6 @@
+id: clients-http-only-tsx
+valid:
+  - 'const View = () => <a href="/api/jobs">jobs</a>'
+invalid:
+  - 'const View = () => <div>{SurrealStore.connect()}</div>'
+  - 'const View = () => <a href="/api/db">admin</a>'

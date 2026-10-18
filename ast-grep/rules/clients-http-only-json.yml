@@ -1,0 +1,14 @@
+id: clients-http-only-json
+language: Json
+severity: error
+message: Web/integration configuration must not reference storage, jobs, or the database admin endpoint.
+files:
+  - web/**/*.json
+  - integrations/**/*.json
+ignores:
+  - web/node_modules/**
+  - web/dist/**
+  - integrations/node_modules/**
+rule:
+  kind: string
+  regex: 'surrealdb|surrealkv|SurrealStore|(?:crate|memcastle)::(?:store|jobs)\b|/api/db\b'

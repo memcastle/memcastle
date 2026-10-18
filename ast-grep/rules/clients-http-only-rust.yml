@@ -1,0 +1,36 @@
+id: clients-http-only-rust
+language: Rust
+severity: error
+message: Web and integration code must use HTTP/MCP, never storage, jobs, or the database admin endpoint.
+files:
+  - integrations/**/*.rs
+  - web/**/*.rs
+ignores:
+  - integrations/node_modules/**
+  - web/node_modules/**
+  - web/dist/**
+rule:
+  any:
+    - kind: identifier
+      regex: '^(surrealdb|surrealkv|SurrealStore)$'
+    - kind: scoped_identifier
+      regex: '^(crate|memcastle)::(store|jobs)\b'
+    - all:
+        - kind: scoped_use_list
+        - has:
+            field: path
+            regex: '^(crate|memcastle)$'
+        - has:
+            field: list
+            has:
+              any:
+                - kind: scoped_identifier
+                  regex: '^(store|jobs)::'
+                - kind: scoped_use_list
+                  regex: '^(store|jobs)::'
+                - kind: identifier
+                  regex: '^(store|jobs)$'
+    - kind: string_literal
+      regex: 'surrealkv:|/api/db\b|^"surrealdb(?:/[^\"]*)?"$'
+    - kind: raw_string_literal
+      regex: 'surrealkv:|/api/db\b|surrealdb'

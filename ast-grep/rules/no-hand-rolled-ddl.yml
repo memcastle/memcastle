@@ -1,0 +1,12 @@
+id: no-hand-rolled-ddl
+language: Rust
+severity: error
+message: Put schema DDL in database/schema; Rust must use SurrealKit to apply it.
+files:
+  - src/**/*.rs
+rule:
+  any:
+    - kind: string_literal
+      regex: '(?i)(?:\b(?:DEFINE|REMOVE|ALTER)\s+(?:(?:OVERWRITE|IF\s+NOT\s+EXISTS)\s+)?[A-Z]{4,}\s+[A-Za-z_@$]|\bINFO\s+FOR\b)'
+    - kind: raw_string_literal
+      regex: '(?i)(?:\b(?:DEFINE|REMOVE|ALTER)\s+(?:(?:OVERWRITE|IF\s+NOT\s+EXISTS)\s+)?[A-Z]{4,}\s+[A-Za-z_@$]|\bINFO\s+FOR\b)'

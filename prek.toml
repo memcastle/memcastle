@@ -85,95 +85,18 @@ pass_filenames = false
 # template owns everything above it and will keep updating it; everything here
 # is yours, and Git's 3-way merge preserves it across `git tpl update`.
 #
-# The pattern these projects use is a grep that fails the commit when a
-# dependency escapes the module that is supposed to contain it:
-#
-#   [[repos.hooks]]
-#   id = "http-isolation"
-#   name = "the HTTP client is confined to the data layer"
-#   language = "system"
-#   entry = "bash -c '! grep -rnP --include=*.rs \"(?<![A-Za-z0-9_])ureq::\" src | grep -v \"^src/data/\"'"
-#   files = "\\.rs$"
-#   pass_filenames = false
-
-# AGENTS.md invariant #1: the CLI, MCP, HTTP, and client layers reach storage
-# and the scheduler only through `app::AppServices` (or, for the CLI, the
-# daemon over HTTP) — never `store` or `jobs` directly — so any interface
-# (or a future one, like a web UI) can only ever do what that struct
-# exposes. `src/main.rs` is included, minus its one documented exception:
-# `memcastle migrate` connects to storage itself (ADR-004). The pattern also
-# catches single-line grouped imports (`use crate::{store::..}`) too; a second
-# `-z` pass over whole files catches the multi-line groups rustfmt emits.
 [[repos.hooks]]
-id = "store-isolation"
-name = "cli/mcp/api/client/main reach storage only through app::AppServices"
+id = "architecture"
+name = "architecture invariants (ast-grep)"
 language = "system"
-entry = '''bash -c '! grep -rnP --include=*.rs "(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b" src/main.rs src/cli.rs src/client src/mcp src/api | grep -vP "^src/main\.rs:\d+:use memcastle::store::SurrealStore;$"&& ! grep -rlPz --include=*.rs "use (crate|memcastle)::\{[^;]*?\b(store|jobs)::" src/main.rs src/cli.rs src/client src/mcp src/api' '''
-files = '^src/(main\.rs|cli\.rs|client/|mcp/|api/)'
+entry = "ast-grep scan --report-style short"
+files = '^(src/.*\.rs$|tests/.*\.rs$|integrations/.*\.(rs|ts|tsx|js|jsx|vue|json)$|web/.*\.(rs|ts|tsx|js|jsx|vue|html|json)$|sgconfig\.yml$|ast-grep/)'
 pass_filenames = false
 
-# AGENTS.md invariant #4: one daemon per embedded palace, one writer — a store
-# is only ever constructed by `server::run` or the `migrate` command in
-# `main.rs` (the same documented exception as invariant #1). Nothing else may
-# open the embedded SurrealKV path, since a second opener would either fail on
-# the file lock or, on the remote backend, bypass the lease/fencing that keeps
-# several daemons safe (ADR-006).
 [[repos.hooks]]
-id = "single-writer"
-name = "only server::run and `migrate` construct a SurrealStore"
+id = "architecture-rule-tests"
+name = "architecture rule fixtures (ast-grep)"
 language = "system"
-entry = '''bash -c '! grep -rnP --include=*.rs "SurrealStore::connect\(|surrealkv:" src | grep -vP "^src/(server/|store/|main\.rs:)" | grep -vP "^\S+:\d+:\s*//"' '''
-files = '^src/.*\.rs$'
-pass_filenames = false
-
-# AGENTS.md invariant #2: `Job::apply` is the only thing that assigns
-# `job.status`. Without this a handler could set a status directly and skip the
-# lease/timestamp bookkeeping the state machine centralises. The pattern is `=`
-# not followed by another `=`, so comparisons pass; the state machine's own
-# file (and its tests, which seed a status to walk every transition) is exempt.
-[[repos.hooks]]
-id = "job-status-only-via-apply"
-name = "only domain::job assigns Job.status"
-language = "system"
-entry = '''bash -c '! grep -rnP --include=*.rs "\.status\s*=[^=]" src tests | grep -vP "^src/domain/job\.rs:" | grep -vP "^\S+:\d+:\s*//"' '''
-files = '^(src|tests)/.*\.rs$'
-pass_filenames = false
-
-# AGENTS.md invariant #5: schema management is SurrealKit's. Schema lives in
-# `database/schema/*.surql` and is applied through `Sync`/`embed_schema!()`, so
-# Rust code has no business issuing DDL — that would be a hand-rolled schema
-# engine growing back. Comments may still mention the statements.
-[[repos.hooks]]
-id = "no-hand-rolled-ddl"
-name = "schema DDL lives in database/schema, not in Rust"
-language = "system"
-entry = '''bash -c '! grep -rniP --include=*.rs "(DEFINE|REMOVE|ALTER)\s+(OVERWRITE\s+|IF\s+NOT\s+EXISTS\s+)?[A-Z]{4,}\s+[A-Za-z_@$]|INFO\s+FOR\b" src | grep -vP "^\S+:\d+:\s*//"' '''
-files = '^src/.*\.rs$'
-pass_filenames = false
-
-# AGENTS.md invariant #8: an integration is lifecycle glue over MCP and HTTP and
-# nothing else. It must not open the database (the `surrealdb` client, a
-# `surrealkv:` path or `SurrealStore`), reach MemCastle's `store`/`jobs` code, or
-# use the database admin endpoint (`/api/db`, ADR-015), each of which would be a
-# second path to the palace that skips the memory-mode gate and the single
-# writer. Documentation may mention them, and so may vendored dependencies,
-# so Markdown and `node_modules` are left out.
-[[repos.hooks]]
-id = "integrations-http-only"
-name = "integrations reach MemCastle only over MCP and HTTP"
-language = "system"
-entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules "surrealdb|surrealkv|SurrealStore|(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b" integrations' '''
-files = '^integrations/'
-pass_filenames = false
-
-# AGENTS.md invariant #11: the web UI is a client of the REST API and nothing else, as the CLI is. Like an
-# integration (invariant #8), it must not open the database, reach MemCastle's `store`/`jobs` code, or use the database
-# admin endpoint (`/api/db`, ADR-015), each of which would be a second path to the palace that skips the memory-mode
-# gate and the single writer. `dist` is generated, and `node_modules` and Markdown are left out as for integrations.
-[[repos.hooks]]
-id = "web-http-only"
-name = "the web UI reaches MemCastle only over HTTP"
-language = "system"
-entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules --exclude-dir=dist --exclude=bun.lock "surrealdb|surrealkv|SurrealStore|(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b" web' '''
-files = '^web/'
+entry = "ast-grep test --skip-snapshot-tests"
+files = '^(sgconfig\.yml$|ast-grep/)'
 pass_filenames = false

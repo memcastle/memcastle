@@ -378,8 +378,8 @@ An integration maps to the daemon's names and never renames anything in MemCastl
 1. Make it installable: add a `memcastle-integration.toml`, an adapter for the agent in `src/integration/agent.rs`
    and its bundle to `packaging/integrations/build.sh`, as [Agent integrations](integrations.md#the-manifest) describes.
 
-The `integrations-http-only` hook (see [Development](development.md#the-architecture-guard))
-fails the build if anything under `integrations/` reaches into MemCastle's storage or job code
+The `architecture` hook's integration rules (see [Development](development.md#the-architecture-guard))
+fail the build if supported source files under `integrations/` reach into MemCastle's storage or job code
 instead of using the protocol.
 
 ## The fixtures

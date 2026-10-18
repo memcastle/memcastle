@@ -1,0 +1,23 @@
+id: store-isolation
+valid:
+  - 'use crate::app::AppServices;'
+  - '// use crate::store::SurrealStore;'
+  - 'let unrelated = "store::SurrealStore";'
+  - |-
+    use crate::{
+      // store::SurrealStore,
+      app::AppServices,
+    };
+  - 'use crate::{app::{store::Helper}};'
+invalid:
+  - 'use crate::store::SurrealStore;'
+  - 'use memcastle::jobs::Scheduler;'
+  - |-
+    use crate::{
+        app::AppServices,
+        store::SurrealStore,
+    };
+  - 'let _ = crate::store::SurrealStore;'
+  - 'use crate::{store::{SurrealStore}};'
+  - 'let code = "memcastle::jobs::not_found";'
+  - 'let code = r#"crate::store::not_found"#;'

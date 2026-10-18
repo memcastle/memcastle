@@ -1,0 +1,11 @@
+id: web-http-only-code
+valid:
+  - 'const url = "/api/dbr"'
+  - '// const url = "/api/db"'
+  - 'const name = "SurrealStore is a class name"'
+invalid:
+  - 'import { Surreal } from "surrealdb"'
+  - 'const store = SurrealStore.connect()'
+  - 'type Database = SurrealStore'
+  - 'fetch("/api/db")'
+  - 'const path = `surrealkv:${file}`'

@@ -1,0 +1,16 @@
+id: web-http-only-html
+language: Html
+severity: error
+message: Web markup must not reference storage, jobs, or the database admin endpoint.
+files:
+  - web/**/*.html
+  - web/**/*.vue
+ignores:
+  - web/node_modules/**
+  - web/dist/**
+rule:
+  any:
+    - kind: attribute_value
+      regex: 'surrealdb|surrealkv|SurrealStore|(?:crate|memcastle)::(?:store|jobs)\b|/api/db\b'
+    - kind: text
+      regex: '(?s)\{\{[^}]*?(?:surrealdb|surrealkv|SurrealStore|(?:crate|memcastle)::(?:store|jobs)\b|/api/db\b)[^}]*\}\}'

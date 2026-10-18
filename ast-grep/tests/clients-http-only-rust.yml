@@ -1,0 +1,15 @@
+id: clients-http-only-rust
+valid:
+  - 'use memcastle::client::DaemonClient;'
+  - '// use surrealdb::Surreal;'
+  - 'let note = "a SurrealStore is a concept";'
+invalid:
+  - 'use surrealdb::Surreal;'
+  - 'let _store = SurrealStore::connect(&backend);'
+  - |-
+    use crate::{
+      jobs::Scheduler,
+      app::AppServices,
+    };
+  - 'let url = "/api/db";'
+  - 'let endpoint = r#"surrealkv:/data/palace"#;'

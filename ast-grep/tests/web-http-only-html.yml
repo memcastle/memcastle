@@ -1,0 +1,9 @@
+id: web-http-only-html
+valid:
+  - '<a href="/api/jobs">OK</a>'
+  - '<!-- <a href="/api/db">no</a> -->'
+  - '<span>SurrealStore is a word</span>'
+invalid:
+  - '<a href="/api/db">admin</a>'
+  - '<div :href="`/api/db`">admin</div>'
+  - '<div>{{ fetch("/api/db") }}</div>'

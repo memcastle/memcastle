@@ -1,0 +1,10 @@
+id: job-status-only-via-apply
+valid:
+  - 'if job.status == JobStatus::Running {}'
+  - '// job.status = JobStatus::Running;'
+  - 'let status = job.status;'
+invalid:
+  - 'job.status = JobStatus::Running;'
+  - |-
+    job.status
+      = JobStatus::Failed;

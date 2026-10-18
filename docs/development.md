@@ -28,7 +28,7 @@ workflow inputs and compatibility policy.
 - Node and bun, only for `web/` and `integrations/` (`mise run web:check` and `integrations:check` install them for the
   task; the Rust build needs neither).
 - Rust, via `rustup`, which installs the channel pinned in `rust-toolchain.toml` (mise does not manage Rust itself).
-- The remaining tools (nextest, prek, typos, ...) via `mise` — run `mise install` once.
+- The remaining tools (nextest, prek, ast-grep, typos, ...) via `mise` — run `mise install` once.
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
 so the storage engine itself needs no C/C++ toolchain.
@@ -44,7 +44,7 @@ mise run sources:check      # build and conformance-test every source under sour
 mise run sources:test -- directory   # the same for one source, which is what each CI leg runs
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
-mise run guards     # the architecture guard hooks, described below
+mise run guards     # the architecture guard, including its rule fixtures, described below
 mise run integrations:check # test the Core-shipped integration and install its bundle
 mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
 mise run integrations:package # lay out what a release ships in target/bundled-integrations
@@ -335,25 +335,23 @@ What is left of the job is compiling the instrumented test binaries.
 ## The architecture guard
 
 The non-negotiable invariant in `AGENTS.md` — "the CLI has no business logic MCP/HTTP can't reuse" —
-is enforced by the `store-isolation` `prek` hook.
-It greps `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
-for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports,
-even when rustfmt spreads them over several lines).
+is enforced by the `architecture` prek hook's ast-grep `store-isolation` rules.
+They inspect Rust paths in `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
+for direct `store` or `jobs` use (including multiline grouped `use crate::{store::..}` imports).
 The one allowed exception is `main.rs`'s `SurrealStore` import, which `memcastle migrate` needs.
-The pattern matches text, not syntax,
-so a diagnostic-code string such as `memcastle::jobs::not_found` trips it too, even inside a comment:
+A diagnostic-code string such as `memcastle::jobs::not_found` still trips the rule, but a comment does not:
 tests should read a code from the error (`Error::body().code`) rather than spell it out in these directories.
 If you find yourself wanting to import `store` from one of those,
 the fix is almost always to add a method to `app::AppServices` instead,
 so the same capability becomes available to every interface at once.
 
-The `single-writer` hook enforces the companion invariant, one daemon and one writer per embedded palace:
+The `single-writer` rule enforces the companion invariant, one daemon and one writer per embedded palace:
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
-The `integrations-http-only` hook keeps an integration to MCP and HTTP:
-it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `integrations/`
-(Markdown and `node_modules` are skipped), see [ADR-019](adr/019-shared-integration-contract.md).
-Like the others it is a text match, so a comment that names one of them trips it too.
+The `integrations-http-only-*` and shared `clients-http-only-*` rules keep an integration to MCP and HTTP:
+they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path, or `/api/db` in supported source files
+under `integrations/` (Markdown and `node_modules` are skipped), see [ADR-019](adr/019-shared-integration-contract.md).
+Comments and unsupported file types do not trip these rules.
 
 The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
 It is enforced by tests instead: `tests/in_process/auth.rs` walks a list of the REST routes
@@ -405,16 +403,30 @@ network or an agent's settings file or a credential, and when anything under `sr
 `tests/integration_cli.rs` exercises the installer with synthetic integrations;
 `tests/integration_bundle.rs` checks the Core-shipped package tree on Linux.
 
-The web UI is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
-`SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `web/` (Markdown, `node_modules` and `dist` are
-skipped), see [ADR-035](adr/035-web-ui.md).
+The web UI is held to HTTP as an integration is: the `web-http-only-*` and shared `clients-http-only-*` rules fail on
+`surrealdb`, `surrealkv`,
+`SurrealStore`, a `store` or `jobs` path, or `/api/db` in supported source files under `web/`
+(Markdown, `node_modules`, `dist` and `bun.lock` are skipped), see [ADR-035](adr/035-web-ui.md).
 That the dashboard's static files are the only thing besides the liveness probe that needs no token is held by
 `tests/in_process/auth.rs` and `tests/in_process/web.rs`, which walk the routes with the dashboard off and on.
 
-Two more hooks guard the remaining invariants.
+Two more rules guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,
 so a job's status only ever changes through `Job::apply`.
 `no-hand-rolled-ddl` fails on schema DDL in Rust code, because the schema is SurrealKit's (`database/schema/*.surql`).
+
+The pinned ast-grep rules live under `ast-grep/rules/`, with discovery and Vue-as-HTML parsing in `sgconfig.yml`.
+The `architecture` hook scans the whole checkout even if only one relevant file was staged;
+`architecture-rule-tests` runs the native YAML rule fixtures, and `mise run guards` runs both prek hooks.
+To inspect diagnostics directly, run `ast-grep scan --report-style short`;
+to iterate on a rule, run `ast-grep test --skip-snapshot-tests`.
+Vue `<script>` blocks use HTML's built-in JavaScript injection, including imports from `lang="ts"` blocks;
+HTML rules check attributes and interpolations separately.
+The rules target Rust, TypeScript, TSX, JavaScript, Vue, HTML and JSON as specified by each rule's file globs;
+other file types are outside their scope.
+The web guard skips Markdown, `node_modules`, `dist` and `bun.lock`, and the integration guard skips Markdown and
+`node_modules`.
+These syntax rules cannot resolve renamed imports, computed strings or runtime behavior.
 
 ## Documentation
 
