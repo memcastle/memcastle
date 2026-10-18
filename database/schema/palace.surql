@@ -84,16 +84,14 @@ DEFINE FIELD IF NOT EXISTS signals ON TABLE similar_to TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE similar_to TYPE datetime;
 DEFINE INDEX IF NOT EXISTS similar_to_edge ON TABLE similar_to FIELDS in, out UNIQUE;
 
--- Retrieval over drawer content, all on this one table: a BM25 full-text index
--- and, beside it, an HNSW index over `embedding`. The vector index's DIMENSION
--- is the palace's fixed embedding length (`domain::EMBEDDING_DIMENSION`, which
--- a test keeps equal to this number); drawers without an embedding are simply
--- not in it.
+-- BM25 stays on canonical content. The old unscoped vector index is retired by
+-- the version-4 SurrealKit rollout rather than by Sync (which refuses REMOVE):
+-- its vectors have no model provenance and must not share an active HNSW.
+-- The legacy field remains for recovery, but new profile-scoped indexes are
+-- declared in embedding.surql instead (SurrealKit owns both changes).
 DEFINE ANALYZER IF NOT EXISTS drawer_text TOKENIZERS blank, class FILTERS lowercase, snowball(english);
 DEFINE INDEX IF NOT EXISTS drawer_content_search ON TABLE drawer
     FIELDS content FULLTEXT ANALYZER drawer_text BM25 HIGHLIGHTS;
-DEFINE INDEX IF NOT EXISTS drawer_embedding_idx ON TABLE drawer
-    FIELDS embedding HNSW DIMENSION 768 DIST COSINE TYPE F32;
 
 -- Knowledge-graph tables, wired by `store::entities` (create/supersede/
 -- invalidate/list relationships). Populated by a checkpoint item's optional

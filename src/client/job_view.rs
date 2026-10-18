@@ -31,6 +31,7 @@ fn parameters(kind: &JobKind, painter: Painter) -> Vec<String> {
             wing: w,
             full,
             options,
+            embedding_space,
         } => {
             match source {
                 MiningSource::Directory { path } => {
@@ -48,13 +49,32 @@ fn parameters(kind: &JobKind, painter: Painter) -> Vec<String> {
                 lines.push(field(painter, &format!("Option {key}"), value));
             }
             wing(&mut lines, w);
+            if let Some(space) = embedding_space {
+                lines.push(field(painter, "Embedding profile", &space.profile));
+            }
             if *full {
                 // A full re-read costs more than an incremental one, so say it was asked for.
                 lines.push(field(painter, "Mode", "full re-read"));
             }
         }
-        JobKind::Audit { wing: w } | JobKind::Embed { wing: w } | JobKind::Extract { wing: w } => {
+        JobKind::Audit { wing: w } | JobKind::Extract { wing: w } => {
             wing(&mut lines, w);
+        }
+        JobKind::Embed {
+            wing: w,
+            profile,
+            refresh,
+            space,
+            ..
+        } => {
+            wing(&mut lines, w);
+            if let Some(profile) = profile {
+                lines.push(field(painter, "Profile", profile));
+            }
+            lines.push(field(painter, "Refresh", format!("{refresh:?}")));
+            if let Some(space) = space {
+                lines.push(field(painter, "Model", &space.model));
+            }
         }
         JobKind::Repair { based_on_job, .. } => {
             if let Some(job) = based_on_job {
@@ -152,6 +172,7 @@ mod tests {
                 wing: Some("project".to_string()),
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Background,
             "cli",
@@ -233,6 +254,7 @@ mod tests {
                 wing: None,
                 full: true,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Background,
             "cli",

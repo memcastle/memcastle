@@ -39,6 +39,8 @@ pub struct SearchOptions {
     pub room: Option<String>,
     /// A ranking name (see [`RankingMode::NAMES`]); `None` means `auto`.
     pub ranking: Option<String>,
+    /// Named embedding profile for the semantic leg; omitted selects the global default.
+    pub profile: Option<String>,
     /// A drawer must carry all of these tags.
     pub tags: Vec<String>,
     /// A source kind name (`file`, `manual`, `transcript`, `note`, `other`).
@@ -102,6 +104,7 @@ impl SearchOptions {
             },
             expand: self.expand,
             query_embedding: None,
+            profile: self.profile,
         })
     }
 
@@ -235,6 +238,7 @@ pub async fn search(
     query: &SearchQuery,
     limit: u32,
     vector: Option<&[f32]>,
+    space: Option<&str>,
     preferences: &SourcePreferences,
 ) -> Result<Vec<SearchHit>> {
     // Keep enough relevant candidates that a preference can lift a near miss without letting an unrelated memory
@@ -249,12 +253,29 @@ pub async fn search(
         Strategy::Semantic => {
             // `resolve_strategy` returned `Semantic` only with a vector.
             let vector = vector.unwrap_or_default();
-            store.search_vector(vector, pool, &query.filter).await?
+            store
+                .search_vector_space(
+                    vector,
+                    pool,
+                    &query.filter,
+                    space.ok_or(Error::SemanticUnavailable {
+                        ranking: "semantic profile".into(),
+                    })?,
+                )
+                .await?
         }
         Strategy::Hybrid => {
             let vector = vector.unwrap_or_default();
             store
-                .search_hybrid(&query.text, vector, pool, &query.filter)
+                .search_hybrid_space(
+                    &query.text,
+                    vector,
+                    pool,
+                    &query.filter,
+                    space.ok_or(Error::SemanticUnavailable {
+                        ranking: "hybrid profile".into(),
+                    })?,
+                )
                 .await?
         }
     };

@@ -619,6 +619,7 @@ fn retrieval_query(
         wing,
         room,
         ranking: retrieval.ranking,
+        profile: retrieval.profile,
         tags: retrieval.tags,
         source_kind: retrieval.source_kind,
         as_of: retrieval.as_of,
@@ -1439,6 +1440,7 @@ async fn cmd_miner(config: &Config, mode: Option<MemoryMode>, command: MinerComm
                 wing: args.wing.as_deref(),
                 credential_env: args.credential_env.as_deref(),
                 credential_file: args.credential_file.as_deref(),
+                embedding_profile: args.embedding_profile.as_deref(),
                 credential_oauth: args.credential_oauth,
                 options: &args.option,
                 unset_options: &args.unset_option,
@@ -1951,7 +1953,14 @@ async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -
 }
 
 async fn cmd_embed(config: &Config, mode: Option<MemoryMode>, args: EmbedArgs) -> Result<()> {
-    let job = client(config, mode).submit_embed(args.wing).await?;
+    let refresh = match args.refresh.as_str() {
+        "stale" => memcastle::domain::EmbeddingRefresh::Stale,
+        "all" => memcastle::domain::EmbeddingRefresh::All,
+        _ => memcastle::domain::EmbeddingRefresh::Missing,
+    };
+    let job = client(config, mode)
+        .submit_embed_profile(args.wing, args.profile, refresh)
+        .await?;
     print_submitted(&job)
 }
 

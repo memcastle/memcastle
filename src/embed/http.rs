@@ -19,6 +19,7 @@ pub struct HttpEmbedder {
     endpoint: String,
     model: String,
     api_key: Option<Secret>,
+    dimensions: usize,
 }
 
 #[derive(Deserialize)]
@@ -56,7 +57,15 @@ impl HttpEmbedder {
             endpoint: format!("{}/embeddings", base_url.trim_end_matches('/')),
             model,
             api_key,
+            dimensions: EMBEDDING_DIMENSION,
         })
+    }
+
+    /// Request the selected profile's vector length, not the legacy palace length.
+    #[must_use]
+    pub fn with_dimensions(mut self, dimensions: usize) -> Self {
+        self.dimensions = dimensions;
+        self
     }
 
     async fn run(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -66,7 +75,7 @@ impl HttpEmbedder {
             // Lets a model with a longer native vector (OpenAI's v3 family)
             // return the dimension the palace stores; servers that do not
             // support it ignore the field.
-            "dimensions": EMBEDDING_DIMENSION,
+            "dimensions": self.dimensions,
         }));
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key.expose());
@@ -182,6 +191,93 @@ mod tests {
         assert_eq!(body["model"], "nomic");
         assert_eq!(body["dimensions"], 768);
         assert_eq!(body["input"], json!(["a"]));
+    }
+
+    #[tokio::test]
+    async fn a_profile_can_request_a_different_dimension_from_the_same_protocol() {
+        let (url, seen) = stub(
+            StatusCode::OK,
+            json!({"data": [{"index": 0, "embedding": [1.0, 0.0, 0.0]}]}),
+        )
+        .await;
+        let embedder = HttpEmbedder::new(url, "small".into(), None, Duration::from_secs(10))
+            .unwrap()
+            .with_dimensions(3);
+        let vectors = embedder.run(&["a".into()]).await.unwrap();
+        assert_eq!(vectors[0].len(), 3);
+        assert_eq!(seen.lock().unwrap()[0].1["dimensions"], 3);
+    }
+
+    #[tokio::test]
+    async fn two_named_openai_connections_send_the_selected_model_to_their_own_endpoint() {
+        let (local, local_seen) = stub(
+            StatusCode::OK,
+            json!({"data": [{"index": 0, "embedding": [1.0, 0.0, 0.0]}]}),
+        )
+        .await;
+        let (hosted, hosted_seen) = stub(
+            StatusCode::OK,
+            json!({"data": [{"index": 0, "embedding": [0.0, 1.0, 0.0]}]}),
+        )
+        .await;
+        let mut config = crate::config::EmbeddingsConfig::default();
+        for (name, url, model) in [
+            ("local", local, "ollama-model"),
+            ("hosted", hosted, "hosted-model"),
+        ] {
+            config.providers.insert(
+                name.into(),
+                crate::config::EmbeddingConnection {
+                    provider: crate::config::EmbeddingProvider::Openai,
+                    url: Some(url),
+                    ..Default::default()
+                },
+            );
+            config.profiles.insert(
+                name.into(),
+                crate::config::EmbeddingProfileConfig {
+                    provider: name.into(),
+                    model: model.into(),
+                    dimensions: 3,
+                },
+            );
+        }
+        config.default = Some("local".into());
+        let profiles = super::super::Embeddings::from_config(&config).unwrap();
+        assert_eq!(
+            profiles
+                .select(None)
+                .unwrap()
+                .embed_one("hello")
+                .await
+                .unwrap(),
+            [1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            profiles
+                .select(Some("hosted"))
+                .unwrap()
+                .embed_one("hello")
+                .await
+                .unwrap(),
+            [0.0, 1.0, 0.0]
+        );
+        assert_eq!(local_seen.lock().unwrap()[0].1["model"], "ollama-model");
+        assert_eq!(hosted_seen.lock().unwrap()[0].1["model"], "hosted-model");
+        assert_ne!(
+            profiles
+                .select(Some("local"))
+                .unwrap()
+                .space()
+                .unwrap()
+                .fingerprint,
+            profiles
+                .select(Some("hosted"))
+                .unwrap()
+                .space()
+                .unwrap()
+                .fingerprint
+        );
     }
 
     #[tokio::test]

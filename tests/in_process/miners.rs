@@ -92,6 +92,62 @@ fn code(body: &Value) -> &str {
 }
 
 #[tokio::test]
+async fn a_miner_profile_override_pins_a_source_scoped_embedding_job_without_a_wing() {
+    let daemon = TestDaemon::start_configured(|config| {
+        config.embeddings.providers.insert(
+            "bulk".into(),
+            memcastle::config::EmbeddingConnection {
+                provider: memcastle::config::EmbeddingProvider::Openai,
+                url: Some("http://127.0.0.1:1/v1".into()),
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "bulk".into(),
+            memcastle::config::EmbeddingProfileConfig {
+                provider: "bulk".into(),
+                model: "example".into(),
+                dimensions: 768,
+            },
+        );
+    })
+    .await;
+    let dir = notes_dir();
+    let (status, miner) = put(
+        &daemon,
+        "docs",
+        json!({
+            "source": "directory", "locator": dir.path(), "embedding_profile": "bulk",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{miner}");
+    let (status, submitted) = post(&daemon, "/api/miners/docs/run").await;
+    assert!(status.is_success(), "{submitted}");
+    let job: Job = serde_json::from_value(submitted).expect("mine job");
+    let client = reqwest::Client::new();
+    let done = wait_for_job_status(&client, &daemon.base_url, job.id, JobStatus::Completed).await;
+    let source_id = done.result.as_ref().unwrap()["source_id"].as_str().unwrap();
+    let embed = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs: Vec<Job> = client.get(format!("{}/api/jobs?kind=embed", daemon.base_url))
+                .send().await.unwrap().json().await.unwrap();
+            if let Some(job) = jobs.into_iter().find(|job| matches!(&job.kind,
+                memcastle::domain::JobKind::Embed { profile: Some(profile), source_id: Some(id), .. }
+                    if profile == "bulk" && id.to_string() == source_id)) {
+                break job;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("source-scoped embed job was submitted");
+    assert!(matches!(
+        embed.kind,
+        memcastle::domain::JobKind::Embed { space: Some(_), .. }
+    ));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn several_miners_coexist_with_their_own_settings_and_survive_in_the_file() {
     let daemon = TestDaemon::start().await;
     let (docs, notes) = (notes_dir(), notes_dir());

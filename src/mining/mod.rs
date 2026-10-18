@@ -167,6 +167,7 @@ mod tests {
                 wing: Some("docs".to_string()),
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Background,
             requested_by,
@@ -181,6 +182,7 @@ mod tests {
             wing,
             full,
             options,
+            ..
         } = job.kind.clone()
         else {
             unreachable!("every test job is a mine job")
@@ -350,6 +352,7 @@ mod tests {
             wing: Some("0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e".into()),
             full: false,
             options: Default::default(),
+            embedding_space: None,
         };
 
         let outcome = run_job(&store, &mut job, MiningConfig::default()).await;
@@ -377,6 +380,7 @@ mod tests {
             wing: Some("docs".into()),
             full: true,
             options: Default::default(),
+            embedding_space: None,
         };
         run_job(&store, &mut job, MiningConfig::default())
             .await
@@ -785,6 +789,7 @@ mod tests {
             wing: None,
             full: true,
             options: Default::default(),
+            embedding_space: None,
         };
         assert_eq!(
             run_job(&store, &mut full, MiningConfig::default())
@@ -807,6 +812,7 @@ mod tests {
                 wing: None,
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Background,
             "test",
@@ -968,6 +974,7 @@ mod tests {
                 wing: None,
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Background,
             "test",

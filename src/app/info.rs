@@ -120,13 +120,28 @@ impl ConfigReport {
                 lease_ttl_secs: config.jobs.lease_ttl_secs,
             },
             embeddings: ProviderInfo {
-                provider: match config.embeddings.provider {
+                provider: match config
+                    .embeddings
+                    .default
+                    .as_ref()
+                    .and_then(|name| config.embeddings.profiles.get(name))
+                    .and_then(|profile| config.embeddings.providers.get(&profile.provider))
+                    .map_or(config.embeddings.provider, |connection| connection.provider)
+                {
                     EmbeddingProvider::None => "none",
                     EmbeddingProvider::Command => "command",
                     EmbeddingProvider::Http => "http",
+                    EmbeddingProvider::Openai => "openai",
+                    EmbeddingProvider::External => "external",
                 }
                 .to_string(),
-                model: config.embeddings.model.clone(),
+                model: config
+                    .embeddings
+                    .default
+                    .as_ref()
+                    .and_then(|name| config.embeddings.profiles.get(name))
+                    .map(|profile| profile.model.clone())
+                    .or_else(|| config.embeddings.model.clone()),
             },
             extraction: ProviderInfo {
                 provider: config.extraction.provider.as_str().to_string(),

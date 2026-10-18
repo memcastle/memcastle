@@ -286,6 +286,8 @@ struct SearchParams {
     room: Option<String>,
     /// `auto` (default), `lexical`, `semantic` or `hybrid`.
     ranking: Option<String>,
+    /// Named embedding profile for semantic ranking.
+    profile: Option<String>,
     /// Comma-separated tags a drawer must all carry.
     #[serde(alias = "tag")]
     tags: Option<String>,
@@ -317,6 +319,7 @@ impl SearchParams {
             wing: self.wing,
             room: self.room,
             ranking: self.ranking,
+            profile: self.profile,
             tags: self
                 .tags
                 .iter()
@@ -539,6 +542,7 @@ async fn submit_job(
             wing,
             full,
             options,
+            ..
         } => {
             // Gated as a write inside `submit_mine`: mining files drawers.
             state
@@ -558,11 +562,16 @@ async fn submit_job(
             // (see `AppServices::submit_audit`'s doc comment).
             state.app.submit_audit(wing, &body.requested_by).await?
         }
-        JobKind::Embed { wing } => {
+        JobKind::Embed {
+            wing,
+            profile,
+            refresh,
+            ..
+        } => {
             // Gated as a write inside `submit_embed`: it fills every drawer's embedding.
             state
                 .app
-                .submit_embed(wing, &body.requested_by, mode)
+                .submit_embed_profile(wing, profile, refresh, &body.requested_by, mode)
                 .await?
         }
         JobKind::Extract { wing } => {

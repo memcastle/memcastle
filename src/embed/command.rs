@@ -30,6 +30,7 @@ pub struct CommandEmbedder {
     argv: Vec<String>,
     model: Option<String>,
     timeout: Duration,
+    dimensions: usize,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +47,15 @@ impl CommandEmbedder {
             argv,
             model,
             timeout,
+            dimensions: EMBEDDING_DIMENSION,
         }
+    }
+
+    /// Pass the selected profile's vector length to the command.
+    #[must_use]
+    pub fn with_dimensions(mut self, dimensions: usize) -> Self {
+        self.dimensions = dimensions;
+        self
     }
 
     async fn run(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -58,7 +67,7 @@ impl CommandEmbedder {
             })?;
         let request = serde_json::json!({
             "model": self.model,
-            "dimension": EMBEDDING_DIMENSION,
+            "dimension": self.dimensions,
             "texts": texts,
         })
         .to_string();

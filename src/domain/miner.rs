@@ -62,6 +62,9 @@ pub struct MinerDefinition {
     /// The wing the mined drawers go to, when it should not be the adapter's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wing: Option<String>,
+    /// The embedding profile used for the drawers mined by this miner; absent uses the global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_profile: Option<String>,
     /// Where the source's credential is read from; never the credential itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<CredentialRef>,
@@ -124,7 +127,11 @@ impl MinerDefinition {
         if self.source.trim().is_empty() {
             return Err("`source` is empty; name the source adapter this miner runs".to_string());
         }
-        for (field, value) in [("locator", &self.locator), ("wing", &self.wing)] {
+        for (field, value) in [
+            ("locator", &self.locator),
+            ("wing", &self.wing),
+            ("embedding_profile", &self.embedding_profile),
+        ] {
             if value.as_deref().is_some_and(|v| v.trim().is_empty()) {
                 return Err(format!("`{field}` is empty; remove it or give it a value"));
             }

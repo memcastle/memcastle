@@ -23,6 +23,7 @@
 
 mod dedup_keys;
 mod diary_provenance;
+mod embedding_quarantine;
 mod renames;
 mod since_0_2;
 mod supersession_lineage;
@@ -95,6 +96,11 @@ const DATA_MIGRATIONS: &[DataMigration] = &[
         version: 3,
         name: "since-0.2",
         apply: since_0_2::apply,
+    },
+    DataMigration {
+        version: 4,
+        name: "embedding-quarantine",
+        apply: embedding_quarantine::apply,
     },
 ];
 

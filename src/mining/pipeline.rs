@@ -530,6 +530,7 @@ mod tests {
                 wing: None,
                 full: false,
                 options: Options::new(),
+                embedding_space: None,
             },
             Priority::Background,
             "test",

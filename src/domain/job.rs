@@ -151,6 +151,9 @@ pub enum JobKind {
         /// `wing` and `full` rather than part of [`MiningSource`], so a job queued before options existed still reads.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         options: Options,
+        /// Resolved embedding pipeline for this miner run; kept separate from source options.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        embedding_space: Option<super::EmbeddingSpace>,
     },
     /// Persist an already-classified batch of checkpoint items — durable,
     /// resumable writes only; classification into destination buckets
@@ -200,6 +203,18 @@ pub enum JobKind {
         /// Restrict the sweep to one wing by name; `None` sweeps the palace.
         #[serde(default)]
         wing: Option<String>,
+        /// Restrict an automatic miner sweep to drawers from exactly that mined source.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_id: Option<super::SourceId>,
+        /// The profile chosen when submitted, not the daemon's current default.
+        #[serde(default)]
+        profile: Option<String>,
+        /// Automatic sweeps retain missing-only semantics.
+        #[serde(default)]
+        refresh: super::EmbeddingRefresh,
+        /// A non-secret snapshot; old jobs without one must not guess their original provider.
+        #[serde(default)]
+        space: Option<super::EmbeddingSpace>,
     },
     /// Read every mined drawer not yet read and add the entities and
     /// relationships it names to the knowledge graph — see
@@ -873,6 +888,7 @@ mod tests {
                 ("since".to_string(), "2026-09".to_string()),
                 ("dir".to_string(), "/work/app".to_string()),
             ]),
+            embedding_space: None,
         };
         let json = serde_json::to_value(&kind).unwrap();
         assert_eq!(
@@ -891,6 +907,40 @@ mod tests {
     }
 
     #[test]
+    fn old_embed_jobs_deserialize_without_guessing_their_missing_provider_snapshot() {
+        let old: JobKind =
+            serde_json::from_value(serde_json::json!({"type": "embed", "wing": null})).unwrap();
+        assert!(matches!(
+            old,
+            JobKind::Embed {
+                profile: None,
+                space: None,
+                refresh: crate::domain::EmbeddingRefresh::Missing,
+                ..
+            }
+        ));
+        let space = crate::domain::EmbeddingSpace::new(
+            "local".into(),
+            "ollama".into(),
+            "openai".into(),
+            "connection".into(),
+            "model".into(),
+            768,
+        );
+        let new = JobKind::Embed {
+            wing: Some("docs".into()),
+            source_id: None,
+            profile: Some("local".into()),
+            refresh: crate::domain::EmbeddingRefresh::All,
+            space: Some(space.clone()),
+        };
+        let back: JobKind = serde_json::from_value(serde_json::to_value(new).unwrap()).unwrap();
+        assert!(
+            matches!(back, JobKind::Embed { space: Some(pinned), refresh: crate::domain::EmbeddingRefresh::All, .. } if pinned == space)
+        );
+    }
+
+    #[test]
     fn mine_job_kind_serializes_to_the_same_wire_shape_as_before_the_source_seam() {
         let kind = JobKind::Mine {
             source: MiningSource::Directory {
@@ -899,6 +949,7 @@ mod tests {
             wing: Some("docs".to_string()),
             full: false,
             options: Default::default(),
+            embedding_space: None,
         };
 
         // `MiningSource` must stay invisible on the wire: existing callers
@@ -960,6 +1011,7 @@ mod tests {
             wing: None,
             full: true,
             options: Default::default(),
+            embedding_space: None,
         };
         let json = serde_json::to_value(&kind).unwrap();
         assert_eq!(

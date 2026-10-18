@@ -84,6 +84,8 @@ struct SearchArgs {
     /// Ranking: `auto` (default: hybrid when the daemon can embed the query,
     /// else lexical), `lexical`, `semantic` or `hybrid`.
     ranking: Option<String>,
+    /// Select this embedding profile for the semantic leg.
+    profile: Option<String>,
     /// Only drawers carrying every one of these tags.
     #[serde(default)]
     tags: Vec<String>,
@@ -124,6 +126,8 @@ struct RecallArgs {
     wing: Option<String>,
     /// Ranking: `auto` (default), `lexical`, `semantic` or `hybrid`.
     ranking: Option<String>,
+    /// Select this embedding profile for the semantic leg.
+    profile: Option<String>,
     /// Only drawers carrying every one of these tags.
     #[serde(default)]
     tags: Vec<String>,
@@ -152,6 +156,7 @@ impl RecallArgs {
             wing: self.wing,
             room: None,
             ranking: self.ranking,
+            profile: self.profile,
             tags: self.tags,
             source_kind: self.source_kind,
             as_of: self.as_of,
@@ -172,6 +177,7 @@ impl SearchArgs {
             wing: self.wing,
             room: if with_room { self.room } else { None },
             ranking: self.ranking,
+            profile: self.profile,
             tags: self.tags,
             source_kind: self.source_kind,
             as_of: self.as_of,

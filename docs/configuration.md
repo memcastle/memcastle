@@ -299,13 +299,18 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `webhook.bind` (an IP address) | `MEMCASTLE_WEBHOOK_BIND` | `127.0.0.1` |
 | `webhook.port` (0 to 65535) | `MEMCASTLE_WEBHOOK_PORT` | `8787` |
 | `webhook.allow_remote` (`true` or `false`) | `MEMCASTLE_WEBHOOK_ALLOW_REMOTE` | `false` |
-| `embeddings.provider` (`none`, `command` or `http`) | `MEMCASTLE_EMBEDDINGS_PROVIDER` | `none` |
+| `embeddings.provider` (`none`, `command`, `http`, `openai` or `external`) | `MEMCASTLE_EMBEDDINGS_PROVIDER` | `none` |
 | `embeddings.url` (an `http://` or `https://` URL) | `MEMCASTLE_EMBEDDINGS_URL` | none |
 | `embeddings.model` | `MEMCASTLE_EMBEDDINGS_MODEL` | none |
 | `embeddings.api_key` | `MEMCASTLE_EMBEDDINGS_API_KEY` | none |
 | `embeddings.timeout_secs` (1 to 3600) | `MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS` | `30` |
 | `embeddings.batch_size` (1 to 1024) | none | `16` |
 | `embeddings.command` (a list) | none | none |
+| `embeddings.dimensions` (positive integer, legacy single-provider form) | none | `768` |
+| `embeddings.default` (named profile) | none | legacy `default` when a single provider is configured |
+| `embeddings.providers.<name>.type` (`command`, `openai`, `http` or `external`) | none | none |
+| `embeddings.providers.<name>.url` (`base_url` is an alias) | none | none |
+| `embeddings.profiles.<name>.provider`, `.model`, `.dimensions` | none | none |
 | `extraction.provider` (`none`, `heuristic`, `command` or `http`) | `MEMCASTLE_EXTRACTION_PROVIDER` | `none` |
 | `extraction.url` (an `http://` or `https://` URL) | `MEMCASTLE_EXTRACTION_URL` | none |
 | `extraction.model` | `MEMCASTLE_EXTRACTION_MODEL` | none |
@@ -421,10 +426,56 @@ MemCastle links no model and does not want your API keys, so the `[embeddings]` 
 Without it the palace works exactly as before and `search` is lexical.
 A vector is *derived* data: it is stored beside the drawer, never replaces its content, and can be recomputed at any time.
 
-Every stored vector has **768** numbers, because the vector index's dimension is part of the palace's schema.
-Pick a model that produces 768, or one that can be asked for 768 (OpenAI's `text-embedding-3-*` models accept a
-`dimensions` setting, which MemCastle sends).
-Anything else is refused with `memcastle::embed::dimension_mismatch`.
+The legacy single-provider configuration defaults to 768 dimensions; set `dimensions` for another model.
+The daemon requests each profile's configured dimensions and rejects a different-sized response with
+`memcastle::embed::dimension_mismatch`.
+Vectors for different profiles have separate records keyed by a generation-pipeline fingerprint, including the
+connection identity, model, dimensions and truncation version.
+Changing any of those settings creates a new space, rather than silently reusing incompatible vectors.
+The first space to claim a schema-declared 768-, 1536- or 3072-dimensional HNSW tier owns that tier permanently;
+other spaces, including models with the same dimensions, use slower exact profile-filtered ranking.
+Other positive dimensions also use exact ranking, so a model change never needs runtime schema DDL.
+The indexed tier cannot be reassigned by disabling a profile; choose the profile to index before the first embedding
+at that dimension (usually by setting it as the default), or plan for exact searches that grow with its corpus size.
+Use a versioned, immutable model identifier when the provider offers one.
+If an endpoint silently changes the model behind the *same* alias, MemCastle cannot detect that from configuration:
+pin the revision at the provider, or change the configured model/profile deliberately and re-embed.
+
+### Named connections and profiles
+
+```toml
+[embeddings]
+default = "local"
+
+[embeddings.providers.ollama]
+type = "openai"
+base_url = "http://localhost:11434/v1"
+
+[embeddings.providers.router]
+type = "openai"
+base_url = "https://openrouter.ai/api/v1"
+
+[embeddings.profiles.local]
+provider = "ollama"
+model = "qwen3-embedding"
+dimensions = 768
+
+[embeddings.profiles.bulk]
+provider = "router"
+model = "openai/text-embedding-3-small"
+dimensions = 1536
+```
+
+The `openai` type implements the OpenAI embeddings protocol, including compatible endpoints.
+`http` remains available for the legacy single-provider form.
+For caller-computed vectors without a daemon provider, use `type = "external"` for a named connection and select its
+profile explicitly on upload and query; the declared model and dimensions identify the space.
+Do not use one external profile for vectors from different models.
+The existing single-provider keys under `[embeddings]` map to a profile named `default` when that provider is enabled.
+If only named profiles are configured, set `embeddings.default` to enable automatic sweeps and unqualified semantic
+queries; otherwise select a profile explicitly for each job or search.
+Old vectors in `drawer.embedding` have no verifiable model identity: they are retained but excluded from profile search.
+Run `memcastle embed --profile NAME` to populate a new space.
 
 ### The `command` provider
 
@@ -466,9 +517,13 @@ A hosted one takes `MEMCASTLE_EMBEDDINGS_API_KEY`, sent as a bearer token; prefe
 
 - The daemon embeds in the background.
   After anything that writes drawers (mining, a checkpoint, a diary entry, a created drawer) and once at startup,
-  it queues a low-priority `embed` job that embeds every drawer without a vector.
+  it queues a low-priority `embed` job that embeds every drawer missing a vector in the default profile.
   Queued sweeps are coalesced, so a burst of writes leaves one waiting job.
   `memcastle embed` queues one by hand, for example after you first configure a provider.
+  `memcastle embed --profile bulk --refresh stale --wing project` selects a profile and refreshes missing or stale inputs;
+  `--refresh all` re-embeds every drawer in scope, while the default is `missing`.
+  Jobs persist their selected model and generation settings and fail with an actionable error if a restarted daemon has
+  changed them; submit a new job after changing a profile.
 - A drawer is embedded from its first 8,000 characters, because providers cap their input.
   Its content is stored whole and verbatim whatever the provider sees.
 - A query is embedded on the fly.
@@ -824,6 +879,14 @@ CLI `memcastle miner set` accepts the same options with repeatable `--option 'in
 `--option 'exclude=acme/private-experiment'` flags, and the REST miner API accepts the same table.
 MCP can list/get this miner but cannot change it.
 See [GitHub source](mining-sources.md#github) for Git prerequisites, path/label/topic filters and cursor behavior.
+
+A miner can override the global embedding profile with `embedding_profile = "bulk"` as a top-level `[[miners]]` field.
+This is not a source acquisition option: it does not go to the source adapter or alter its cursor.
+The miner pins its resolved profile on the mine job and queues a separate, pinned, missing-only embedding job limited
+to that mined source when mining finishes; a `wing` further restricts it if set.
+An explicit `memcastle embed --profile NAME` selects its own profile instead.
+Set it through `memcastle miner set NAME --embedding-profile bulk --wing WING` or unset it with
+`memcastle miner set NAME --unset embedding_profile`.
 
 ### Changing miners while the daemon runs
 

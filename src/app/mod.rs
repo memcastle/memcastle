@@ -65,6 +65,15 @@ pub use triggers::{
     TriggersReload, TriggersReport, WebhookView,
 };
 
+/// The mining request plus the optional pipeline a configured miner resolved before queuing it.
+struct MiningSubmission {
+    source: MiningSource,
+    wing: Option<String>,
+    full: bool,
+    options: Options,
+    embedding_space: Option<crate::domain::EmbeddingSpace>,
+}
+
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -599,11 +608,24 @@ impl AppServices {
             .map_err(|message| Error::invalid_input("temporal", message))?;
         let limit = effective_limit(Some(query.limit), DEFAULT_SEARCH_LIMIT);
         let vector = self.query_vector(&query).await?;
+        let space = if vector.is_some() {
+            Some(
+                self.embeddings
+                    .select(query.profile.as_deref())?
+                    .space()
+                    .ok_or(Error::EmbeddingsNotConfigured)?
+                    .fingerprint
+                    .clone(),
+            )
+        } else {
+            None
+        };
         crate::search::search(
             &self.store,
             &query,
             limit,
             vector.as_deref(),
+            space.as_deref(),
             &self.preferences,
         )
         .await
@@ -623,24 +645,45 @@ impl AppServices {
             return Ok(None);
         }
         if let Some(embedding) = &query.query_embedding {
+            let selected = query.profile.as_deref().ok_or_else(|| {
+                Error::invalid_input(
+                    "profile",
+                    "caller-supplied query vectors require an explicit configured profile",
+                )
+            })?;
+            let space = self
+                .embeddings
+                .select(Some(selected))?
+                .space()
+                .cloned()
+                .ok_or(Error::EmbeddingsNotConfigured)?;
             // A caller's mistake, so `invalid_input` (400) rather than the
             // provider-fault error `check_dimension` raises on the store side.
-            if embedding.len() != crate::domain::EMBEDDING_DIMENSION {
+            if embedding.len() != space.dimensions
+                || embedding.iter().any(|value| !value.is_finite())
+            {
                 return Err(Error::invalid_input(
                     "query_embedding",
                     format!(
-                        "has {} dimension(s) but the palace stores {}",
+                        "has {} dimension(s), but the selected profile requires {} finite dimensions",
                         embedding.len(),
-                        crate::domain::EMBEDDING_DIMENSION
+                        space.dimensions
                     ),
                 ));
             }
             return Ok(Some(embedding.clone()));
         }
-        if !self.embeddings.is_configured() || query.text.trim().is_empty() {
+        if query.text.trim().is_empty()
+            || (query.profile.is_none() && !self.embeddings.is_configured())
+        {
             return Ok(None);
         }
-        match self.embeddings.embed_one(&query.text).await {
+        match self
+            .embeddings
+            .select(query.profile.as_deref())?
+            .embed_one(&query.text)
+            .await
+        {
             Ok(vector) => Ok(Some(vector)),
             Err(error) if query.ranking == RankingMode::Auto => {
                 tracing::warn!(%error, "query embedding failed; searching lexically instead");
@@ -689,6 +732,57 @@ impl AppServices {
         }
     }
 
+    /// A caller vector must declare a configured profile so it can never be attached to an unknown space.
+    pub async fn set_drawer_profile_embedding(
+        &self,
+        drawer: DrawerId,
+        profile: &str,
+        embedding: Vec<f32>,
+        mode: MemoryMode,
+    ) -> Result<()> {
+        Self::require_write(mode, "drawer_embed")?;
+        let space = self
+            .embeddings
+            .select(Some(profile))?
+            .space()
+            .cloned()
+            .ok_or(Error::EmbeddingsNotConfigured)?;
+        if embedding.len() != space.dimensions || embedding.iter().any(|value| !value.is_finite()) {
+            return Err(Error::invalid_input(
+                "embedding",
+                format!(
+                    "profile `{profile}` requires {} finite dimensions",
+                    space.dimensions
+                ),
+            ));
+        }
+        let stored = self
+            .store
+            .get_drawer(drawer)
+            .await?
+            .ok_or_else(|| Error::DrawerNotFound {
+                room: None,
+                drawer: drawer.to_string(),
+            })?;
+        if self
+            .store
+            .set_profile_embedding(
+                &stored,
+                &space,
+                &crate::domain::EmbeddingSpace::input_hash(&stored.content),
+                &embedding,
+            )
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(Error::invalid_input(
+                "embedding",
+                "drawer content changed during embedding; retry with the current content",
+            ))
+        }
+    }
+
     /// Submit a mining job for `source`, returning immediately with the
     /// job's id — the CLI/MCP/HTTP caller never runs the mine itself.
     ///
@@ -719,6 +813,34 @@ impl AppServices {
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
+        self.submit_mine_with_embedding(
+            MiningSubmission {
+                source,
+                wing,
+                full,
+                options,
+                embedding_space: None,
+            },
+            requested_by,
+            mode,
+        )
+        .await
+    }
+
+    /// Submit a miner run with its resolved embedding-space override pinned beside the source job.
+    async fn submit_mine_with_embedding(
+        &self,
+        submission: MiningSubmission,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        let MiningSubmission {
+            source,
+            wing,
+            full,
+            options,
+            embedding_space,
+        } = submission;
         Self::require_write(mode, "mine")?;
         let source = self.checked_mining_source(source, &options).await?;
         // Up front, like the path: a bad wing name is a 400 at submission,
@@ -734,6 +856,7 @@ impl AppServices {
                     wing,
                     full,
                     options,
+                    embedding_space,
                 },
                 Priority::Background,
                 requested_by,
@@ -1115,12 +1238,46 @@ impl AppServices {
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
+        self.submit_embed_profile(
+            wing,
+            None,
+            crate::domain::EmbeddingRefresh::Missing,
+            requested_by,
+            mode,
+        )
+        .await
+    }
+
+    /// Pin an explicitly selected profile and refresh policy before the job enters the durable queue.
+    pub async fn submit_embed_profile(
+        &self,
+        wing: Option<String>,
+        profile: Option<String>,
+        refresh: crate::domain::EmbeddingRefresh,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
         Self::require_write(mode, "embed")?;
-        if !self.embeddings.is_configured() {
+        let selected = self.embeddings.select(profile.as_deref())?;
+        if !selected.is_configured() {
             return Err(Error::EmbeddingsNotConfigured);
         }
+        let space = selected
+            .space()
+            .cloned()
+            .ok_or(Error::EmbeddingsNotConfigured)?;
         self.scheduler
-            .submit(JobKind::Embed { wing }, Priority::Background, requested_by)
+            .submit(
+                JobKind::Embed {
+                    wing,
+                    source_id: None,
+                    profile: Some(space.profile.clone()),
+                    refresh,
+                    space: Some(space),
+                },
+                Priority::Background,
+                requested_by,
+            )
             .await
     }
 
@@ -2847,15 +3004,19 @@ mod tests {
         (app.with_embeddings(embeddings), store)
     }
 
-    /// Write `content` through the app and give it the fake provider's vector,
-    /// as the embedding sweep would.
+    /// Write `content` through the app and attach the fake provider's pinned-space vector.
     async fn remember(app: &AppServices, store: &SurrealStore, content: &str) -> Drawer {
         let drawer = app
             .diary_write("agent", "w", content.to_string(), "test", MemoryMode::Full)
             .await
             .expect("write");
         store
-            .set_drawer_embedding(drawer.id, &crate::embed::fake::vector_for(content))
+            .set_profile_embedding(
+                &drawer,
+                app.embeddings.space().expect("test provider has a space"),
+                &crate::domain::EmbeddingSpace::input_hash(content),
+                &crate::embed::fake::vector_for(content),
+            )
             .await
             .expect("embed");
         drawer
@@ -2946,10 +3107,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_caller_vector_of_the_wrong_length_is_the_callers_invalid_input() {
-        let app = test_app().await;
+        let (app, _) =
+            app_with_embeddings(Embeddings::new(crate::embed::fake::WordHashEmbedder, 8)).await;
         let query = SearchQuery {
             ranking: RankingMode::Semantic,
             query_embedding: Some(vec![1.0, 2.0]),
+            profile: Some("test".into()),
             ..SearchQuery::new("x")
         };
         let error = app

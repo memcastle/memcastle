@@ -1,4 +1,4 @@
-//! Retrieval queries: lexical, vector and fused ranking over the `drawer` table.
+//! Retrieval queries: lexical ranking over drawers, vector ranking in one space, and fused results.
 //!
 //! Every leg is one SurrealQL script, and every leg applies the *same* scope
 //! predicate ([`SCOPE_WHERE`]) inside the database, before ranking and before
@@ -181,6 +181,157 @@ pub(crate) fn check_dimension(embedding: &[f32]) -> Result<()> {
 }
 
 impl SurrealStore {
+    /// Exact, profile-filtered ranking for spaces without a dedicated index.
+    /// Apply the drawer scope inside the database before limiting candidates.
+    pub async fn search_vector_space(
+        &self,
+        embedding: &[f32],
+        limit: u32,
+        filter: &SearchFilter,
+        space: &str,
+    ) -> Result<Vec<SearchHit>> {
+        if let Some(table) = self.indexed_embedding_table(space, embedding.len()).await? {
+            let knn = knn_operator(limit);
+            let sql = format!(
+                "{SCOPE_PRELUDE} SELECT drawer AS id, vector::distance::knn() AS distance \
+                 FROM {table} WHERE vector {knn} $embedding AND drawer IN \
+                 (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+                 ORDER BY distance ASC, id ASC LIMIT $limit"
+            );
+            #[derive(Deserialize)]
+            struct Ranked {
+                id: String,
+                distance: f32,
+            }
+            let mut response = bind_scope(self.db.query(sql), filter)?
+                .bind(("embedding", embedding.to_vec()))
+                .bind(("limit", limit))
+                .await?;
+            let rows: Vec<Ranked> = super::take_rows(&mut response, 1)?;
+            let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+            let mut drawers = self.fetch_search_drawers(&ids).await?;
+            return Ok(rows
+                .into_iter()
+                .filter_map(|row| {
+                    let drawer = drawers.remove(&row.id)?;
+                    let score = 1.0 - row.distance;
+                    Some(SearchHit {
+                        drawer,
+                        score,
+                        signals: Signals {
+                            semantic: Some(score),
+                            ..Signals::default()
+                        },
+                        via: Vec::new(),
+                    })
+                })
+                .collect());
+        }
+        let sql = format!(
+            "{SCOPE_PRELUDE} SELECT drawer AS id, vector::similarity::cosine(vector, $embedding) AS score \
+            FROM drawer_embedding WHERE space = $space AND drawer IN \
+            (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+            ORDER BY score DESC, id ASC LIMIT $limit"
+        );
+        #[derive(Deserialize)]
+        struct Row {
+            id: String,
+            score: f32,
+        }
+        let mut response = bind_scope(self.db.query(sql), filter)?
+            .bind(("embedding", embedding.to_vec()))
+            .bind(("space", space.to_string()))
+            .bind(("limit", limit))
+            .await?;
+        let rows: Vec<Row> = super::take_rows(&mut response, 1)?;
+        let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+        let mut drawers = self.fetch_search_drawers(&ids).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                let drawer = drawers.remove(&row.id)?;
+                Some(SearchHit {
+                    drawer,
+                    score: row.score,
+                    signals: Signals {
+                        semantic: Some(row.score),
+                        ..Signals::default()
+                    },
+                    via: Vec::new(),
+                })
+            })
+            .collect())
+    }
+
+    /// Fuse the selected space with the unchanged BM25 leg; never compare vectors across spaces.
+    pub async fn search_hybrid_space(
+        &self,
+        query: &str,
+        embedding: &[f32],
+        limit: u32,
+        filter: &SearchFilter,
+        space: &str,
+    ) -> Result<Vec<SearchHit>> {
+        let pool = limit.saturating_mul(2).max(20);
+        let semantic = if let Some(table) =
+            self.indexed_embedding_table(space, embedding.len()).await?
+        {
+            let knn = knn_operator(pool);
+            format!(
+                "SELECT drawer AS id, vector::distance::knn() AS distance \
+                FROM {table} WHERE vector {knn} $embedding AND drawer IN \
+                (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+                ORDER BY distance ASC, id ASC LIMIT $pool"
+            )
+        } else {
+            format!(
+                "SELECT drawer AS id, 1.0 - vector::similarity::cosine(vector, $embedding) AS distance \
+                FROM drawer_embedding WHERE space = $space AND drawer IN \
+                (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+                ORDER BY distance ASC, id ASC LIMIT $pool"
+            )
+        };
+        let sql = format!(
+            "{SCOPE_PRELUDE} \
+             LET $semantic = ({semantic}); \
+             LET $lexical = (SELECT record::id(id) AS id, search::score(1) AS ft_score \
+                FROM drawer WHERE content @1,OR@ $query AND {SCOPE_WHERE} \
+                ORDER BY ft_score DESC, id ASC LIMIT $pool); \
+             RETURN search::rrf([$semantic, $lexical], $fuse_limit, 60);"
+        );
+        let mut response = bind_scope(self.db.query(sql), filter)?
+            .bind(("embedding", embedding.to_vec()))
+            .bind(("space", space.to_string()))
+            .bind(("query", query.to_string()))
+            .bind(("pool", pool))
+            .bind(("fuse_limit", pool.saturating_mul(2)))
+            .await?;
+        let mut fused: Vec<FusedRow> = super::take_rows(&mut response, 3)?;
+        fused.sort_by(|a, b| {
+            b.rrf_score
+                .total_cmp(&a.rrf_score)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        fused.truncate(limit as usize);
+        let ids: Vec<String> = fused.iter().map(|row| row.id.clone()).collect();
+        let mut drawers = self.fetch_search_drawers(&ids).await?;
+        Ok(fused
+            .into_iter()
+            .filter_map(|row| {
+                Some(SearchHit {
+                    drawer: drawers.remove(&row.id)?,
+                    score: row.rrf_score,
+                    signals: Signals {
+                        lexical: row.ft_score,
+                        semantic: row.distance.map(|distance| 1.0 - distance),
+                        ..Signals::default()
+                    },
+                    via: Vec::new(),
+                })
+            })
+            .collect())
+    }
+
     /// Lexical (BM25 full-text) search over drawer content, best first.
     ///
     /// `mode` picks whether every query term must match or any one will (see
@@ -222,11 +373,9 @@ impl SurrealStore {
     /// Vector search: the drawers nearest `embedding` by cosine similarity,
     /// most similar first, within `filter`.
     ///
-    /// The scope sits in the same `WHERE` as the KNN operator, so SurrealDB
-    /// filters *during* the index traversal and still returns `limit`
-    /// in-scope neighbours; a post-filter would return fewer, or none, when
-    /// the globally nearest drawers are out of scope. Drawers without an
-    /// embedding are not in the index and never appear.
+    /// Legacy compatibility path for provenance-free vectors; production
+    /// search uses `search_vector_space` instead. Scope is applied before
+    /// exact ranking and limiting, and drawers without an old vector are omitted.
     pub async fn search_vector(
         &self,
         embedding: &[f32],
@@ -234,11 +383,10 @@ impl SurrealStore {
         filter: &SearchFilter,
     ) -> Result<Vec<SearchHit>> {
         check_dimension(embedding)?;
-        let knn = knn_operator(limit);
         let sql = format!(
             "{SCOPE_PRELUDE} \
-             SELECT {DRAWER_SEARCH_COLUMNS}, vector::distance::knn() AS rank FROM drawer \
-             WHERE embedding {knn} $embedding AND {SCOPE_WHERE} \
+             SELECT {DRAWER_SEARCH_COLUMNS}, 1.0 - vector::similarity::cosine(embedding, $embedding) AS rank FROM drawer \
+             WHERE embedding != NONE AND {SCOPE_WHERE} \
              ORDER BY rank ASC, id ASC LIMIT $limit"
         );
         let mut response = bind_scope(self.db.query(sql), filter)?
@@ -286,11 +434,10 @@ impl SurrealStore {
         // drawer ranked mid-table by one leg but high by the other can still
         // surface.
         let pool = limit.saturating_mul(2).max(20);
-        let knn = knn_operator(pool);
         let sql = format!(
             "{SCOPE_PRELUDE} \
-             LET $semantic = (SELECT record::id(id) AS id, vector::distance::knn() AS distance \
-                FROM drawer WHERE embedding {knn} $embedding AND {SCOPE_WHERE} \
+             LET $semantic = (SELECT record::id(id) AS id, 1.0 - vector::similarity::cosine(embedding, $embedding) AS distance \
+                FROM drawer WHERE embedding != NONE AND {SCOPE_WHERE} \
                 ORDER BY distance ASC, id ASC LIMIT $pool); \
              LET $lexical = (SELECT record::id(id) AS id, search::score(1) AS ft_score \
                 FROM drawer WHERE content @1,OR@ $query AND {SCOPE_WHERE} \
@@ -1160,10 +1307,10 @@ mod tests {
     fn the_declared_dimension_matches_the_schema_index() {
         // `DIMENSION` lives in the schema file because Rust may not carry DDL;
         // this keeps the constant callers validate against equal to it.
-        let schema = include_str!("../../database/schema/palace.surql");
+        let schema = include_str!("../../database/schema/embedding.surql");
         assert!(
             schema.contains(&format!("HNSW DIMENSION {EMBEDDING_DIMENSION} ")),
-            "palace.surql must declare an HNSW index of {EMBEDDING_DIMENSION} dimensions"
+            "embedding.surql must declare a dedicated HNSW tier of {EMBEDDING_DIMENSION} dimensions"
         );
     }
 }

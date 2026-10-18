@@ -11,6 +11,7 @@ pub mod auth;
 mod checkpoint;
 mod credential;
 mod drawer;
+mod embedding;
 mod entity;
 mod extraction;
 mod fingerprint;
@@ -36,6 +37,7 @@ pub use credential::{AccessTokens, SourceAuth};
 pub use drawer::{
     Drawer, DrawerHistory, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex,
 };
+pub use embedding::{EmbeddingRefresh, EmbeddingSpace, MAX_EMBED_CHARS, PIPELINE_VERSION};
 pub use entity::{
     Entity, EntityKind, FactLifecycle, FactLink, FactLinkKind, FactLinkOrigin, FactProvenance,
     FactState, Mention, NewRelationship, Observation, Predicate, Relationship, infer_fact_link,

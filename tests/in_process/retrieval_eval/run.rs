@@ -54,6 +54,7 @@ pub fn request_for(
         },
     };
     SearchQuery {
+        profile: embedder.map(|_| "fixture".into()),
         text: query.text.clone(),
         ranking: run.ranking,
         limit: u32::try_from(LIMIT).expect("a small limit"),

@@ -110,7 +110,8 @@ A vector-seeded expansion is not measured here.
 An embedding model is a different thing to evaluate from the retrieval engine around it, and mixing them makes a number
 mean nothing: a better model would look like a better engine.
 So the bundled dataset runs with the daemon's embedding provider off, and the harness computes the vectors itself
-and hands them over (`PUT /api/drawers/{id}/embedding` and `query_embedding`).
+and hands them over under a configured caller-only `external` profile
+(`PUT /api/drawers/{id}/embedding` with `profile` and `query_embedding` with the same `profile`).
 
 The stand-in model is a hashed bag of concepts.
 Each word lights one slot of a 768-dimensional unit vector, stop words are dropped,

@@ -607,7 +607,20 @@ async fn wait_for_job(
 /// into an actual, actionable error message on the next failure, instead of
 /// guessing again.
 async fn spawn_daemon_and_wait(bin: &Path, palace: &Path) -> (Child, RuntimeInfo) {
-    let mut child = Command::new(bin)
+    spawn_daemon_and_wait_with_config(bin, palace, None).await
+}
+
+/// The provider-less caller-vector test keeps its space definition across both processes.
+async fn spawn_daemon_and_wait_with_config(
+    bin: &Path,
+    palace: &Path,
+    config: Option<&Path>,
+) -> (Child, RuntimeInfo) {
+    let mut command = Command::new(bin);
+    if let Some(config) = config {
+        command.env("MEMCASTLE_CONFIG", config);
+    }
+    let mut child = command
         .arg("serve")
         .env("MEMCASTLE_PALACE_PATH", palace)
         .env("MEMCASTLE_BIND", "127.0.0.1")
@@ -682,6 +695,8 @@ fn axis_vector(axis: usize) -> Vec<f32> {
 async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
     let dir = tempfile::tempdir().expect("tempdir");
     let palace = dir.path().join("palace");
+    let config = dir.path().join("embeddings.toml");
+    std::fs::write(&config, "[embeddings.providers.fixture]\ntype = 'external'\n[embeddings.profiles.fixture]\nprovider = 'fixture'\nmodel = 'axis-fixture'\ndimensions = 768\n").unwrap();
     let bin = cargo_bin("memcastle");
     let client = reqwest::Client::new();
 
@@ -706,7 +721,8 @@ async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
     // Round 1: derived data is written, then the daemon is stopped.
     let moment;
     {
-        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let (mut child, info) =
+            spawn_daemon_and_wait_with_config(&bin, &palace, Some(&config)).await;
         let base = format!("http://{}", info.bind_addr);
 
         let kept = write(base.clone(), "persisted vector memory about harbours").await;
@@ -715,7 +731,7 @@ async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
         for (id, axis) in [(&kept, 0), (&old, 1)] {
             client
                 .put(format!("{base}/api/drawers/{id}/embedding"))
-                .json(&serde_json::json!({ "embedding": axis_vector(axis) }))
+                .json(&serde_json::json!({ "profile": "fixture", "embedding": axis_vector(axis) }))
                 .send()
                 .await
                 .expect("put embedding")
@@ -749,7 +765,8 @@ async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
 
     // Round 2: a new process over the same files finds everything again.
     {
-        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let (mut child, info) =
+            spawn_daemon_and_wait_with_config(&bin, &palace, Some(&config)).await;
         let base = format!("http://{}", info.bind_addr);
         let contents = |hits: &serde_json::Value| -> Vec<String> {
             hits.as_array()
@@ -765,6 +782,7 @@ async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
             .json(&serde_json::json!({
                 "text": "",
                 "ranking": "semantic",
+                "profile": "fixture",
                 "limit": 1,
                 "query_embedding": axis_vector(0),
             }))

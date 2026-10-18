@@ -228,6 +228,7 @@ mod tests {
                 wing: None,
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Normal,
             "test",
