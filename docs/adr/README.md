@@ -68,7 +68,7 @@ The history is the value.
   (packaged and installed with an integration by ADR-034)
 - [ADR-021](021-richer-retrieval.md) — retrieval is SurrealDB-native and derived: one HNSW index, one shared scope,
   `search::rrf` fusion, point-in-time validity, drawer supersession and graph expansion, with embeddings from a provider
-  or the caller (temporal rule and supersession amended by ADR-032)
+  or the caller (temporal rule and supersession amended by ADR-032, vector-space layout amended by ADR-050)
 - [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) — integrations are self-contained bun
   packages, each with its own small client, tested against a real daemon in their own CI job
   (cross-integration tests amended by ADR-027, bundled releases by ADR-034)
@@ -195,3 +195,6 @@ The history is the value.
   independently selectable source and integration modules; a separate reviewed catalogue preserves the legacy source
   index, module state remains independent, and provider-scoped CI/releases decouple upstream changes from Core
   (builds on ADR-026, ADR-033 and ADR-034)
+- [ADR-050](050-embedding-spaces-and-provenance.md) — model and pipeline provenance define immutable vector spaces;
+  legacy vectors are quarantined, jobs pin their provider, and dedicated dimension-tier HNSW slots never mix spaces
+  (amends ADR-021)

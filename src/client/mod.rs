@@ -843,10 +843,21 @@ impl DaemonClient {
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
     pub async fn submit_embed(&self, wing: Option<String>) -> Result<Job> {
+        self.submit_embed_profile(wing, None, crate::domain::EmbeddingRefresh::Missing)
+            .await
+    }
+
+    /// Submit a profile-scoped, optionally refreshing embedding job.
+    pub async fn submit_embed_profile(
+        &self,
+        wing: Option<String>,
+        profile: Option<String>,
+        refresh: crate::domain::EmbeddingRefresh,
+    ) -> Result<Job> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
-                .json(&json!({ "type": "embed", "wing": wing, "requested_by": CHANNEL })),
+                .json(&json!({ "type": "embed", "wing": wing, "profile": profile, "refresh": refresh, "requested_by": CHANNEL })),
         )
         .await
     }

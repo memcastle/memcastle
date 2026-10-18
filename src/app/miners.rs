@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use super::AppServices;
+use super::{AppServices, MiningSubmission};
 use crate::config::miners_file::{self, FileStamp};
 use crate::domain::{
     CredentialRef, Job, JobKind, JobStatus, MemoryMode, MinerDefinition, MiningSource, NameKind,
@@ -238,6 +238,9 @@ pub struct MinerView {
     /// The wing its drawers go to, when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wing: Option<String>,
+    /// Optional profile overriding the global embedding default for this miner's drawers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_profile: Option<String>,
     /// Its credential, as a kind and an availability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<CredentialView>,
@@ -283,6 +286,8 @@ pub struct MinerPatch {
     pub locator: Option<String>,
     /// The wing for its drawers.
     pub wing: Option<String>,
+    /// Named profile to set; clear with `unset = ["embedding_profile"]`.
+    pub embedding_profile: Option<String>,
     /// Where its credential comes from.
     pub credential: Option<CredentialRef>,
     /// Source options to set.
@@ -603,15 +608,29 @@ impl AppServices {
             }
         }
         let job = self
-            .submit_mine(
-                MiningSource::Named {
-                    source: miner.source.clone(),
-                    // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
-                    locator: miner.locator.clone(),
+            .submit_mine_with_embedding(
+                MiningSubmission {
+                    source: MiningSource::Named {
+                        source: miner.source.clone(),
+                        // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
+                        locator: miner.locator.clone(),
+                    },
+                    wing: miner.wing.clone(),
+                    full,
+                    options,
+                    embedding_space: miner
+                        .embedding_profile
+                        .as_deref()
+                        .map(|profile| {
+                            self.embeddings.select(Some(profile)).map(|handle| {
+                                handle
+                                    .space()
+                                    .expect("activation verified the profile")
+                                    .clone()
+                            })
+                        })
+                        .transpose()?,
                 },
-                miner.wing.clone(),
-                full,
-                options,
                 requested_by,
                 mode,
             )
@@ -721,6 +740,17 @@ impl AppServices {
         &self,
         miner: &MinerDefinition,
     ) -> std::result::Result<(), String> {
+        if let Some(profile) = &miner.embedding_profile {
+            let selected = self
+                .embeddings
+                .select(Some(profile))
+                .map_err(|error| error.to_string())?;
+            if !selected.is_configured() {
+                return Err(format!(
+                    "embedding profile `{profile}` is external or has no provider; choose a runnable profile"
+                ));
+            }
+        }
         // The saved options are what a run passes to its source, so their keys are the source's to accept.
         let options = miner.options()?;
         crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source, &options)
@@ -867,6 +897,7 @@ impl AppServices {
             reason,
             locator: miner.locator.clone(),
             wing: miner.wing.clone(),
+            embedding_profile: miner.embedding_profile.clone(),
             credential,
             options: miner.options.clone(),
             source_id: record.map(|r| r.id),
@@ -926,6 +957,7 @@ fn apply(
                 enabled: true,
                 locator: None,
                 wing: None,
+                embedding_profile: None,
                 credential: None,
                 options: Map::new(),
             }
@@ -935,6 +967,7 @@ fn apply(
         match field.as_str() {
             "locator" => miner.locator = None,
             "wing" => miner.wing = None,
+            "embedding_profile" => miner.embedding_profile = None,
             "credential" => miner.credential = None,
             other => {
                 return Err(invalid(
@@ -957,6 +990,9 @@ fn apply(
     }
     if patch.wing.is_some() {
         miner.wing = patch.wing;
+    }
+    if patch.embedding_profile.is_some() {
+        miner.embedding_profile = patch.embedding_profile;
     }
     if patch.credential.is_some() {
         miner.credential = patch.credential;

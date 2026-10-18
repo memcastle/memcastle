@@ -243,6 +243,7 @@ mod tests {
             enabled: true,
             locator: Some("x".to_string()),
             wing: None,
+            embedding_profile: None,
             credential,
             options: serde_json::Map::new(),
         }

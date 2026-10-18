@@ -291,7 +291,17 @@ async fn build_report(
             };
             if in_scope {
                 total_drawers_in_scope += 1;
-                if drawer.missing_embedding {
+                // A migrated palace keeps its old vector field for recovery, but only a vector in the default
+                // configured space is semantically searchable. Without a default, retain the legacy diagnostic.
+                let missing = if let Some(space) = ctx.embeddings().space() {
+                    store
+                        .embedding_hashes(drawer.id, &space.fingerprint)
+                        .await?
+                        .is_none()
+                } else {
+                    drawer.missing_embedding
+                };
+                if missing {
                     drawers_without_embedding += 1;
                 }
             }
@@ -357,6 +367,54 @@ mod tests {
         assert_eq!(report.running_jobs, 0);
         assert_eq!(report.drawers_without_embedding, 0);
         assert_eq!(report.total_drawers_in_scope, 0);
+    }
+
+    #[tokio::test]
+    async fn an_audit_with_a_default_profile_counts_legacy_vectors_as_missing_until_reembedded() {
+        let store = memory_store().await;
+        let wing = store.get_or_create_wing("w", None).await.unwrap();
+        let room = store.get_or_create_room(wing.id, "r", None).await.unwrap();
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            room.id,
+            "legacy".into(),
+            Source::new(SourceKind::Manual, None, None),
+            vec![],
+            Provenance {
+                requested_by: "test".into(),
+                job_id: None,
+            },
+        );
+        store.create_drawer(&drawer).await.unwrap();
+        let vector = crate::embed::fake::vector_for("legacy");
+        store
+            .set_drawer_embedding(drawer.id, &vector)
+            .await
+            .unwrap();
+        let embeddings = crate::embed::Embeddings::new(crate::embed::fake::WordHashEmbedder, 4);
+        let space = embeddings.space().unwrap().clone();
+        let audit = |job: &Job| {
+            ctx_for(&store, job, JobControl::default()).with_embeddings(embeddings.clone())
+        };
+        let mut first = audit_job(None);
+        run(&audit(&first), &mut first, AuditParams { wing: None })
+            .await
+            .unwrap();
+        assert_eq!(report_of(&first).drawers_without_embedding, 1);
+        store
+            .set_profile_embedding(
+                &drawer,
+                &space,
+                &crate::domain::EmbeddingSpace::input_hash(&drawer.content),
+                &vector,
+            )
+            .await
+            .unwrap();
+        let mut second = audit_job(None);
+        run(&audit(&second), &mut second, AuditParams { wing: None })
+            .await
+            .unwrap();
+        assert_eq!(report_of(&second).drawers_without_embedding, 0);
     }
 
     #[tokio::test]

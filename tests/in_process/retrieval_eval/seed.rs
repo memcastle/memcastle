@@ -177,7 +177,7 @@ async fn create_new(
 pub async fn attach(http: &reqwest::Client, base: &str, id: &str, vector: &[f32]) {
     let response = http
         .put(format!("{base}/api/drawers/{id}/embedding"))
-        .json(&json!({ "embedding": vector }))
+        .json(&json!({ "profile": "fixture", "embedding": vector }))
         .send()
         .await
         .expect("attach embedding");

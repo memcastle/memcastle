@@ -15,12 +15,13 @@ pub mod command;
 pub mod http;
 pub mod job;
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::config::{EmbeddingProvider, EmbeddingsConfig};
-use crate::domain::EMBEDDING_DIMENSION;
+use crate::config::{EmbeddingConnection, EmbeddingProvider, EmbeddingsConfig};
+use crate::domain::{EMBEDDING_DIMENSION, EmbeddingSpace};
 use crate::error::{Error, Result};
 
 /// The most characters of one text sent to a provider.
@@ -29,7 +30,7 @@ use crate::error::{Error, Result};
 /// tokens, so an over-long text would make the provider reject the whole
 /// batch. The head of a document carries its subject; only the vector is
 /// computed from the truncated text, the drawer's content is untouched.
-pub const MAX_EMBED_CHARS: usize = 8_000;
+pub use crate::domain::MAX_EMBED_CHARS;
 
 /// The future an [`Embedder`] returns.
 pub type EmbedFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<Vec<f32>>>> + Send + 'a>>;
@@ -53,6 +54,9 @@ pub trait Embedder: Send + Sync + 'static {
 pub struct Embeddings {
     provider: Option<Arc<dyn Embedder>>,
     batch_size: usize,
+    space: Option<EmbeddingSpace>,
+    profiles: Arc<BTreeMap<String, Embeddings>>,
+    default_profile: Option<String>,
 }
 
 impl std::fmt::Debug for Embeddings {
@@ -77,6 +81,16 @@ impl Embeddings {
         Self {
             provider: Some(Arc::new(provider)),
             batch_size: batch_size.max(1),
+            space: Some(EmbeddingSpace::new(
+                "test".into(),
+                "test".into(),
+                "test".into(),
+                "test".into(),
+                "test".into(),
+                EMBEDDING_DIMENSION,
+            )),
+            profiles: Arc::default(),
+            default_profile: None,
         }
     }
 
@@ -86,27 +100,139 @@ impl Embeddings {
     ///
     /// [`Error::EmbeddingFailed`] if the HTTP client cannot be built.
     pub fn from_config(config: &EmbeddingsConfig) -> Result<Self> {
+        let legacy = EmbeddingConnection {
+            provider: config.provider,
+            command: config.command.clone(),
+            url: config.url.clone(),
+            api_key: config.api_key.clone(),
+            timeout_secs: config.timeout_secs,
+            batch_size: config.batch_size,
+        };
+        let mut profiles = BTreeMap::new();
+        if legacy.provider != EmbeddingProvider::None {
+            profiles.insert(
+                "default".to_string(),
+                Self::from_connection(
+                    "default",
+                    "legacy",
+                    &legacy,
+                    config.model.clone().unwrap_or_default(),
+                    config.dimensions,
+                )?,
+            );
+        }
+        for (name, profile) in &config.profiles {
+            let connection =
+                config
+                    .providers
+                    .get(&profile.provider)
+                    .ok_or_else(|| Error::EmbeddingFailed {
+                        message: format!(
+                            "unknown provider `{}` for profile `{name}`",
+                            profile.provider
+                        ),
+                    })?;
+            profiles.insert(
+                name.clone(),
+                Self::from_connection(
+                    name,
+                    &profile.provider,
+                    connection,
+                    profile.model.clone(),
+                    profile.dimensions,
+                )?,
+            );
+        }
+        let default = config.default.clone().or_else(|| {
+            profiles
+                .contains_key("default")
+                .then(|| "default".to_string())
+        });
+        let mut selected = default
+            .as_ref()
+            .and_then(|name| profiles.get(name))
+            .cloned()
+            .unwrap_or_default();
+        selected.profiles = Arc::new(profiles);
+        selected.default_profile = default;
+        Ok(selected)
+    }
+
+    fn from_connection(
+        name: &str,
+        provider_name: &str,
+        config: &EmbeddingConnection,
+        model: String,
+        dimensions: usize,
+    ) -> Result<Self> {
         let timeout = std::time::Duration::from_secs(config.timeout_secs);
-        match config.provider {
-            EmbeddingProvider::None => Ok(Self::disabled()),
-            EmbeddingProvider::Command => Ok(Self::new(
-                command::CommandEmbedder::new(
-                    config.command.clone(),
-                    config.model.clone(),
-                    timeout,
-                ),
+        let kind = match config.provider {
+            EmbeddingProvider::None => "none",
+            EmbeddingProvider::External => "external",
+            EmbeddingProvider::Command => "command",
+            EmbeddingProvider::Http | EmbeddingProvider::Openai => "openai",
+        };
+        let connection = match config.provider {
+            EmbeddingProvider::Command => {
+                serde_json::to_string(&config.command).unwrap_or_default()
+            }
+            _ => config.url.clone().unwrap_or_default(),
+        };
+        let mut handle = match config.provider {
+            EmbeddingProvider::None | EmbeddingProvider::External => Self::disabled(),
+            EmbeddingProvider::Command => Self::new(
+                command::CommandEmbedder::new(config.command.clone(), Some(model.clone()), timeout)
+                    .with_dimensions(dimensions),
                 config.batch_size,
-            )),
-            EmbeddingProvider::Http => Ok(Self::new(
+            ),
+            EmbeddingProvider::Http | EmbeddingProvider::Openai => Self::new(
                 http::HttpEmbedder::new(
                     config.url.clone().unwrap_or_default(),
-                    config.model.clone().unwrap_or_default(),
+                    model.clone(),
                     config.api_key.clone(),
                     timeout,
-                )?,
+                )?
+                .with_dimensions(dimensions),
                 config.batch_size,
-            )),
+            ),
+        };
+        // Commands and URLs may contain credentials; the fingerprint pins them without exposing them in job rows.
+        let connection_digest = crate::domain::sha256_hex(connection.as_bytes());
+        handle.space = Some(EmbeddingSpace::new(
+            name.into(),
+            provider_name.into(),
+            kind.into(),
+            connection_digest,
+            model,
+            dimensions,
+        ));
+        Ok(handle)
+    }
+
+    /// Resolve a named profile; an unknown or disabled profile must never substitute another.
+    pub fn select(&self, name: Option<&str>) -> Result<Self> {
+        if let Some(name) = name {
+            if self
+                .space
+                .as_ref()
+                .is_some_and(|space| space.profile == name)
+            {
+                return Ok(self.clone());
+            }
+            return self.profiles.get(name).cloned().ok_or_else(|| Error::invalid_input(
+                "profile", format!("unknown embedding profile `{name}`; configure it under [embeddings.profiles.{name}]"),
+            ));
         }
+        if !self.is_configured() {
+            return Err(Error::EmbeddingsNotConfigured);
+        }
+        Ok(self.clone())
+    }
+
+    /// The pinned, non-secret identity of the pipeline used by this handle.
+    #[must_use]
+    pub fn space(&self) -> Option<&EmbeddingSpace> {
+        self.space.as_ref()
     }
 
     /// Whether a provider is configured.
@@ -145,9 +271,13 @@ impl Embeddings {
                 });
             }
             for vector in &answered {
-                if vector.len() != EMBEDDING_DIMENSION {
+                let expected = self
+                    .space
+                    .as_ref()
+                    .map_or(EMBEDDING_DIMENSION, |s| s.dimensions);
+                if vector.len() != expected {
                     return Err(Error::EmbeddingDimension {
-                        expected: EMBEDDING_DIMENSION,
+                        expected,
                         actual: vector.len(),
                     });
                 }
@@ -225,6 +355,51 @@ pub(crate) mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_profiles_keep_same_dimension_models_in_different_spaces() {
+        let mut config = EmbeddingsConfig::default();
+        config.providers.insert(
+            "local".into(),
+            EmbeddingConnection {
+                provider: EmbeddingProvider::External,
+                ..Default::default()
+            },
+        );
+        config.providers.insert(
+            "bulk".into(),
+            EmbeddingConnection {
+                provider: EmbeddingProvider::External,
+                ..Default::default()
+            },
+        );
+        config.profiles.insert(
+            "local".into(),
+            crate::config::EmbeddingProfileConfig {
+                provider: "local".into(),
+                model: "one".into(),
+                dimensions: 768,
+            },
+        );
+        config.profiles.insert(
+            "bulk".into(),
+            crate::config::EmbeddingProfileConfig {
+                provider: "bulk".into(),
+                model: "two".into(),
+                dimensions: 768,
+            },
+        );
+        config.default = Some("local".into());
+        let profiles = Embeddings::from_config(&config).unwrap();
+        let local = profiles.select(None).unwrap_err(); // external-only profiles do not generate vectors.
+        assert!(matches!(local, Error::EmbeddingsNotConfigured));
+        let local = profiles.select(Some("local")).unwrap();
+        let bulk = profiles.select(Some("bulk")).unwrap();
+        assert_ne!(
+            local.space().unwrap().fingerprint,
+            bulk.space().unwrap().fingerprint
+        );
+    }
 
     /// Returns whatever it was built with, whatever it is asked.
     struct Canned(Vec<Vec<f32>>);

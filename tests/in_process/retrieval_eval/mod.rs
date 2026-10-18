@@ -49,7 +49,24 @@ pub async fn evaluate(path: &Path, options: &Options) -> Evaluation {
     let (dataset, sha256) = Dataset::load(path);
     let embedder = Embedder::new(&dataset.concepts);
     // No provider: the vectors are the harness's own, so the daemon's embedding pipeline is not part of what is measured.
-    let daemon = TestDaemon::start().await;
+    let daemon = TestDaemon::start_configured(|config| {
+        config.embeddings.providers.insert(
+            "fixture".into(),
+            memcastle::config::EmbeddingConnection {
+                provider: memcastle::config::EmbeddingProvider::External,
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "fixture".into(),
+            memcastle::config::EmbeddingProfileConfig {
+                provider: "fixture".into(),
+                model: "hashed-bag-of-concepts".into(),
+                dimensions: 768,
+            },
+        );
+    })
+    .await;
     let base = daemon.base_url.clone();
     let seeded = seed::seed(&base, &dataset, &embedder, options.scale).await;
 

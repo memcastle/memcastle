@@ -84,6 +84,16 @@ The version stays at the last step that succeeded, so once the cause is fixed a 
 The lock is a lease, so a crashed run does not block the next one forever;
 a start that finds it held fails with `memcastle::migrate::locked`.
 
+## Existing embeddings without provenance
+
+Version 4 records the switch to profile-scoped vectors after SurrealKit adds the derived-vector tables,
+and retires the unscoped legacy HNSW index with SurrealKit's destructive rollout API.
+The old `drawer.embedding` values remain recoverable, but their provider and model cannot be inferred reliably;
+semantic search does not use them in a selected profile.
+Migration does not contact a provider or rewrite canonical content.
+After configuring a profile, run `memcastle embed --profile NAME` to fill its missing vectors as a durable job.
+Use `--refresh stale` or `--refresh all` only when those replacements are intended.
+
 ## Inspect or run migrations by hand
 
 `memcastle migrate` runs the same code as `serve`, but talks to storage directly and needs no daemon.
@@ -119,7 +129,7 @@ Applying prints what happened, in the same two forms:
 An embedded palace can only be opened by one process, so **stop the daemon before running `memcastle migrate`**;
 otherwise it fails with `memcastle::store::backend_failed`.
 While a daemon is running, `memcastle status` shows the same information under its datastore line
-(`migrations 3/3`), and lists any pending steps.
+(`migrations 4/4`), and lists any pending steps.
 
 ## Upgrading MemCastle
 

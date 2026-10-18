@@ -278,6 +278,8 @@ pub(super) async fn drawer_history(
 pub(super) struct EmbeddingBody {
     /// The vector, of the palace's fixed dimension.
     embedding: Vec<f32>,
+    /// The configured profile whose model produced this caller-supplied vector.
+    profile: Option<String>,
 }
 
 /// `PUT /api/drawers/{id}/embedding`: attach a caller-computed vector.
@@ -290,7 +292,12 @@ pub(super) async fn set_drawer_embedding(
     let id = parse_drawer_id(&id)?;
     state
         .app
-        .set_drawer_embedding(id, body.embedding, mode)
+        .set_drawer_profile_embedding(
+            id,
+            body.profile.as_deref().unwrap_or(""),
+            body.embedding,
+            mode,
+        )
         .await?;
     Ok(Json(serde_json::json!({ "embedded": true })))
 }

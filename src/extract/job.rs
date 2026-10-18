@@ -305,6 +305,7 @@ mod tests {
                 wing: Some("docs".to_string()),
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Background,
             "test",

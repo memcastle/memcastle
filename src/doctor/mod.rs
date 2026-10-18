@@ -943,6 +943,7 @@ mod tests {
             enabled: false,
             locator: Some(temp.path().join("absent").display().to_string()),
             wing: None,
+            embedding_profile: None,
             credential: Some(CredentialRef::File {
                 path: temp.path().join("missing-secret").display().to_string(),
             }),

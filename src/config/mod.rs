@@ -310,6 +310,10 @@ pub enum EmbeddingProvider {
     /// An OpenAI-compatible `/embeddings` HTTP endpoint (OpenAI, Ollama,
     /// llama.cpp, vLLM, ...).
     Http,
+    /// The OpenAI embeddings protocol, also spoken by compatible endpoints.
+    Openai,
+    /// Vectors are computed by callers; the daemon never invokes this provider.
+    External,
 }
 
 impl std::str::FromStr for EmbeddingProvider {
@@ -320,8 +324,10 @@ impl std::str::FromStr for EmbeddingProvider {
             "none" => Ok(Self::None),
             "command" => Ok(Self::Command),
             "http" => Ok(Self::Http),
+            "openai" => Ok(Self::Openai),
+            "external" => Ok(Self::External),
             other => Err(format!(
-                "unknown embedding provider `{other}`; expected one of: none, command, http"
+                "unknown embedding provider `{other}`; expected one of: none, command, http, openai, external"
             )),
         }
     }
@@ -332,6 +338,51 @@ pub const DEFAULT_EMBEDDING_TIMEOUT_SECS: u64 = 30;
 /// The default number of texts sent to the provider per call.
 pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 16;
 
+/// A named connection to an embedding service; credentials are never part of a space identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EmbeddingConnection {
+    /// Provider implementation (`openai` accepts any OpenAI-compatible endpoint).
+    #[serde(rename = "type")]
+    pub provider: EmbeddingProvider,
+    /// Executable and arguments, for the command provider.
+    pub command: Vec<String>,
+    /// API base URL, for the OpenAI-compatible provider.
+    #[serde(alias = "base_url")]
+    pub url: Option<String>,
+    /// Optional bearer credential; excluded from serialized configuration.
+    #[serde(skip_serializing)]
+    pub api_key: Option<Secret>,
+    /// Maximum time per request in seconds.
+    pub timeout_secs: u64,
+    /// Number of texts per provider call.
+    pub batch_size: usize,
+}
+
+impl Default for EmbeddingConnection {
+    fn default() -> Self {
+        Self {
+            provider: EmbeddingProvider::None,
+            command: Vec::new(),
+            url: None,
+            api_key: None,
+            timeout_secs: DEFAULT_EMBEDDING_TIMEOUT_SECS,
+            batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+        }
+    }
+}
+
+/// A selectable embedding pipeline. Several profiles may share one connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingProfileConfig {
+    /// Name of the connection under `[embeddings.providers]`.
+    pub provider: String,
+    /// Model identifier passed to the provider.
+    pub model: String,
+    /// Expected vector length and requested length when the provider supports it.
+    pub dimensions: usize,
+}
+
 /// Embedding provider settings (`[embeddings]`).
 ///
 /// Embeddings are derived data: the palace works without a provider, and one
@@ -340,6 +391,12 @@ pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 16;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddingsConfig {
+    /// Default profile used by automatic sweeps and unqualified queries.
+    pub default: Option<String>,
+    /// Named connections; the profile below selects one by name.
+    pub providers: std::collections::BTreeMap<String, EmbeddingConnection>,
+    /// Named, independently searchable vector spaces.
+    pub profiles: std::collections::BTreeMap<String, EmbeddingProfileConfig>,
     /// Which mechanism produces embeddings.
     pub provider: EmbeddingProvider,
     /// For `provider = "command"`: the program and its arguments, run without a
@@ -362,11 +419,16 @@ pub struct EmbeddingsConfig {
     pub timeout_secs: u64,
     /// How many texts one call carries; bounds a provider's request size.
     pub batch_size: usize,
+    /// Dimension of the legacy single-provider configuration.
+    pub dimensions: usize,
 }
 
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
+            default: None,
+            providers: Default::default(),
+            profiles: Default::default(),
             provider: EmbeddingProvider::None,
             command: Vec::new(),
             url: None,
@@ -374,6 +436,7 @@ impl Default for EmbeddingsConfig {
             api_key: None,
             timeout_secs: DEFAULT_EMBEDDING_TIMEOUT_SECS,
             batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+            dimensions: crate::domain::EMBEDDING_DIMENSION,
         }
     }
 }
@@ -1671,7 +1734,7 @@ impl Config {
     fn validate_embeddings(&self) -> Result<()> {
         let embeddings = &self.embeddings;
         match embeddings.provider {
-            EmbeddingProvider::None => {}
+            EmbeddingProvider::None | EmbeddingProvider::External => {}
             EmbeddingProvider::Command => {
                 if embeddings
                     .command
@@ -1684,7 +1747,7 @@ impl Config {
                     ));
                 }
             }
-            EmbeddingProvider::Http => {
+            EmbeddingProvider::Http | EmbeddingProvider::Openai => {
                 let url = embeddings.url.as_deref().unwrap_or_default();
                 if !(url.starts_with("http://") || url.starts_with("https://")) {
                     return Err(Error::config(
@@ -1714,6 +1777,66 @@ impl Config {
             return Err(Error::config(
                 "embeddings.batch_size must be between 1 and 1024",
             ));
+        }
+        if embeddings.dimensions == 0 {
+            return Err(Error::config("embeddings.dimensions must be positive"));
+        }
+        if let Some(default) = &embeddings.default
+            && !embeddings.profiles.contains_key(default)
+            && !(default == "default" && embeddings.provider != EmbeddingProvider::None)
+        {
+            return Err(Error::config(format!(
+                "embeddings.default refers to unknown profile `{default}`"
+            )));
+        }
+        for (name, profile) in &embeddings.profiles {
+            if !embeddings.providers.contains_key(&profile.provider) {
+                return Err(Error::config(format!(
+                    "embedding profile `{name}` refers to unknown provider `{}`",
+                    profile.provider
+                )));
+            }
+            if profile.dimensions == 0 || profile.model.trim().is_empty() {
+                return Err(Error::config(format!(
+                    "embedding profile `{name}` needs a model and positive dimensions"
+                )));
+            }
+        }
+        for (name, provider) in &embeddings.providers {
+            match provider.provider {
+                EmbeddingProvider::None => {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` needs a type"
+                    )));
+                }
+                EmbeddingProvider::Command
+                    if provider
+                        .command
+                        .first()
+                        .is_none_or(|program| program.trim().is_empty()) =>
+                {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` needs a command"
+                    )));
+                }
+                EmbeddingProvider::Http | EmbeddingProvider::Openai
+                    if provider.url.as_deref().is_none_or(|url| {
+                        !(url.starts_with("http://") || url.starts_with("https://"))
+                    }) =>
+                {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` needs an http(s) url"
+                    )));
+                }
+                _ => {}
+            }
+            if !(1..=3600).contains(&provider.timeout_secs)
+                || !(1..=1024).contains(&provider.batch_size)
+            {
+                return Err(Error::config(format!(
+                    "embedding provider `{name}` needs timeout_secs in 1..=3600 and batch_size in 1..=1024"
+                )));
+            }
         }
         Ok(())
     }
@@ -2681,7 +2804,7 @@ mod tests {
     fn a_malformed_provider_override_names_the_variable() {
         let mut config = valid_config();
         let message = config
-            .apply_overrides_from(env(&[("MEMCASTLE_EMBEDDINGS_PROVIDER", "openai")]))
+            .apply_overrides_from(env(&[("MEMCASTLE_EMBEDDINGS_PROVIDER", "unknown")]))
             .unwrap_err()
             .to_string();
         assert!(
@@ -2731,6 +2854,61 @@ mod tests {
         config.embeddings.api_key = Some(Secret::new("sk-very-secret"));
         assert!(!format!("{config:?}").contains("sk-very-secret"));
         assert!(!toml::to_string(&config).unwrap().contains("sk-very-secret"));
+    }
+
+    #[test]
+    fn named_embedding_profiles_require_known_connections_and_hide_their_credentials() {
+        let mut config = valid_config();
+        config.embeddings.default = Some("local".into());
+        config.embeddings.profiles.insert(
+            "local".into(),
+            EmbeddingProfileConfig {
+                provider: "ollama".into(),
+                model: "qwen".into(),
+                dimensions: 768,
+            },
+        );
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("ollama"), "{error}");
+        config.embeddings.providers.insert(
+            "ollama".into(),
+            EmbeddingConnection {
+                provider: EmbeddingProvider::Openai,
+                url: Some("http://127.0.0.1:11434/v1".into()),
+                api_key: Some(Secret::new("secret-test-value")),
+                ..Default::default()
+            },
+        );
+        config
+            .validate()
+            .expect("a complete named provider and profile validate");
+        assert!(
+            !toml::to_string(&config)
+                .unwrap()
+                .contains("secret-test-value")
+        );
+    }
+
+    #[test]
+    fn named_provider_toml_accepts_the_openai_compatible_base_url_spelling() {
+        let config: EmbeddingsConfig = toml::from_str(
+            r#"
+default = "local"
+[providers.local]
+type = "openai"
+base_url = "http://127.0.0.1:11434/v1"
+[profiles.local]
+provider = "local"
+model = "qwen"
+dimensions = 768
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.providers["local"].url.as_deref(),
+            Some("http://127.0.0.1:11434/v1")
+        );
+        assert_eq!(config.default.as_deref(), Some("local"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 |---|---|---|
 | `memcastle_set_mode` | `mode` | Choose this session's [memory mode](memory-modes.md). |
 | `memcastle_status` | none | Daemon health: version, uptime, pid, address, palace, datastore and migration state, counts. |
-| `memcastle_search` | `query`, `limit?`, `wing?`, `room?`, `ranking?`, `tags?`, `source_kind?`, `as_of?`, `from?`, `until?`, `include_historical?`, `expand?` | Search drawer content: lexical, semantic or hybrid, see [Searching](#searching). |
+| `memcastle_search` | `query`, `limit?`, `wing?`, `room?`, `ranking?`, `profile?`, `tags?`, `source_kind?`, `as_of?`, `from?`, `until?`, `include_historical?`, `expand?` | Search drawer content: lexical, semantic or hybrid in a selected profile, see [Searching](#searching). |
 | `memcastle_recall` | the same, without `room` | Verbatim recall of matching content. |
 | `memcastle_history` | `drawer_id` | How one piece of knowledge evolved: every version of a drawer's supersession chain, oldest first, see [History](#history). |
 | `memcastle_fact_history` | `relationship_id`, `as_of?` | An assertion and its linked confirmations, conflicts or corrections, with provenance and reasons. Read-only. |
@@ -215,7 +215,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | One drawer in full. | none |
 | `DELETE /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | Delete one drawer. | none |
 | `POST /api/drawers/{id}/supersede` | End a drawer's validity now, with a replacement when `content` is given: `{superseded, replacement}`. | JSON body: `content?`, `tags?`, `requested_by?` |
-| `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer. | JSON body: `embedding` (768 numbers) |
+| `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer in a configured profile. | JSON body: `profile`, `embedding` (profile dimensions) |
 | `GET /api/drawers/{id}/duplicates` | The drawers this one was recorded as a likely duplicate of, or that resemble it, with the evidence: `{drawer, similar}`. See [Deduplication](deduplication.md). | none |
 | `GET /api/drawers/{id}/history` | How the knowledge a drawer belongs to evolved: `{drawer, versions}`, every version of its supersession chain oldest first, from any version of it. See [History](#history). | none |
 | `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. The name converges on an entity it is a variant of. | JSON body: `name`, `kind` |
@@ -410,20 +410,24 @@ A hit never carries the embedding vector.
 
 **Your own vectors.**
 `POST /api/search` takes the request as JSON, so it can carry a `query_embedding`.
+Set `profile` to select one compatible embedding space, in either JSON or the GET query string.
+Caller-supplied vectors require an explicit configured profile, including when the connection is `external`.
 Its text is `text` (or `query`, like everywhere else), and the scope is a nested `filter` rather than the flat
 `wing`, `room` and `tags` of the `GET` form:
 
 ```json
 { "text": "…", "ranking": "semantic", "limit": 5,
   "filter": { "wing": "work", "tags": ["style"], "temporal": "current" },
-  "query_embedding": [0.01, "… 768 numbers"] }
+  "profile": "local", "query_embedding": [0.01, "… profile dimensions"] }
 ```
 
 `temporal` is `"current"`, `"all"`, `{"as_of": "2026-01-31T12:00:00Z"}` or
 `{"between": {"from": "2026-01-01T00:00:00Z", "until": "2026-02-01T00:00:00Z"}}`.
 An interval whose `from` is not before its `until` is refused with `memcastle::input::invalid`.
-Attach a document vector with `PUT /api/drawers/{id}/embedding`, whose body is `{"embedding": [...]}`.
-Both need exactly 768 numbers: the dimension is part of the palace's schema.
+Attach a document vector with `PUT /api/drawers/{id}/embedding`, whose body is
+`{"profile": "local", "embedding": [...]}`.
+The selected profile records provider, model, dimension and pipeline provenance with the vector.
+The document and query vectors must both have the selected profile's configured dimensions.
 
 **Correcting a drawer.**
 `POST /api/drawers/{id}/supersede` closes the drawer and, when the body has `content`, files a replacement in the same room
@@ -675,7 +679,7 @@ The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md) and
 | `mine` | `path` (absolute directory) or `source` (a [source](mining-sources.md) by name) with `locator?`, then `options?` (an object of strings), `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
 | `audit` | `wing?` |
-| `embed` | `wing?`; fills the embeddings that are missing, and needs an `[embeddings]` provider (REST and CLI only, no MCP tool) |
+| `embed` | `wing?`, `profile?`, `refresh?` (`missing` by default; `stale` or `all` when explicitly requested); pins the provider, model, dimension and space in the durable job (REST and CLI only, no MCP tool) |
 | `extract` | `wing?`, see [the knowledge graph](#the-knowledge-graph) |
 | `repair` | `dry_run?` (default `true`), `based_on_job?` |
 | `demo` | `steps` |

@@ -302,15 +302,18 @@ Retrieval is SurrealDB's work, and MemCastle owns the contract and the policy
 ([ADR-021](adr/021-richer-retrieval.md)).
 The `search` module takes a `SearchQuery` (text, ranking, scope, point in time, expansion) and returns `SearchHit`s: the
 stored drawer verbatim, a score and the signals behind it.
-No second vector store, graph store or index file exists; everything runs against the one `drawer` table.
+No second datastore or vector index file exists: canonical drawers, derived profile-scoped vectors and graph records
+share the same SurrealDB palace.
 
 ```mermaid
 flowchart LR
     Q[SearchQuery] --> R{ranking}
     R -->|lexical| BM[BM25 full-text index]
-    R -->|semantic| HN[HNSW vector index]
-    R -->|hybrid| BM & HN
-    BM & HN --> FU[search::rrf fusion]
+    R -->|semantic| VS{selected profile}
+    R -->|hybrid| BM & VS
+    VS -->|assigned tier| HN[dedicated HNSW index]
+    VS -->|other dimension or space| ES[exact profile-filtered search]
+    BM & HN & ES --> FU[search::rrf fusion]
     FU --> TB[id tie-break]
     TB --> EX{expand?}
     EX -->|yes| GR[mentions, entity, relates_to traversal]
@@ -321,7 +324,8 @@ flowchart LR
 - **Lexical** (BM25) first requires every word to match.
   Only if that finds nothing does it retry with any single word sufficing,
   because SurrealDB has no stop-word filter and a natural-language question carries words the stored text never contains.
-- **Semantic** is a k-nearest-neighbour query on an HNSW index over `drawer.embedding` (768 dimensions, cosine).
+- **Semantic** selects one immutable space fingerprint and searches its dedicated HNSW tier when assigned;
+  otherwise it ranks only that space's derived vectors exactly by cosine similarity.
 - **Hybrid** runs both and merges them with SurrealDB's own `search::rrf`, which fuses by rank and so needs no score
   normalisation.
   Rust breaks ties by drawer id, so a query always ranks the same way.
@@ -343,8 +347,11 @@ flowchart LR
   after the direct hits, and never reorders them.
 - **Where vectors come from.**
   The `embed` module wraps a provider (an operator's program, an OpenAI-compatible endpoint, or none) behind one trait,
-  and the `Embed` job fills drawers that have none.
-  A caller may instead send vectors itself.
+  and the `Embed` job fills the selected profile's missing vectors by default, or refreshes existing ones when asked.
+  Every vector lives in a separate derived record with a content hash and a pinned provider/model/pipeline identity;
+  an HNSW dimension tier serves only its assigned space, and other profiles use exact profile-filtered ranking.
+  Old, provenance-free vectors remain outside profile search until a new job re-embeds them.
+  A caller may instead send vectors itself under an explicit configured external profile.
   With no provider, `auto` ranking is lexical, so a palace keeps working without any model.
 
 ## Memory flows

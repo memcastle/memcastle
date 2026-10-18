@@ -11,13 +11,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{Drawer, PreferenceMatch, SourceKind};
 
-/// The length of every stored embedding.
+/// The length of the legacy embedding slot and its matching dedicated HNSW tier.
 ///
-/// Fixed because the vector index declares its dimension in
-/// `database/schema/palace.surql` (DDL may not live in Rust), so one number
-/// has to be agreed by the schema, the embedding providers and the callers
-/// supplying their own vectors. A unit test keeps this constant equal to the
-/// schema's `DIMENSION`.
+/// New profiles declare their own dimensions. This constant remains for
+/// compatibility with the old drawer field and its tests; a schema test
+/// keeps it equal to the 768-dimension tier in `database/schema/embedding.surql`.
 pub const EMBEDDING_DIMENSION: usize = 768;
 
 /// How a search ranks drawers.
@@ -175,6 +173,8 @@ pub struct SearchQuery {
     /// Lets a client with its own model search semantically against a daemon
     /// that has no embedding provider configured.
     pub query_embedding: Option<Vec<f32>>,
+    /// The named embedding profile for the semantic leg (defaults to the daemon's configured default).
+    pub profile: Option<String>,
 }
 
 impl SearchQuery {

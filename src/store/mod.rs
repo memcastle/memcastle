@@ -50,6 +50,7 @@ use embedded_schema_gen::embedded_schema;
 mod auth;
 mod drawers;
 mod duplicates;
+mod embedding;
 mod entities;
 mod extraction;
 mod graph;
@@ -505,6 +506,42 @@ impl SurrealStore {
             .await
             .map_err(|source| Error::schema_sync(source.to_string()))
     }
+
+    /// Retire the old, provenance-free HNSW through SurrealKit's destructive rollout API.
+    /// A completed rollout is not replayed when a daemon starts again.
+    pub(crate) async fn retire_legacy_embedding_index(&self) -> Result<()> {
+        use surrealkit::{
+            EntityKey, EntityKind, Rollout, RolloutPhase, RolloutSpec, RolloutStatus, RolloutStep,
+        };
+        let spec = RolloutSpec::builder("memcastle-embedding-quarantine-v4")
+            .step(RolloutStep::remove_entities(
+                "drop-legacy-hnsw",
+                RolloutPhase::Complete,
+                vec![EntityKey {
+                    kind: EntityKind::Index,
+                    scope: Some("drawer".into()),
+                    name: "drawer_embedding_idx".into(),
+                }],
+            ))
+            .build();
+        let rollout = Rollout::new(spec, embedded_schema::SCHEMA);
+        if rollout
+            .status(&self.db)
+            .await
+            .map_err(|error| Error::schema_sync(error.to_string()))?
+            .is_some_and(|state| state.status == Some(RolloutStatus::Completed))
+        {
+            return Ok(());
+        }
+        rollout
+            .start(&self.db)
+            .await
+            .map_err(|error| Error::schema_sync(error.to_string()))?;
+        rollout
+            .complete(&self.db)
+            .await
+            .map_err(|error| Error::schema_sync(error.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -543,6 +580,70 @@ mod tests {
         let store = memory_store().await;
         // Re-running must not error — every DEFINE is IF NOT EXISTS.
         store.sync_schema().await.expect("second sync_schema");
+    }
+
+    #[tokio::test]
+    async fn the_version_four_rollout_removes_an_existing_unscoped_vector_index() {
+        let store = memory_store().await;
+        checked(
+            store
+                .db
+                .query(include_str!(
+                    "../../tests/fixtures/legacy_embedding_index.surql"
+                ))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let wing = store.get_or_create_wing("legacy", None).await.unwrap();
+        let room = store
+            .get_or_create_room(wing.id, "notes", None)
+            .await
+            .unwrap();
+        let drawer = test_drawer(room.id, "legacy content survives index retirement");
+        store.create_drawer(&drawer).await.unwrap();
+        let mut vector = vec![0.0; 768];
+        vector[0] = 1.0;
+        store
+            .set_drawer_embedding(drawer.id, &vector)
+            .await
+            .unwrap();
+        let indexes = |schema: surrealkit::typegen::SchemaTypes| {
+            schema
+                .tables
+                .into_iter()
+                .find(|table| table.name == "drawer")
+                .unwrap()
+                .indexes
+                .into_iter()
+                .map(|index| index.name)
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            indexes(surrealkit::typegen::generate(&store.db).await.unwrap())
+                .contains(&"drawer_embedding_idx".to_string())
+        );
+        crate::migrate::run(&store).await.unwrap();
+        assert!(
+            !indexes(surrealkit::typegen::generate(&store.db).await.unwrap())
+                .contains(&"drawer_embedding_idx".to_string())
+        );
+        assert!(
+            indexes(surrealkit::typegen::generate(&store.db).await.unwrap())
+                .contains(&"drawer_content_search".to_string())
+        );
+        assert_eq!(
+            store
+                .get_drawer(drawer.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .embedding,
+            Some(vector)
+        );
+        crate::migrate::run(&store)
+            .await
+            .expect("the completed rollout does not run a second time");
     }
 
     fn query_error(details: surrealdb::types::QueryError) -> surrealdb::Error {
@@ -844,6 +945,7 @@ mod tests {
                 wing: None,
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             Priority::Critical,
             "test",
@@ -1380,6 +1482,7 @@ mod tests {
                 wing: None,
                 full: false,
                 options: Default::default(),
+                embedding_space: None,
             },
             crate::domain::Priority::Background,
             "test",

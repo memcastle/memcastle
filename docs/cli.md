@@ -243,11 +243,12 @@ Failures print a diagnostic with a `memcastle::<module>::<kind>` code and what t
 
 ```sh
 memcastle search <QUERY> [--limit <N>] [--wing <WING>] [--room <ROOM>]
-                 [--ranking <auto|lexical|semantic|hybrid>] [--tag <TAG>]... [--source-kind <KIND>]
+                 [--ranking <auto|lexical|semantic|hybrid>] [--profile <NAME>] [--tag <TAG>]... [--source-kind <KIND>]
                  [--as-of <WHEN> | --from <WHEN> --until <WHEN> | --include-historical] [--expand]
 ```
 
 Search drawer content, lexically, by meaning or both.
+`--profile` selects the compatible vector space for the semantic leg; without it the daemon uses its default profile.
 `--ranking auto` (the default) is hybrid when the daemon has an [embedding provider](configuration.md#embeddings) and
 lexical otherwise.
 Lexical matching returns drawers containing every word of the query and, if there are none, drawers containing any of them.
@@ -278,7 +279,7 @@ Piped, or with `--json`, the output is JSON, and the fields of each hit are desc
 ### `recall`
 
 ```sh
-memcastle recall <QUERY> [--limit <N>] [--wing <WING>] [--ranking <…>] [--tag <TAG>]... [--source-kind <KIND>]
+memcastle recall <QUERY> [--limit <N>] [--wing <WING>] [--ranking <…>] [--profile <NAME>] [--tag <TAG>]... [--source-kind <KIND>]
                  [--as-of <WHEN> | --from <WHEN> --until <WHEN> | --include-historical] [--expand]
 ```
 
@@ -630,7 +631,7 @@ Like installing a source, it is administrative: `--mode` is ignored and no MCP t
 ```sh
 memcastle miner list
 memcastle miner get <NAME>
-memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>]
+memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>] [--embedding-profile <NAME>]
                            [--credential-env <VAR> | --credential-file <PATH> | --credential-oauth]
                            [--option <KEY=VALUE>]... [--unset-option <KEY>]...
                            [--unset locator|wing|credential]... [--disabled] [--allow-broaden]
@@ -887,15 +888,18 @@ Looking is gated as a read and changing as a write, see [Memory modes](memory-mo
 ### `embed`
 
 ```sh
-memcastle embed [--wing <WING>]
+memcastle embed [--wing <WING>] [--profile <NAME>] [--refresh missing|stale|all]
 ```
 
-Submits a job that computes the embedding of every drawer that has none, so semantic search covers it.
+Submits a job that computes vectors missing from the selected profile (the configured default unless `--profile` is set).
+`--refresh stale` also recomputes vectors whose input or canonical content changed; `--refresh all` recomputes the entire
+selected scope, including vectors that were already up to date.
 It needs an [`[embeddings]` provider](configuration.md#embeddings) and is refused with `memcastle::embed::not_configured`
 without one.
 You rarely run it: the daemon queues the same job after anything that writes drawers, and once at startup, so this is for
 backfilling after you configure a provider and for forcing a sweep.
-It only fills each drawer's embedding and never changes its content, and running it again does nothing.
+It only changes derived vector records and never changes canonical content, graph links or temporal history.
+The default missing-only job is safe to repeat and also recovers provenance-free legacy vectors into the chosen space.
 It is a write, so it is refused in `read_only` and `disabled` modes.
 
 ### `extract`
@@ -921,6 +925,8 @@ memcastle audit [--wing <WING>]
 
 Submits a read-only consistency report job.
 `--wing` restricts only the embedding counts to one wing; orphan and dangling-reference findings are always palace-wide.
+When a default embedding profile is configured, the missing count refers to that profile;
+provenance-free legacy vectors do not count as embedded there until re-embedded.
 Read the report with `memcastle job show <id>`.
 
 ### `repair`

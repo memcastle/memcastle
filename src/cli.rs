@@ -769,6 +769,9 @@ pub struct MinerSetArgs {
     /// The wing the mined drawers go to, when it should not be the source's default.
     #[arg(long)]
     pub wing: Option<String>,
+    /// Use this profile instead of the global default for this miner's drawers.
+    #[arg(long)]
+    pub embedding_profile: Option<String>,
     /// Read the source's credential from this environment variable of the
     /// daemon. The secret itself never goes in the configuration file.
     #[arg(long, value_name = "NAME", conflicts_with = "credential_file")]
@@ -787,8 +790,8 @@ pub struct MinerSetArgs {
     /// Remove a saved source option.
     #[arg(long, value_name = "KEY")]
     pub unset_option: Vec<String>,
-    /// Clear a field: one of `locator`, `wing`, `credential`.
-    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential"]))]
+    /// Clear a field: one of `locator`, `wing`, `credential`, `embedding_profile`.
+    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential", "embedding_profile"]))]
     pub unset: Vec<String>,
     /// Create the miner switched off (or switch it off).
     #[arg(long)]
@@ -867,6 +870,9 @@ pub struct RetrievalArgs {
     /// lexical), `lexical`, `semantic` or `hybrid`.
     #[arg(long, value_parser = PossibleValuesParser::new(memcastle::search::RankingMode::NAMES))]
     pub ranking: Option<String>,
+    /// Use this embedding profile for the semantic leg instead of the global default.
+    #[arg(long)]
+    pub profile: Option<String>,
     /// Only drawers carrying this tag; repeat the flag to require several.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
@@ -1052,6 +1058,12 @@ pub struct EmbedArgs {
     /// Only embed the drawers of this wing, by name.
     #[arg(long)]
     pub wing: Option<String>,
+    /// Select an embedding profile instead of the global default.
+    #[arg(long)]
+    pub profile: Option<String>,
+    /// Recompute stale or all vectors in this profile (default: missing only).
+    #[arg(long, value_parser = ["missing", "stale", "all"], default_value = "missing")]
+    pub refresh: String,
 }
 
 /// Arguments for `memcastle extract`.

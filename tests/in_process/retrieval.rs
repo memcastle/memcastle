@@ -241,14 +241,32 @@ async fn a_post_search_body_may_call_its_text_query_like_every_other_search() {
 
 #[tokio::test]
 async fn caller_supplied_vectors_work_against_a_daemon_with_no_provider() {
-    let daemon = TestDaemon::start().await;
+    // A caller-only profile still identifies a compatible vector space even when the daemon runs no provider.
+    let daemon = TestDaemon::start_configured(|config| {
+        config.embeddings.providers.insert(
+            "client".into(),
+            memcastle::config::EmbeddingConnection {
+                provider: memcastle::config::EmbeddingProvider::External,
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "client".into(),
+            memcastle::config::EmbeddingProfileConfig {
+                provider: "client".into(),
+                model: "client-side-model".into(),
+                dimensions: 768,
+            },
+        );
+    })
+    .await;
     let base = &daemon.base_url;
     let drawer = write(base, "w", "r", "vectors supplied by the client").await;
     let id = drawer["id"].as_str().expect("drawer id");
 
     let put = client()
         .put(format!("{base}/api/drawers/{id}/embedding"))
-        .json(&json!({ "embedding": embed("client side model") }))
+        .json(&json!({ "embedding": embed("client side model"), "profile": "client" }))
         .send()
         .await
         .expect("put embedding");
@@ -259,6 +277,7 @@ async fn caller_supplied_vectors_work_against_a_daemon_with_no_provider() {
         .json(&json!({
             "text": "anything at all",
             "ranking": "semantic",
+            "profile": "client",
             "query_embedding": embed("client side model"),
         }))
         .send()
@@ -272,7 +291,7 @@ async fn caller_supplied_vectors_work_against_a_daemon_with_no_provider() {
     // A wrong-length vector is the caller's mistake and says what length is expected.
     let bad = client()
         .put(format!("{base}/api/drawers/{id}/embedding"))
-        .json(&json!({ "embedding": [1.0, 2.0] }))
+        .json(&json!({ "embedding": [1.0, 2.0], "profile": "client" }))
         .send()
         .await
         .expect("bad put");
@@ -280,6 +299,70 @@ async fn caller_supplied_vectors_work_against_a_daemon_with_no_provider() {
     let body: Value = bad.json().await.unwrap();
     assert!(body["error"].as_str().unwrap().contains("768"), "{body}");
 
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn searches_never_mix_two_same_dimension_profiles_or_a_different_dimension_profile() {
+    let daemon = TestDaemon::start_configured(|config| {
+        for (name, dimensions) in [("one", 768), ("two", 768), ("tiny", 3)] {
+            config.embeddings.providers.insert(
+                name.into(),
+                memcastle::config::EmbeddingConnection {
+                    provider: memcastle::config::EmbeddingProvider::External,
+                    ..Default::default()
+                },
+            );
+            config.embeddings.profiles.insert(
+                name.into(),
+                memcastle::config::EmbeddingProfileConfig {
+                    provider: name.into(),
+                    model: name.into(),
+                    dimensions,
+                },
+            );
+        }
+    })
+    .await;
+    let base = &daemon.base_url;
+    let one = write(base, "w", "r", "first profile only").await;
+    let two = write(base, "w", "r", "second profile only").await;
+    let client = client();
+    for (id, profile, vector) in [
+        (one["id"].as_str().unwrap(), "one", embed("shared")),
+        (two["id"].as_str().unwrap(), "two", embed("shared")),
+    ] {
+        let response = client
+            .put(format!("{base}/api/drawers/{id}/embedding"))
+            .json(&json!({"profile": profile, "embedding": vector}))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+    }
+    for (profile, expected) in [
+        ("one", "first profile only"),
+        ("two", "second profile only"),
+    ] {
+        let response = client.post(format!("{base}/api/search"))
+            .json(&json!({"text": "shared", "ranking": "semantic", "profile": profile, "query_embedding": embed("shared")}))
+            .send().await.unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+        let hits: Value = response.json().await.unwrap();
+        assert_eq!(contents(&hits), [expected]);
+    }
+    let id = one["id"].as_str().unwrap();
+    let response = client
+        .put(format!("{base}/api/drawers/{id}/embedding"))
+        .json(&json!({"profile": "tiny", "embedding": [1.0, 0.0, 0.0]}))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    let hits: Value = client.post(format!("{base}/api/search"))
+        .json(&json!({"text": "shared", "ranking": "semantic", "profile": "tiny", "query_embedding": [1.0, 0.0, 0.0]}))
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(contents(&hits), ["first profile only"]);
     daemon.shutdown().await;
 }
 

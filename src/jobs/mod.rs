@@ -278,7 +278,27 @@ impl Scheduler {
     /// derived data, so failing to schedule it must not fail the write that
     /// triggered it.
     pub async fn ensure_embedding_sweep(&self) {
+        let Some(space) = self.embeddings.space().cloned() else {
+            return;
+        };
         if !self.embeddings.is_configured() {
+            return;
+        }
+        self.ensure_embedding_sweep_for(space, None, None).await;
+    }
+
+    /// Coalesce per-space and per-wing rather than discarding a miner override behind a default sweep.
+    async fn ensure_embedding_sweep_for(
+        &self,
+        space: crate::domain::EmbeddingSpace,
+        wing: Option<String>,
+        source_id: Option<crate::domain::SourceId>,
+    ) {
+        let Ok(selected) = self.embeddings.select(Some(&space.profile)) else {
+            return;
+        };
+        if selected.space() != Some(&space) || !selected.is_configured() {
+            warn!(profile = %space.profile, "mine's pinned embedding profile changed; request a new run after restoring its configuration");
             return;
         }
         let queued = match self.store.list_jobs(Some(JobStatus::Queued)).await {
@@ -290,13 +310,19 @@ impl Scheduler {
         };
         if queued
             .iter()
-            .any(|job| matches!(job.kind, JobKind::Embed { .. }))
+            .any(|job| matches!(&job.kind, JobKind::Embed { wing: queued_wing, source_id: queued_source, refresh: crate::domain::EmbeddingRefresh::Missing, space: Some(queued), .. } if queued_wing == &wing && queued_source == &source_id && queued == &space))
         {
             return;
         }
         if let Err(error) = self
             .submit(
-                JobKind::Embed { wing: None },
+                JobKind::Embed {
+                    wing,
+                    source_id,
+                    profile: Some(space.profile.clone()),
+                    refresh: crate::domain::EmbeddingRefresh::Missing,
+                    space: Some(space),
+                },
                 Priority::Background,
                 // Not a channel: nobody asked, the daemon did.
                 "system",
@@ -882,6 +908,7 @@ impl Scheduler {
                 wing,
                 full,
                 options,
+                embedding_space: _,
             } => {
                 crate::mining::run(
                     &ctx,
@@ -906,9 +933,25 @@ impl Scheduler {
             JobKind::Audit { wing } => {
                 crate::audit::run(&ctx, &mut job, crate::audit::AuditParams { wing }).await
             }
-            JobKind::Embed { wing } => {
-                crate::embed::job::run(&ctx, &mut job, crate::embed::job::EmbedParams { wing })
-                    .await
+            JobKind::Embed {
+                wing,
+                source_id,
+                profile,
+                refresh,
+                space,
+            } => {
+                crate::embed::job::run(
+                    &ctx,
+                    &mut job,
+                    crate::embed::job::EmbedParams {
+                        wing,
+                        source_id,
+                        profile,
+                        refresh,
+                        space,
+                    },
+                )
+                .await
             }
             JobKind::Extract { wing } => {
                 crate::extract::job::run(
@@ -993,7 +1036,28 @@ impl Scheduler {
         // After the final state is saved, so the sweep sees the finished
         // job's drawers and never races its last write.
         if event == JobEvent::Complete && kind_wrote_drawers {
-            self.ensure_embedding_sweep().await;
+            if let JobKind::Mine {
+                embedding_space: Some(space),
+                wing,
+                ..
+            } = &job.kind
+            {
+                let source_id = job
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.get("source_id"))
+                    .and_then(|value| {
+                        serde_json::from_value::<crate::domain::SourceId>(value.clone()).ok()
+                    });
+                if let Some(source_id) = source_id {
+                    self.ensure_embedding_sweep_for(space.clone(), wing.clone(), Some(source_id))
+                        .await;
+                } else {
+                    warn!(job_id = %job.id, "mining job did not report its source id; refusing an unscoped embedding sweep");
+                }
+            } else {
+                self.ensure_embedding_sweep().await;
+            }
         }
         // A mining job files drawers with an origin, which (with notes, queued
         // by `app::palace` when one is captured) is all the extraction sweep
@@ -1044,6 +1108,7 @@ mod tests {
             wing: None,
             full: false,
             options: Default::default(),
+            embedding_space: None,
         }
     }
 
@@ -1151,7 +1216,7 @@ mod tests {
             1,
             "writes must coalesce into one waiting sweep"
         );
-        assert!(matches!(queued[0].kind, JobKind::Embed { wing: None }));
+        assert!(matches!(queued[0].kind, JobKind::Embed { wing: None, .. }));
         assert_eq!(queued[0].priority, Priority::Background);
     }
 

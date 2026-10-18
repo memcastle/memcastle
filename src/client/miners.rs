@@ -138,6 +138,8 @@ pub struct SetFlags<'a> {
     pub locator: Option<&'a str>,
     /// `--wing`.
     pub wing: Option<&'a str>,
+    /// `--embedding-profile`.
+    pub embedding_profile: Option<&'a str>,
     /// `--credential-env`.
     pub credential_env: Option<&'a str>,
     /// `--credential-file`.
@@ -184,6 +186,7 @@ impl SetFlags<'_> {
             source: self.source.map(str::to_string),
             locator: self.locator.map(str::to_string),
             wing: self.wing.map(str::to_string),
+            embedding_profile: self.embedding_profile.map(str::to_string),
             enabled: self.disabled.then_some(false),
             allow_broaden: self.allow_broaden,
             unset_options: self.unset_options.to_vec(),

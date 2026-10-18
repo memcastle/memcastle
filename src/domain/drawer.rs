@@ -101,8 +101,8 @@ pub struct Provenance {
 /// drawer the room already holds is not stored twice, docs/adr/025), so
 /// provenance and history stay honest. A correction is a *supersession*:
 /// the old drawer gains a `valid_to` and a replacement opens from that instant.
-/// `embedding` is derived data filled in after the fact by the embedding sweep
-/// (or by a caller), never part of what the drawer says.
+/// `embedding` is retained for provenance-free legacy vectors only.
+/// New derived vectors live in separate profile-scoped records and never change what this drawer says.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Drawer {
     /// Unique identifier.
@@ -123,7 +123,7 @@ pub struct Drawer {
     pub source: Source,
     /// Free-form tags.
     pub tags: Vec<String>,
-    /// A dense embedding vector (768 numbers), once the embedding sweep or a caller fills it. Derived data; search results omit it.
+    /// An old 768-dimensional vector with unknown provenance; profile-aware search never reads it.
     pub embedding: Option<Vec<f32>>,
     /// Why this drawer exists.
     pub provenance: Provenance,
