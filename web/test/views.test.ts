@@ -309,6 +309,8 @@ describe("the maintenance page", () => {
     expect(wrapper.text()).toContain("Audit")
     expect(wrapper.text()).toContain("Repair")
     expect(requests.map((request) => new URL(request.url, "http://daemon").searchParams.get("kind"))).toEqual(expect.arrayContaining(["audit", "repair"]))
+    expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(2)
+    expect(wrapper.text()).toContain("1 / 1")
   })
 
   it("submits an audit without asking", async () => {
@@ -351,6 +353,9 @@ describe("the jobs page", () => {
 
     expect(wrapper.text()).toContain("Active 3")
     expect(wrapper.text()).toContain("History 2")
+    expect(wrapper.findAll(".table-scroll")).toHaveLength(2)
+    expect(wrapper.findAll(".job-progress")).toHaveLength(5)
+    expect(wrapper.text()).toContain("25% · 1 / 4")
   })
 
   it("offers the transitions the daemon would accept for each state", async () => {
@@ -399,7 +404,23 @@ describe("the jobs page", () => {
 
     expect(document.body.textContent).toContain("Parameters")
     expect(document.body.textContent).toContain('"drawers": 3')
+    expect(document.body.textContent).toContain("Progress")
+    expect(document.body.textContent).toContain("1 / 1")
   }, 15_000)
+
+  it("updates the active indicator and open details when a new job response arrives", async () => {
+    let current = 1
+    const { wrapper } = await show(JobsView, () => ({ body: [job("run", "running", { progress: { current, total: 4, message: null } })] }))
+    await button(wrapper, "Details")[0]!.trigger("click")
+    await flushPromises()
+
+    current = 3
+    await wrapper.findAll("button").find((candidate) => candidate.text().includes("Refresh"))!.trigger("click")
+    await flushPromises()
+
+    expect(wrapper.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("75")
+    expect(document.body.textContent).toContain("75% · 3 / 4")
+  })
 })
 
 describe("the launch page", () => {

@@ -3,13 +3,13 @@ import Button from "openvue/button"
 import Column from "openvue/column"
 import DataTable from "openvue/datatable"
 import Dialog from "openvue/dialog"
-import ProgressBar from "openvue/progressbar"
 import SelectButton from "openvue/selectbutton"
 import { useToast } from "openvue/usetoast"
 import { computed, ref, watch } from "vue"
 import type { Job, JobControl, JobStatus } from "../api/types.ts"
 import EmptyState from "../components/EmptyState.vue"
 import ErrorNotice from "../components/ErrorNotice.vue"
+import JobProgress from "../components/JobProgress.vue"
 import RefreshButton from "../components/RefreshButton.vue"
 import PageHeader from "../components/PageHeader.vue"
 import StatusTag from "../components/StatusTag.vue"
@@ -65,11 +65,6 @@ async function control(job: Job, action: JobControl): Promise<void> {
     toast.add({ severity: "error", summary: error.message, detail: error.help, life: 6000 })
   }
 }
-
-function progress(job: Job): number | undefined {
-  const { current, total } = job.progress
-  return total ? Math.min(100, Math.round((current / total) * 100)) : undefined
-}
 </script>
 
 <template>
@@ -81,56 +76,56 @@ function progress(job: Job): number | undefined {
   <ErrorNotice :error="jobs.error.value" @retry="jobs.refresh()" />
 
   <h2>Active <span class="muted">{{ active.length }}</span></h2>
-  <DataTable :value="active" data-key="id" size="small" class="panel-table">
-    <template #empty><EmptyState title="No active jobs" /></template>
-    <Column header="ID"><template #body="{ data }"><code>{{ shortId(data.id) }}</code></template></Column>
-    <Column header="Kind"><template #body="{ data }">{{ data.kind.type }}</template></Column>
-    <Column header="State"><template #body="{ data }"><StatusTag :status="data.status" /></template></Column>
-    <Column header="Target"><template #body="{ data }">{{ jobTarget(data.kind) }}</template></Column>
-    <Column header="Progress">
-      <template #body="{ data }">
-        <ProgressBar v-if="progress(data) !== undefined" :value="progress(data)" style="height: 1rem" />
-        <span v-else class="muted">{{ data.progress.message ?? data.progress.current }}</span>
-      </template>
-    </Column>
-    <Column header="Created"><template #body="{ data }">{{ ago(data.created_at) }}</template></Column>
-    <Column header="">
-      <template #body="{ data }">
-        <div class="row">
-          <Button label="Details" size="small" text @click="selected = data" />
-          <Button
-            v-for="action in actions(data)"
-            :key="action"
-            :label="action"
-            size="small"
-            :severity="action === 'cancel' ? 'danger' : 'secondary'"
-            outlined
-            @click="control(data, action)"
-          />
-        </div>
-      </template>
-    </Column>
-  </DataTable>
+  <div class="table-scroll">
+    <DataTable :value="active" data-key="id" size="small" class="panel-table">
+      <template #empty><EmptyState title="No active jobs" /></template>
+      <Column header="ID"><template #body="{ data }"><code>{{ shortId(data.id) }}</code></template></Column>
+      <Column header="Kind"><template #body="{ data }">{{ data.kind.type }}</template></Column>
+      <Column header="State"><template #body="{ data }"><StatusTag :status="data.status" /></template></Column>
+      <Column header="Target"><template #body="{ data }">{{ jobTarget(data.kind) }}</template></Column>
+      <Column header="Progress"><template #body="{ data }"><JobProgress :job="data" /></template></Column>
+      <Column header="Created"><template #body="{ data }">{{ ago(data.created_at) }}</template></Column>
+      <Column header="">
+        <template #body="{ data }">
+          <div class="row">
+            <Button label="Details" size="small" text @click="selected = data" />
+            <Button
+              v-for="action in actions(data)"
+              :key="action"
+              :label="action"
+              size="small"
+              :severity="action === 'cancel' ? 'danger' : 'secondary'"
+              outlined
+              @click="control(data, action)"
+            />
+          </div>
+        </template>
+      </Column>
+    </DataTable>
+  </div>
 
   <h2 style="margin-top: 1.5rem">History <span class="muted">{{ history.length }}</span></h2>
-  <DataTable :value="history" data-key="id" size="small" paginator :rows="15" :rows-per-page-options="[15, 50, 100]">
-    <template #empty><EmptyState title="No finished jobs yet" /></template>
-    <Column header="ID"><template #body="{ data }"><code>{{ shortId(data.id) }}</code></template></Column>
-    <Column header="Kind"><template #body="{ data }">{{ data.kind.type }}</template></Column>
-    <Column header="State"><template #body="{ data }"><StatusTag :status="data.status" /></template></Column>
-    <Column header="Target"><template #body="{ data }">{{ jobTarget(data.kind) }}</template></Column>
-    <Column header="Created"><template #body="{ data }">{{ ago(data.created_at) }}</template></Column>
-    <Column header="Duration"><template #body="{ data }">{{ jobDuration(data) }}</template></Column>
-    <Column header="Attempts" field="attempt" />
-    <Column header="">
-      <template #body="{ data }">
-        <div class="row">
-          <Button label="Details" size="small" text @click="selected = data" />
-          <Button v-for="action in actions(data)" :key="action" :label="action" size="small" severity="secondary" outlined @click="control(data, action)" />
-        </div>
-      </template>
-    </Column>
-  </DataTable>
+  <div class="table-scroll">
+    <DataTable :value="history" data-key="id" size="small" paginator :rows="15" :rows-per-page-options="[15, 50, 100]">
+      <template #empty><EmptyState title="No finished jobs yet" /></template>
+      <Column header="ID"><template #body="{ data }"><code>{{ shortId(data.id) }}</code></template></Column>
+      <Column header="Kind"><template #body="{ data }">{{ data.kind.type }}</template></Column>
+      <Column header="State"><template #body="{ data }"><StatusTag :status="data.status" /></template></Column>
+      <Column header="Target"><template #body="{ data }">{{ jobTarget(data.kind) }}</template></Column>
+      <Column header="Progress"><template #body="{ data }"><JobProgress :job="data" /></template></Column>
+      <Column header="Created"><template #body="{ data }">{{ ago(data.created_at) }}</template></Column>
+      <Column header="Duration"><template #body="{ data }">{{ jobDuration(data) }}</template></Column>
+      <Column header="Attempts" field="attempt" />
+      <Column header="">
+        <template #body="{ data }">
+          <div class="row">
+            <Button label="Details" size="small" text @click="selected = data" />
+            <Button v-for="action in actions(data)" :key="action" :label="action" size="small" severity="secondary" outlined @click="control(data, action)" />
+          </div>
+        </template>
+      </Column>
+    </DataTable>
+  </div>
 
   <Dialog :visible="!!selected" modal :header="selected ? `Job ${shortId(selected.id)}` : ''" :style="{ width: 'min(46rem, 95vw)' }" @update:visible="selected = undefined">
     <template v-if="selected">
@@ -142,6 +137,8 @@ function progress(job: Job): number | undefined {
         <div><dt>Started</dt><dd>{{ utc(selected.started_at) }}</dd></div>
         <div><dt>Completed</dt><dd>{{ utc(selected.completed_at) }}</dd></div>
       </dl>
+      <h2>Progress</h2>
+      <JobProgress :job="selected" />
       <p v-if="selected.error" class="error-body"><strong>Failed:</strong> {{ selected.error }}</p>
       <h2>Parameters</h2>
       <pre class="drawer-content">{{ JSON.stringify(selected.kind, null, 2) }}</pre>

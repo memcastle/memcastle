@@ -112,7 +112,7 @@ onBeforeUnmount(() => cy.value?.destroy())
 <template>
   <PageHeader title="Graph" subtitle="Entities and the facts between them, with where each one was read from." />
   <form class="toolbar" @submit.prevent="find">
-    <InputText v-model="search" placeholder="Find an entity by name" aria-label="Entity name" style="min-width: 18rem" />
+    <InputText v-model="search" placeholder="Find an entity by name" aria-label="Entity name" class="graph-search" />
     <Button type="submit" label="Find" severity="secondary" size="small" />
     <template v-if="center">
       <span class="muted">Around <strong>{{ center.name }}</strong>, hops</span>
@@ -129,7 +129,7 @@ onBeforeUnmount(() => cy.value?.destroy())
   <Message v-if="view?.truncated" severity="info" :closable="false">The graph was cut at {{ view.nodes.length }} entities. Pick one to see its neighbourhood.</Message>
   <EmptyState v-if="view && !view.nodes.length" title="The knowledge graph is empty" hint="Entities appear once an extraction job has read mined drawers, or a checkpoint has recorded facts." />
 
-  <div class="split" style="grid-template-columns: 1fr minmax(16rem, 22rem)" :style="{ display: view?.nodes.length ? undefined : 'none' }">
+  <div class="split graph-split" :style="{ display: view?.nodes.length ? undefined : 'none' }">
     <div ref="canvas" class="graph-canvas" role="img" aria-label="Knowledge graph" />
     <section class="panel">
       <h2>{{ selected?.name ?? "Select an entity" }}</h2>

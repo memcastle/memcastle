@@ -6,6 +6,7 @@ import { computed, ref } from "vue"
 import { RouterLink } from "vue-router"
 import type { Job } from "../api/types.ts"
 import ErrorNotice from "../components/ErrorNotice.vue"
+import JobProgress from "../components/JobProgress.vue"
 import RefreshButton from "../components/RefreshButton.vue"
 import PageHeader from "../components/PageHeader.vue"
 import StatusTag from "../components/StatusTag.vue"
@@ -63,7 +64,7 @@ function lastJob(task: Task): Job | undefined {
   <Message v-if="!writable" severity="info" :closable="false">The session is read only: an audit and a dry run still work, applying a repair needs full access.</Message>
   <ErrorNotice :error="latest.error.value" @retry="latest.refresh()" />
 
-  <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr))">
+  <div class="cards maintenance-cards">
     <section v-for="task in tasks" :key="task.id" class="panel" style="margin: 0">
       <h2 style="margin-bottom: 0.2rem">{{ task.title }}</h2>
       <code class="muted">{{ task.command }}</code>
@@ -85,6 +86,7 @@ function lastJob(task: Task): Job | undefined {
           <span class="muted">{{ ago(lastJob(task)!.created_at) }}</span>
           <code v-if="task.id === 'repair'" class="muted">{{ lastJob(task)!.kind.dry_run ? "dry run" : "applied" }}</code>
         </div>
+        <JobProgress :job="lastJob(task)!" />
         <pre v-if="lastJob(task)!.result" class="drawer-content" style="margin-top: 0.6rem; max-height: 16rem">{{ JSON.stringify(lastJob(task)!.result, null, 2) }}</pre>
         <p v-else-if="lastJob(task)!.error" class="muted">{{ lastJob(task)!.error }}</p>
       </div>

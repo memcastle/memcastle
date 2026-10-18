@@ -49,35 +49,37 @@ function settings(trigger: Trigger): string {
     title="No trigger is configured, so nothing runs unattended"
     hint="`memcastle trigger set <name> --miner <miner> --type <schedule|poll|webhook|watch>` defines one; it starts disabled."
   />
-  <DataTable v-else-if="triggers.data.value" :value="triggers.data.value.triggers" data-key="name" size="small">
-    <Column field="name" header="Name" />
-    <Column field="miner" header="Miner" />
-    <Column field="type" header="Type" />
-    <Column header="Status">
-      <template #body="{ data }">
-        <StatusTag :status="data.status" />
-        <div v-if="data.reason" class="muted">{{ data.reason }}</div>
-      </template>
-    </Column>
-    <Column header="Settings">
-      <template #body="{ data }"
-        ><code>{{ settings(data) }}</code></template
-      >
-    </Column>
-    <Column header="Last fired">
-      <template #body="{ data }">
-        <span :title="utc(data.last_fired_at)">{{ ago(data.last_fired_at) }}</span>
-        <span class="muted"> ({{ data.fired }} run{{ data.fired === 1 ? "" : "s" }}<template v-if="data.coalesced">, {{ data.coalesced }} joined</template>)</span>
-      </template>
-    </Column>
-    <Column header="Next due">
-      <template #body="{ data }">{{ data.next_due ? utc(data.next_due) : "-" }}</template>
-    </Column>
-    <Column header="Last error">
-      <template #body="{ data }">
-        <span v-if="data.last_error" :title="utc(data.last_error_at)">{{ data.last_error }}</span>
-        <span v-else class="muted">-</span>
-      </template>
-    </Column>
-  </DataTable>
+  <div v-else-if="triggers.data.value" class="table-scroll">
+    <DataTable :value="triggers.data.value.triggers" data-key="name" size="small">
+      <Column field="name" header="Name" />
+      <Column field="miner" header="Miner" />
+      <Column field="type" header="Type" />
+      <Column header="Status">
+        <template #body="{ data }">
+          <StatusTag :status="data.status" />
+          <div v-if="data.reason" class="muted">{{ data.reason }}</div>
+        </template>
+      </Column>
+      <Column header="Settings">
+        <template #body="{ data }"
+          ><code>{{ settings(data) }}</code></template
+        >
+      </Column>
+      <Column header="Last fired">
+        <template #body="{ data }">
+          <span :title="utc(data.last_fired_at)">{{ ago(data.last_fired_at) }}</span>
+          <span class="muted"> ({{ data.fired }} run{{ data.fired === 1 ? "" : "s" }}<template v-if="data.coalesced">, {{ data.coalesced }} joined</template>)</span>
+        </template>
+      </Column>
+      <Column header="Next due">
+        <template #body="{ data }">{{ data.next_due ? utc(data.next_due) : "-" }}</template>
+      </Column>
+      <Column header="Last error">
+        <template #body="{ data }">
+          <span v-if="data.last_error" :title="utc(data.last_error_at)">{{ data.last_error }}</span>
+          <span v-else class="muted">-</span>
+        </template>
+      </Column>
+    </DataTable>
+  </div>
 </template>
