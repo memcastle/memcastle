@@ -42,6 +42,8 @@ const CONFIG = {
   assets: { source: "installed", root: "/usr/share/memcastle" },
   jobs: { max_concurrency: 2, drain_timeout_secs: 30, lease_ttl_secs: 60 },
   embeddings: { provider: "none", model: null },
+  provider_accounts: [{ id: "openai-main", provider_id: "openai", auth: "bearer", available: true }],
+  embedding_connections: [{ id: "hosted", provider_id: "openai", account: "openai-main" }],
   extraction: { provider: "heuristic", model: null },
   mining: { chunk_chars: 1200, max_documents: 500, registries: 1, dedup_enabled: true },
 }
@@ -210,6 +212,8 @@ describe("the settings page", () => {
     expect(wrapper.text()).toContain("/palace/db")
     expect(wrapper.text()).toContain("Job concurrency")
     expect(wrapper.text()).toContain("Authentication is off")
+    expect(wrapper.text()).toContain("Provider account openai-main")
+    expect(wrapper.text()).toContain("Embedding connection hosted")
     expect(wrapper.text()).toContain("full access")
   })
 

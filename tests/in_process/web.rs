@@ -325,6 +325,13 @@ async fn the_configuration_route_reports_the_settings_and_never_a_secret() {
     let assets = tempfile::tempdir().unwrap();
     built_dashboard(assets.path());
     let root = assets.path().to_path_buf();
+    let account: memcastle::config::ProviderAccount = toml::from_str(
+        r#"
+provider_id = "openai"
+auth = { type = "bearer", credential = { type = "env", name = "PRIVATE_REFERENCE_NAME" } }
+"#,
+    )
+    .unwrap();
     let daemon = TestDaemon::start_configured(move |config| {
         config.web.enable = true;
         config.assets.dir = Some(root);
@@ -332,6 +339,19 @@ async fn the_configuration_route_reports_the_settings_and_never_a_secret() {
         config.auth.token = Some(Secret::new(SECRET));
         config.embeddings.api_key = Some(Secret::new("embeddings-key-0123456789"));
         config.embeddings.url = Some("http://user:pw@embeddings.example/v1".into());
+        config
+            .provider_accounts
+            .insert("openai-main".into(), account);
+        config.embeddings.providers.insert(
+            "hosted".into(),
+            memcastle::config::EmbeddingConnection {
+                provider: memcastle::config::EmbeddingProvider::Openai,
+                provider_id: Some("openai".into()),
+                account: Some("openai-main".into()),
+                url: Some("https://api.openai.com/v1".into()),
+                ..Default::default()
+            },
+        );
     })
     .await;
 
@@ -348,6 +368,9 @@ async fn the_configuration_route_reports_the_settings_and_never_a_secret() {
     assert_eq!(config["web"], json!({"enabled": true, "built": true}));
     assert_eq!(config["assets"]["source"], "override");
     assert_eq!(config["backend"], "embedded");
+    assert_eq!(config["provider_accounts"][0]["id"], "openai-main");
+    assert_eq!(config["provider_accounts"][0]["available"], false);
+    assert_eq!(config["embedding_connections"][0]["account"], "openai-main");
     assert!(
         config["bind_addr"]
             .as_str()
@@ -359,6 +382,7 @@ async fn the_configuration_route_reports_the_settings_and_never_a_secret() {
         "embeddings-key-0123456789",
         "embeddings.example",
         "user:pw",
+        "PRIVATE_REFERENCE_NAME",
     ] {
         assert!(
             !text.contains(secret),

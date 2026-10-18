@@ -45,6 +45,8 @@ const config = useLoad(() => client.config())
       <h2>Providers and mining</h2>
       <dl class="facts">
         <div><dt>Embeddings</dt><dd>{{ config.data.value.embeddings.provider }} <span class="muted">{{ config.data.value.embeddings.model ?? "" }}</span></dd></div>
+        <div v-for="account in config.data.value.provider_accounts" :key="account.id"><dt>Provider account {{ account.id }}</dt><dd>{{ account.provider_id }} · {{ account.auth }} <Tag :value="account.available ? 'available' : 'unavailable'" :severity="account.available ? 'success' : 'warn'" /></dd></div>
+        <div v-for="connection in config.data.value.embedding_connections.filter(connection => connection.account)" :key="connection.id"><dt>Embedding connection {{ connection.id }}</dt><dd>{{ connection.provider_id }} · account {{ connection.account }}</dd></div>
         <div><dt>Entity extraction</dt><dd>{{ config.data.value.extraction.provider }} <span class="muted">{{ config.data.value.extraction.model ?? "" }}</span></dd></div>
         <div><dt>Deduplication</dt><dd>{{ config.data.value.mining.dedup_enabled ? "on" : "off" }}</dd></div>
         <div><dt>Chunk size</dt><dd>{{ config.data.value.mining.chunk_chars }} characters</dd></div>

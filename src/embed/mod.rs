@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use crate::config::{EmbeddingConnection, EmbeddingProvider, EmbeddingsConfig};
+use crate::config::{EmbeddingConnection, EmbeddingProvider, EmbeddingsConfig, ProviderAccount};
 use crate::domain::{EMBEDDING_DIMENSION, EmbeddingSpace};
 use crate::error::{Error, Result};
 
@@ -59,6 +59,7 @@ pub struct Embeddings {
     profiles: Arc<BTreeMap<String, Embeddings>>,
     default_profile: Option<String>,
     installed: Arc<RwLock<BTreeMap<String, Embeddings>>>,
+    accounts: Arc<BTreeMap<String, ProviderAccount>>,
 }
 
 impl std::fmt::Debug for Embeddings {
@@ -94,6 +95,7 @@ impl Embeddings {
             profiles: Arc::default(),
             default_profile: None,
             installed: Arc::default(),
+            accounts: Arc::default(),
         }
     }
 
@@ -103,6 +105,14 @@ impl Embeddings {
     ///
     /// [`Error::EmbeddingFailed`] if the HTTP client cannot be built.
     pub fn from_config(config: &EmbeddingsConfig) -> Result<Self> {
+        Self::from_config_with_accounts(config, &BTreeMap::new())
+    }
+
+    /// Build an embedding handle with Core's named provider accounts.
+    pub fn from_config_with_accounts(
+        config: &EmbeddingsConfig,
+        accounts: &BTreeMap<String, ProviderAccount>,
+    ) -> Result<Self> {
         let legacy = EmbeddingConnection {
             provider: config.provider,
             command: config.command.clone(),
@@ -114,6 +124,8 @@ impl Embeddings {
             module: None,
             settings: serde_json::json!({}),
             credential: None,
+            account: None,
+            provider_id: None,
         };
         let mut profiles = BTreeMap::new();
         if legacy.provider != EmbeddingProvider::None {
@@ -125,6 +137,7 @@ impl Embeddings {
                     &legacy,
                     config.model.clone().unwrap_or_default(),
                     config.dimensions,
+                    accounts,
                 )?,
             );
         }
@@ -147,6 +160,7 @@ impl Embeddings {
                     connection,
                     profile.model.clone(),
                     profile.dimensions,
+                    accounts,
                 )?,
             );
         }
@@ -162,6 +176,7 @@ impl Embeddings {
             .unwrap_or_default();
         selected.profiles = Arc::new(profiles);
         selected.default_profile = default;
+        selected.accounts = Arc::new(accounts.clone());
         Ok(selected)
     }
 
@@ -232,7 +247,22 @@ impl Embeddings {
                 &profile.model,
                 profile.dimensions,
             )?;
-            if connection.credential.is_some() && !descriptor.credential {
+            let account = connection
+                .account
+                .as_ref()
+                .map(|id| {
+                    self.accounts
+                        .get(id)
+                        .cloned()
+                        .ok_or_else(|| Error::EmbeddingFailed {
+                            message: format!(
+                                "embedding connection `{}` refers to missing account `{id}`",
+                                profile.provider
+                            ),
+                        })
+                })
+                .transpose()?;
+            if (connection.credential.is_some() || account.is_some()) && !descriptor.credential {
                 return Err(Error::EmbeddingFailed {
                     message: format!(
                         "embedding module `{module_id}` does not declare credential access"
@@ -244,18 +274,27 @@ impl Embeddings {
                     message: error.to_string(),
                 }
             })?;
-            let provider = wasm::WasmEmbedder::load(
+            let provider = wasm::WasmEmbedder::load_with_account(
                 descriptor,
                 &bytes,
                 profile.model.clone(),
                 profile.dimensions,
                 settings.clone(),
-                connection.credential.clone(),
+                wasm::WasmAccess {
+                    credential: connection.credential.clone(),
+                    account: account.map(|account| {
+                        (
+                            connection
+                                .account
+                                .clone()
+                                .expect("selected account has an id"),
+                            account,
+                        )
+                    }),
+                },
                 std::time::Duration::from_secs(connection.timeout_secs),
             )?;
             let mut handle = Self::new(provider, connection.batch_size);
-            let credential = serde_json::to_vec(&connection.credential)
-                .expect("credential reference serializes");
             let identity = serde_json::to_vec(&(
                 plugin_id,
                 module_id,
@@ -263,7 +302,7 @@ impl Embeddings {
                 &module.sha256,
                 &module.manifest_sha256,
                 &settings,
-                crate::domain::sha256_hex(&credential),
+                &connection.provider_id,
             ))
             .expect("strings serialize");
             handle.space = Some(EmbeddingSpace::new(
@@ -289,6 +328,7 @@ impl Embeddings {
         config: &EmbeddingConnection,
         model: String,
         dimensions: usize,
+        accounts: &BTreeMap<String, ProviderAccount>,
     ) -> Result<Self> {
         let timeout = std::time::Duration::from_secs(config.timeout_secs);
         let kind = match config.provider {
@@ -302,7 +342,20 @@ impl Embeddings {
             EmbeddingProvider::Command => {
                 serde_json::to_string(&config.command).unwrap_or_default()
             }
-            _ => config.url.clone().unwrap_or_default(),
+            _ => {
+                let url = config.url.clone().unwrap_or_default();
+                // A legacy endpoint may contain HTTP userinfo; password rotation cannot change vector meaning.
+                match reqwest::Url::parse(&url) {
+                    Ok(mut parsed)
+                        if !parsed.username().is_empty() || parsed.password().is_some() =>
+                    {
+                        let _ = parsed.set_username("");
+                        let _ = parsed.set_password(None);
+                        parsed.to_string()
+                    }
+                    _ => url,
+                }
+            }
         };
         let mut handle = match config.provider {
             EmbeddingProvider::None | EmbeddingProvider::External => Self::disabled(),
@@ -312,19 +365,29 @@ impl Embeddings {
                     .with_dimensions(dimensions),
                 config.batch_size,
             ),
-            EmbeddingProvider::Http | EmbeddingProvider::Openai => Self::new(
-                http::HttpEmbedder::new(
+            EmbeddingProvider::Http | EmbeddingProvider::Openai => {
+                let mut provider = http::HttpEmbedder::new(
                     config.url.clone().unwrap_or_default(),
                     model.clone(),
                     config.api_key.clone(),
                     timeout,
                 )?
-                .with_dimensions(dimensions),
-                config.batch_size,
-            ),
+                .with_dimensions(dimensions);
+                if let Some(account_id) = &config.account {
+                    let account = accounts.get(account_id).ok_or_else(|| Error::EmbeddingFailed {
+                        message: format!("unknown provider account `{account_id}`; define it in [provider_accounts]"),
+                    })?;
+                    provider = provider.with_account(account_id.clone(), account.clone());
+                }
+                Self::new(provider, config.batch_size)
+            }
         };
         // Commands and URLs may contain credentials; the fingerprint pins them without exposing them in job rows.
-        let connection_digest = crate::domain::sha256_hex(connection.as_bytes());
+        let connection_digest = if let Some(id) = &config.provider_id {
+            crate::domain::sha256_hex(format!("{connection}\0{id}").as_bytes())
+        } else {
+            crate::domain::sha256_hex(connection.as_bytes())
+        };
         handle.space = Some(EmbeddingSpace::new(
             name.into(),
             provider_name.into(),
@@ -522,6 +585,34 @@ pub(crate) mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn http_userinfo_rotation_does_not_change_embedding_provenance() {
+        let connection = |password: &str| EmbeddingConnection {
+            provider: EmbeddingProvider::Openai,
+            url: Some(format!("https://user:{password}@api.example/v1")),
+            ..Default::default()
+        };
+        let first = Embeddings::from_connection(
+            "profile",
+            "service",
+            &connection("old"),
+            "model".into(),
+            3,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let second = Embeddings::from_connection(
+            "profile",
+            "service",
+            &connection("new"),
+            "model".into(),
+            3,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(first.space(), second.space());
+    }
 
     #[test]
     fn named_profiles_keep_same_dimension_models_in_different_spaces() {
