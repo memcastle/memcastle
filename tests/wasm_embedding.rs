@@ -309,12 +309,16 @@ async fn an_installed_module_becomes_selectable_without_replacing_other_profiles
 }
 
 fn release(descriptor: &[u8]) -> Vec<u8> {
+    release_version(descriptor, "0.1.0")
+}
+
+fn release_version(descriptor: &[u8], version: &str) -> Vec<u8> {
     let bytes = component();
     let parent = PluginManifest {
         format: 1,
         plugin: PluginInfo {
             id: "example".into(),
-            version: "0.1.0".into(),
+            version: version.into(),
             provider: "example".into(),
             description: "Embedding provider".into(),
             repository: "https://github.com/example/example".into(),
@@ -511,5 +515,172 @@ async fn an_embedding_network_grant_requires_its_own_reviewed_consent() {
         "{}",
         accepted.text().await.unwrap()
     );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_plugin_update_reuses_only_the_permissions_previously_reviewed_for_that_module() {
+    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let network = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let daemon = common::TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/api/plugins", daemon.base_url);
+    let initial = client
+        .post(&endpoint)
+        .body(release(descriptor))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        initial.status().is_success(),
+        "{}",
+        initial.text().await.unwrap()
+    );
+
+    let widened = release_version(network, "0.2.0");
+    let preview: serde_json::Value = client
+        .post(format!("{endpoint}/preview"))
+        .body(widened.clone())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["embedding_consents"][0]["already_granted"], false);
+    let refused = client
+        .post(&endpoint)
+        .body(widened.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+    let digest = preview["embedding_consents"][0]["digest"].as_str().unwrap();
+    let granted = client
+        .post(&endpoint)
+        .header(
+            "x-memcastle-consents",
+            serde_json::json!({"embedding:mock-embedding": digest}).to_string(),
+        )
+        .body(widened)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        granted.status().is_success(),
+        "{}",
+        granted.text().await.unwrap()
+    );
+
+    let same_permissions = release_version(network, "0.3.0");
+    let preview: serde_json::Value = client
+        .post(format!("{endpoint}/preview"))
+        .body(same_permissions.clone())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["embedding_consents"][0]["already_granted"], true);
+    let unchanged = client
+        .post(&endpoint)
+        .body(same_permissions)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        unchanged.status().is_success(),
+        "{}",
+        unchanged.text().await.unwrap()
+    );
+    let removed = client
+        .delete(format!("{endpoint}/example"))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        removed.status().is_success(),
+        "{}",
+        removed.text().await.unwrap()
+    );
+    let capabilities: serde_json::Value = client
+        .get(format!("{}/api/embedding-providers", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(capabilities.as_array().unwrap().is_empty());
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_update_cannot_retire_an_embedding_module_selected_by_a_profile() {
+    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let daemon = common::TestDaemon::start_configured(|config| {
+        config.embeddings.providers.insert(
+            "synthetic".into(),
+            EmbeddingConnection {
+                provider: EmbeddingProvider::Plugin,
+                plugin: Some("example".into()),
+                module: Some("mock-embedding".into()),
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "synthetic".into(),
+            EmbeddingProfileConfig {
+                provider: "synthetic".into(),
+                model: "synthetic".into(),
+                dimensions: 3,
+            },
+        );
+        config.embeddings.default = Some("synthetic".into());
+    })
+    .await;
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/api/plugins", daemon.base_url);
+    let installed = client
+        .post(&endpoint)
+        .body(release(descriptor))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        installed.status().is_success(),
+        "{}",
+        installed.text().await.unwrap()
+    );
+
+    let removed_module = b"format = 1\nmemcastle = '>=0.4'\n[plugin]\nid = 'example'\nversion = '0.2.0'\nprovider = 'example'\ndescription = 'No embedding module'\nrepository = 'https://github.com/example/example'\nlicense = 'MIT'\n";
+    let archive = package::pack(&BTreeMap::from([(
+        "plugin.toml".into(),
+        removed_module.to_vec(),
+    )]))
+    .unwrap();
+    let preview = client
+        .post(format!("{endpoint}/preview"))
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preview.status(), reqwest::StatusCode::CONFLICT);
+    let body: serde_json::Value = preview.json().await.unwrap();
+    assert_eq!(body["code"], "memcastle::plugin::blocked");
+    assert!(
+        body["error"].as_str().unwrap().contains("synthetic"),
+        "{body}"
+    );
+    let providers: serde_json::Value = client
+        .get(format!("{}/api/embedding-providers", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(providers[0]["module"], "mock-embedding");
     daemon.shutdown().await;
 }

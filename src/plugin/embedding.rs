@@ -304,4 +304,83 @@ mod tests {
         manifest.credential = true;
         assert_ne!(original, manifest.consent_digest());
     }
+
+    #[test]
+    fn malformed_capabilities_and_secret_bearing_schemas_are_rejected_before_installation() {
+        let bad = [
+            (
+                "id = 'Not-a-module'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
+                "lowercase",
+            ),
+            (
+                "id = 'synthetic'\nversion = 'no-version'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
+                "version",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '9.0.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
+                "contract",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n",
+                "models",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3, 3]\n",
+                "duplicate model/dimension",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [0]\n",
+                "invalid",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[[models]]\nid = 'one'\ndimensions = [4]\n",
+                "duplicate",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nadditionalProperties = true\n",
+                "unspecified settings",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\n[config_schema.properties.api_key]\ntype = 'string'\n",
+                "credential reference",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nrequired = ['region']\n",
+                "unknown property",
+            ),
+        ];
+        for (text, expected) in bad {
+            let error =
+                parse(text).expect_err("invalid capabilities must never become installable");
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn instance_settings_must_match_the_declared_types_and_cannot_embed_a_token() {
+        let mut manifest = descriptor();
+        manifest.config_schema = Some(serde_json::json!({
+            "type": "object", "additionalProperties": false,
+            "properties": {"region": {"type": "string"}, "parallel": {"type": "integer"}, "active": {"type": "boolean"}}
+        }));
+        for settings in [
+            serde_json::json!(["not an object"]),
+            serde_json::json!({"api_key": "never-log-this"}),
+            serde_json::json!({"unknown": 1}),
+            serde_json::json!({"parallel": 1.5}),
+            serde_json::json!({"active": "true"}),
+        ] {
+            assert!(
+                validate_selection(&manifest, &settings, "one", 3).is_err(),
+                "{settings}"
+            );
+        }
+        validate_selection(
+            &manifest,
+            &serde_json::json!({"region": "eu", "parallel": 2, "active": true}),
+            "one",
+            3,
+        )
+        .unwrap();
+    }
 }
