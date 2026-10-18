@@ -43,7 +43,8 @@ On narrow screens the sidebar and split views stack,
 while wide tables scroll within their own region rather than widening the page.
 
 Job progress appears on active and finished jobs, in their details and beside Maintenance's latest audit and repair.
-When the daemon reports a meaningful total, the bar and its accessible text show the percentage and exact `current / total` count;
+When the daemon reports a meaningful total,
+the bar and its accessible text show the percentage and exact `current / total` count;
 hover or focus the indicator for the same detail, and the count remains visible without hover.
 When no meaningful total is known, a running job has an indeterminate bar and a count marked "total unknown";
 other job states keep that count without an animated bar.
