@@ -8,6 +8,7 @@ import { createAppRouter } from "../src/router.ts"
 import { createSession, SESSION } from "../src/session.ts"
 import JobsView from "../src/views/JobsView.vue"
 import LaunchView from "../src/views/LaunchView.vue"
+import MinersView from "../src/views/MinersView.vue"
 import AppShell from "../src/layout/AppShell.vue"
 import GraphView from "../src/views/GraphView.vue"
 import OverviewView from "../src/views/OverviewView.vue"
@@ -479,6 +480,33 @@ describe("the launch page", () => {
 
     expect(wrapper.find("input#mine-path").exists()).toBe(true)
     expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Installed source")!.attributes("disabled")).toBeDefined()
+  })
+})
+
+describe("the miners page", () => {
+  const miner = { name: "docs", source: "directory", enabled: true, state: "ready", options: {}, schedule: { every: "1d", enabled: false } }
+  const answer = (request: Recorded): Answer => path(request) === "/api/miners"
+    ? { body: { miners: [miner] } }
+    : path(request) === "/api/source-configs"
+      ? { body: [{ id: "directory", source: "directory", options: {}, credential_kind: null, credential_available: false }] }
+      : { body: { miner } }
+
+  it("keeps a miner's schedule off until its explicit enable action", async () => {
+    const { wrapper, requests } = await show(MinersView, answer)
+    expect(requests.every((request) => request.method === "GET")).toBe(true)
+    expect(wrapper.text()).toContain("every 1d (off)")
+
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Enable schedule")!.trigger("click")
+    await flushPromises()
+    expect(requests.find((request) => request.method === "POST")?.url).toBe("/api/miners/docs/schedule/enable")
+  })
+
+  it("cannot enable an unattended schedule from a read-only session", async () => {
+    const { wrapper, requests } = await show(MinersView, answer, "read_only")
+    const enable = wrapper.findAll("button").find((candidate) => candidate.text() === "Enable schedule")!
+    expect(enable.attributes("disabled")).toBeDefined()
+    await enable.trigger("click")
+    expect(requests.every((request) => request.method === "GET")).toBe(true)
   })
 })
 

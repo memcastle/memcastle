@@ -370,6 +370,7 @@ memcastle note "..." | jq -r .id                              # the stable ident
 ### `mine`
 
 ```sh
+memcastle mine <MINER> [KEY=VALUE]... [--full]
 memcastle mine <SOURCE> [PLACE] [KEY=VALUE]... [--wing <WING>] [--full]
 memcastle mine <PATH> [KEY=VALUE]... [--wing <WING>] [--full]
 ```
@@ -384,7 +385,11 @@ memcastle mine pi /backups/pi/sessions since=2026-09-14 --full
 Submits a job that reads a source into drawers: a directory (one drawer per file, or several for a long one), or a named
 source such as `pi` or `opencode`, a coding agent's session history (installed sources: see
 [Mining sources](mining-sources.md#pi) and [`opencode`](mining-sources.md#opencode)).
-The first word says what to read.
+An exact configured miner ID wins over a source ID or same-named directory and uses its saved source,
+source configuration, locator, options and destination.
+It cannot take a second locator or `--wing`.
+`memcastle mine <source>` remains a temporary source run and never writes a miner definition.
+The first word otherwise says what to read.
 `directory` is the built-in source and takes the path to read as its one `PLACE`.
 Any other word is the name of a source (`memcastle sources` lists them with the options each accepts).
 A word that cannot be a source name is always a directory: one with a `/`, one that starts with `.` or `~`, or one with
@@ -404,6 +409,7 @@ naming the ones it accepts:
 | Source | Option | Meaning |
 | --- | --- | --- |
 | `directory` | `since=DATE` | Only files modified at or after `DATE`. |
+| `directory` | `include=GLOBS`, `exclude=GLOBS` | Comma-separated relative-path glob patterns; not applied to other sources. |
 | `pi` | `since=DATE` | Only sessions modified at or after `DATE`. |
 | `pi` | `dir=PATH` | Only sessions started in this working directory, or in directories matching a pattern. |
 | `opencode` | `since=DATE` | Only sessions updated at or after `DATE`. |
@@ -412,6 +418,8 @@ naming the ones it accepts:
 `DATE` is `2026-09` (the first of the month), `2026-09-14` or an RFC 3339 time, in UTC.
 A `dir` selects a different slice of the same history, so each directory has a cursor of its own;
 `since` only narrows, so it shares the source's cursor, and `--full` is how to read back past it.
+An omitted common `mining.max_documents` limit is unlimited (`0` in the configuration);
+an explicit miner limit caps that run.
 A `path` option is made absolute against the shell's working directory before the daemon sees it, like the path of `directory`.
 
 A `dir` is a directory or a pattern in which `*` matches any run of characters, `/` included:
@@ -631,18 +639,24 @@ Like installing a source, it is administrative: `--mode` is ignored and no MCP t
 ```sh
 memcastle miner list
 memcastle miner get <NAME>
-memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>] [--embedding-profile <NAME>]
+memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>]
+                           [--source-config <ID>] [--room <ROOM>] [--max-documents <N>] [--embedding-profile <NAME>]
+                           [--wing-from <METADATA-KEY>] [--room-from <METADATA-KEY>]
+                           [--schedule-every <INTERVAL>] [--schedule-at <UTC-HH:MM>]
                            [--credential-env <VAR> | --credential-file <PATH> | --credential-oauth]
                            [--option <KEY=VALUE>]... [--unset-option <KEY>]...
                            [--unset locator|wing|credential]... [--disabled] [--allow-broaden]
 memcastle miner enable <NAME>
 memcastle miner disable <NAME>
+memcastle miner schedule-enable <NAME>
+memcastle miner schedule-disable <NAME>
 memcastle miner remove <NAME> [--yes]
 memcastle miner reload
 memcastle miner run <NAME> [KEY=VALUE]... [--full] [--allow-broaden]
 ```
 
-Manages the `[[miners]]` of the configuration file: named, persistent definitions of what to mine,
+Manages global `[[miners]]` and individual files under the XDG miners directory:
+named, persistent definitions of what to mine,
 described in [Configuration](configuration.md#miners).
 Every command is a call to the daemon's `/api/miners` routes, which are the rules MCP's read-only
 `memcastle_miner_list` and `memcastle_miner_get` follow too, so there is one model.
@@ -669,6 +683,9 @@ The file is edited in place: its comments and the other tables are kept.
 `remove` deletes the definition and asks first in a terminal, `--yes` skips it; what the miner mined and its source's
 cursor stay.
 `reload` reads the file again now and says what changed; the daemon also notices an edited file on its own.
+`--schedule-every 1d` adds a disabled UTC timetable; `schedule-enable` opts into unattended execution,
+and `schedule-disable` stops it without removing its settings.
+For day-based intervals `--schedule-at 03:30` chooses the UTC time.
 `run` submits the miner's mining job and prints it, like `mine`, continuing from the cursor its source has;
 it refuses a disabled miner.
 The miner's saved options are passed to the source as the run's options,
@@ -680,6 +697,23 @@ a key the source does not declare makes the miner not runnable, and a nested tab
 the others are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
 and no MCP tool exists for any of them.
 `miner set` and the rest print the miner as it is now when standard output is a terminal, and JSON when it is not.
+
+### `source config`
+
+```sh
+memcastle source config list
+memcastle source config get <ID>
+memcastle source config auth <ID>
+memcastle source config set <ID> --source <SOURCE> [--option KEY=VALUE]...
+                                 [--allow-broaden]
+memcastle source config remove <ID>
+```
+
+Stores reusable source-native defaults and credential references in `[[source_configs]]`, independently of miner
+destination and schedule settings.
+The source ID is always an implicit default configuration ID.
+`source show <SOURCE>` lists that source's configuration IDs and, when it signs in, its default sign-in status.
+Changes are administrative REST calls; MCP can inspect configurations but cannot change or sign them in.
 
 ### `trigger`
 

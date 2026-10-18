@@ -49,11 +49,19 @@ pub struct Request<'a> {
     pub wing: Option<&'a str>,
     /// Ignore the stored cursor and start from the beginning.
     pub full: bool,
+    /// The resolved per-run preset, absent on older and ad-hoc jobs.
+    pub preset: Option<&'a crate::domain::MiningPreset>,
 }
 
 /// What a run did, kept in the job's checkpoint (so a resumed run keeps counting) and reported as its result.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Stats {
+    /// Candidates returned by the adapter after its source-specific filters.
+    #[serde(default)]
+    pub discovered: u64,
+    /// Candidates filtered out before paging, when the adapter can count them.
+    #[serde(default)]
+    pub filtered: u64,
     /// Documents handled, whatever happened to them.
     pub documents: u64,
     /// Chunks filed as new drawers.
@@ -66,6 +74,9 @@ pub struct Stats {
     pub unchanged: u64,
     /// Documents the adapter chose not to read (binary, too large, gone).
     pub skipped: u64,
+    /// New or changed source documents filed successfully in this job.
+    #[serde(default)]
+    pub ingested: u64,
     /// Chunks recorded as likely duplicates of a drawer already in the room (docs/adr/025). They are stored all
     /// the same: two identical files are two records.
     #[serde(default)]
@@ -87,10 +98,36 @@ pub async fn mine<A: SourceAdapter>(
     let store = ctx.store();
     let settings = ctx.mining();
     let reference = adapter.identify(request.locator, request.options)?;
+    let default_wing = adapter.default_wing(&reference);
+    let wing_name = request.wing.unwrap_or(&default_wing).to_string();
+    let mut storage_reference = reference.clone();
+    if let Some(preset) = request.preset
+        && (preset.room.is_some()
+            || (preset.miner.is_some() && wing_name != default_wing)
+            || preset.mapping.is_some()
+            || preset
+                .configuration
+                .as_deref()
+                .is_some_and(|id| id != adapter.name()))
+    {
+        // The adapter keeps its own identity for acquisition; the palace gives different presets independent
+        // document records/cursors, so a second destination cannot be mistaken for already-filed content.
+        storage_reference.account = Some(format!(
+            "preset:{}",
+            sha256_hex(
+                format!(
+                    "{}\0{}\0{}\0{}\0{}",
+                    reference.account.as_deref().unwrap_or(""),
+                    preset.configuration.as_deref().unwrap_or(""),
+                    wing_name,
+                    preset.room.as_deref().unwrap_or(""),
+                    serde_json::to_string(&preset.mapping).unwrap_or_default()
+                )
+                .as_bytes()
+            )
+        ));
+    }
 
-    let wing_name = request
-        .wing
-        .map_or_else(|| adapter.default_wing(&reference), str::to_string);
     // A name that would create a wing is checked here, whoever chose it: an adapter's default (an installed source's
     // too) is not validated anywhere else, and a UUID-shaped or `/`-bearing wing is one no path can address. An
     // existing wing is accepted whatever its name, so a palace written before names were checked keeps mining.
@@ -99,7 +136,7 @@ pub async fn mine<A: SourceAdapter>(
         validate_name(NameKind::Wing, &wing_name)?;
     }
     // After the check, so a refused wing leaves no source record behind.
-    let source = store.get_or_create_source(&reference, None).await?;
+    let source = store.get_or_create_source(&storage_reference, None).await?;
     let wing = store.get_or_create_wing(&wing_name, None).await?;
     if wing_is_new {
         ctx.events().publish(Event::wing(Action::Created, wing.id));
@@ -112,124 +149,182 @@ pub async fn mine<A: SourceAdapter>(
         .get("stats")
         .and_then(|stats| serde_json::from_value(stats.clone()).ok())
         .unwrap_or_default();
-    let cursor = match job.checkpoint.get("cursor") {
+    let mut cursor = match job.checkpoint.get("cursor") {
         Some(own) => own.clone(),
         None if request.full => serde_json::Value::Null,
         None => source.cursor.clone(),
     };
 
-    let remaining = settings
-        .max_documents
-        .saturating_sub(usize::try_from(stats.documents).unwrap_or(usize::MAX));
-    let discovery = adapter.discover(&reference, &cursor, remaining).await?;
-    let truncated = !discovery.exhausted;
-    let base = stats.documents;
-    let total = base + discovery.candidates.len() as u64;
-    // Counts only: names, paths and contents stay out of the log.
-    tracing::info!(
-        source = adapter.name(),
-        candidates = discovery.candidates.len(),
-        full = request.full,
-        resumed = job.checkpoint.get("cursor").is_some(),
-        truncated,
-        "mining source"
-    );
+    let cap = request
+        .preset
+        .and_then(|preset| preset.max_documents)
+        .unwrap_or(settings.max_documents);
+    let cap = if cap == 0 { usize::MAX } else { cap };
+    let mut truncated: bool;
+    loop {
+        let remaining = cap.saturating_sub(usize::try_from(stats.documents).unwrap_or(usize::MAX));
+        if remaining == 0 {
+            truncated = true;
+            break;
+        }
+        // Every adapter sees only a bounded page even for an unlimited job; the checkpoint is durable between pages.
+        let discovery = adapter
+            .discover(&reference, &cursor, remaining.min(256))
+            .await?;
+        if stats.documents == 0 {
+            // A source may rescan the same tree on every page; count its exclusions once per job.
+            stats.filtered = u64::try_from(discovery.filtered).unwrap_or(u64::MAX);
+        }
+        let exhausted = discovery.exhausted;
+        truncated = !exhausted;
+        let base = stats.documents;
+        let total = base + discovery.candidates.len() as u64;
+        if discovery.candidates.is_empty() && !exhausted {
+            return Err(crate::Error::server(
+                "the source returned an empty nonterminal discovery page; it cannot advance the cursor",
+            ));
+        }
+        // Counts only: names, paths and contents stay out of the log.
+        tracing::info!(
+            source = adapter.name(),
+            candidates = discovery.candidates.len(),
+            full = request.full,
+            resumed = job.checkpoint.get("cursor").is_some(),
+            truncated = !exhausted,
+            "mining source"
+        );
 
-    // A window of two overlaps acquisition with filing, but never commits out of discovery order.
-    // A slow second read must not delay the first document's cursor/checkpoint or a stop request.
-    let mut reads = FuturesOrdered::new();
-    let mut next = 0;
-    for (position, candidate) in discovery.candidates.iter().enumerate() {
-        if ctx.is_cancelled() {
-            return Ok(JobOutcome::Cancelled);
-        }
-        if ctx.should_pause() {
-            return Ok(JobOutcome::Paused);
-        }
-        while next < discovery.candidates.len() && next < position + 2 {
-            reads.push_back(adapter.read(&reference, &discovery.candidates[next]));
-            next += 1;
-        }
-        let read = reads.next().await.expect("one read for every candidate");
-        if ctx.is_cancelled() {
-            return Ok(JobOutcome::Cancelled);
-        }
-        if ctx.should_pause() {
-            // Everything handled so far is already in the checkpoint: it is written after every document.
-            return Ok(JobOutcome::Paused);
-        }
+        // A window of two overlaps acquisition with filing, but never commits out of discovery order.
+        // A slow second read must not delay the first document's cursor/checkpoint or a stop request.
+        let mut reads = FuturesOrdered::new();
+        let mut next = 0;
+        for (position, candidate) in discovery.candidates.iter().enumerate() {
+            if ctx.is_cancelled() {
+                return Ok(JobOutcome::Cancelled);
+            }
+            if ctx.should_pause() {
+                return Ok(JobOutcome::Paused);
+            }
+            while next < discovery.candidates.len() && next < position + 2 {
+                reads.push_back(adapter.read(&reference, &discovery.candidates[next]));
+                next += 1;
+            }
+            let read = reads.next().await.expect("one read for every candidate");
+            if ctx.is_cancelled() {
+                return Ok(JobOutcome::Cancelled);
+            }
+            if ctx.should_pause() {
+                // Everything handled so far is already in the checkpoint: it is written after every document.
+                return Ok(JobOutcome::Paused);
+            }
 
-        // Compared after the document, so one event says "drawers changed" per document and not per chunk: a large
-        // run would otherwise publish thousands of events a minute for a client that re-reads once anyway.
-        let drawers_before = stats.created + stats.superseded + stats.retired;
-        match read? {
-            None => stats.skipped += 1,
-            Some(raw) => {
-                let existing = store
-                    .get_source_document(source.id, &raw.external_id)
-                    .await?;
-                if existing.as_ref().is_some_and(|known| {
-                    known.revision == raw.revision
-                        && known.metadata == raw.metadata
-                        && known.occurred_at == raw.occurred_at
-                }) {
-                    stats.unchanged += 1;
-                } else {
-                    let canonical = adapter.normalize(&raw)?;
-                    let room_name = canonical
-                        .room
-                        .as_deref()
-                        .filter(|name| validate_name(NameKind::Room, name).is_ok())
+            // Compared after the document, so one event says "drawers changed" per document and not per chunk: a large
+            // run would otherwise publish thousands of events a minute for a client that re-reads once anyway.
+            let drawers_before = stats.created + stats.superseded + stats.retired;
+            match read? {
+                None => stats.skipped += 1,
+                Some(raw) => {
+                    let existing = store
+                        .get_source_document(source.id, &raw.external_id)
+                        .await?;
+                    if existing.as_ref().is_some_and(|known| {
+                        known.revision == raw.revision
+                            && known.metadata == raw.metadata
+                            && known.occurred_at == raw.occurred_at
+                    }) {
+                        stats.unchanged += 1;
+                    } else {
+                        let canonical = adapter.normalize(&raw)?;
+                        let metadata_name = |key: Option<&str>, kind: NameKind| -> Option<&str> {
+                            key.and_then(|key| raw.metadata.get(key))
+                                .and_then(serde_json::Value::as_str)
+                                .filter(|name| validate_name(kind, name).is_ok())
+                        };
+                        let mapping = request.preset.and_then(|preset| preset.mapping.as_ref());
+                        let target_wing = metadata_name(
+                            mapping.and_then(|mapping| mapping.wing_from.as_deref()),
+                            NameKind::Wing,
+                        )
+                        .unwrap_or(&wing_name);
+                        let destination_wing = if target_wing == wing_name {
+                            wing.clone()
+                        } else {
+                            let created = store.get_wing(target_wing).await?.is_none();
+                            let destination = store.get_or_create_wing(target_wing, None).await?;
+                            if created {
+                                ctx.events()
+                                    .publish(Event::wing(Action::Created, destination.id));
+                            }
+                            destination
+                        };
+                        let room_name = metadata_name(
+                            mapping.and_then(|mapping| mapping.room_from.as_deref()),
+                            NameKind::Room,
+                        )
+                        .or(request.preset.and_then(|preset| preset.room.as_deref()))
+                        .or(canonical
+                            .room
+                            .as_deref()
+                            .filter(|name| validate_name(NameKind::Room, name).is_ok()))
                         .unwrap_or_else(|| adapter.default_room());
-                    let room = store.get_or_create_room(wing.id, room_name, None).await?;
-                    let record = ingest(
-                        store,
-                        &Ingest {
-                            adapter: adapter.name(),
-                            retains_raw: adapter.capabilities().retains_raw,
-                            chunk_chars: settings.chunk_chars,
-                            source: &source,
-                            room: room.id,
-                            job,
-                            dedup: ctx.dedup(),
-                        },
-                        &raw,
-                        &canonical,
-                        existing.as_ref(),
-                        &mut stats,
-                    )
-                    .await?;
-                    store.save_source_document(&record).await?;
+                        let room = store
+                            .get_or_create_room(destination_wing.id, room_name, None)
+                            .await?;
+                        let record = ingest(
+                            store,
+                            &Ingest {
+                                adapter: adapter.name(),
+                                retains_raw: adapter.capabilities().retains_raw,
+                                chunk_chars: settings.chunk_chars,
+                                source: &source,
+                                room: room.id,
+                                job,
+                                dedup: ctx.dedup(),
+                            },
+                            &raw,
+                            &canonical,
+                            existing.as_ref(),
+                            &mut stats,
+                        )
+                        .await?;
+                        store.save_source_document(&record).await?;
+                        stats.ingested += 1;
+                    }
                 }
             }
-        }
-        stats.documents += 1;
-        if stats.created + stats.superseded + stats.retired != drawers_before {
-            ctx.events().publish(Event::drawers_changed());
-        }
+            stats.documents += 1;
+            stats.discovered += 1;
+            if stats.created + stats.superseded + stats.retired != drawers_before {
+                ctx.events().publish(Event::drawers_changed());
+            }
 
-        store
-            .save_source_cursor(source.id, &candidate.cursor_after, job.id, Utc::now())
+            store
+                .save_source_cursor(source.id, &candidate.cursor_after, job.id, Utc::now())
+                .await?;
+            let progress = JobProgress {
+                current: u32::try_from(stats.documents).unwrap_or(u32::MAX),
+                total: Some(u32::try_from(total).unwrap_or(u32::MAX)),
+                message: Some(format!(
+                    "mined {}/{total} documents{}",
+                    stats.documents,
+                    if truncated {
+                        " (limit reached: run again to continue)"
+                    } else {
+                        ""
+                    }
+                )),
+            };
+            ctx.checkpoint(
+                job,
+                progress,
+                json!({ "cursor": candidate.cursor_after, "stats": stats }),
+            )
             .await?;
-        let progress = JobProgress {
-            current: u32::try_from(stats.documents).unwrap_or(u32::MAX),
-            total: Some(u32::try_from(total).unwrap_or(u32::MAX)),
-            message: Some(format!(
-                "mined {}/{total} documents{}",
-                stats.documents,
-                if truncated {
-                    " (limit reached: run again to continue)"
-                } else {
-                    ""
-                }
-            )),
-        };
-        ctx.checkpoint(
-            job,
-            progress,
-            json!({ "cursor": candidate.cursor_after, "stats": stats }),
-        )
-        .await?;
+            cursor = candidate.cursor_after.clone();
+        }
+        if exhausted {
+            break;
+        }
     }
 
     // The only report a mining job leaves besides its progress line, and where a caller checks whether the whole
@@ -238,13 +333,16 @@ pub async fn mine<A: SourceAdapter>(
         "source_id": source.id,
         "source": adapter.name(),
         "documents": stats.documents,
+        "discovered": stats.discovered,
+        "filtered": stats.filtered,
+        "ingested": stats.ingested,
         "created": stats.created,
         "superseded": stats.superseded,
         "retired": stats.retired,
         "unchanged": stats.unchanged,
         "skipped": stats.skipped,
         "similar": stats.similar,
-        "limit": settings.max_documents,
+        "limit": if cap == usize::MAX { None } else { Some(cap) },
         "truncated": truncated,
     }));
     Ok(JobOutcome::Completed)
@@ -445,6 +543,7 @@ mod tests {
                 incremental: true,
                 retains_raw: false,
                 needs_credentials: false,
+                single_account_auth: false,
             }
         }
 
@@ -475,6 +574,7 @@ mod tests {
                     })
                     .collect(),
                 exhausted: true,
+                filtered: 0,
             })
         }
 
@@ -494,7 +594,7 @@ mod tests {
                 external_id: candidate.external_id.clone(),
                 revision: RawDocument::revision_of(&body),
                 body,
-                metadata: json!({}),
+                metadata: json!({ "project": "wing-a", "group": "conversations" }),
                 occurred_at: None,
             }))
         }
@@ -531,6 +631,7 @@ mod tests {
                 full: false,
                 options: Options::new(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             "test",
@@ -547,6 +648,7 @@ mod tests {
                 options: &options,
                 wing: None,
                 full: false,
+                preset: None,
             },
         )
         .await
@@ -556,5 +658,74 @@ mod tests {
         assert_eq!(adapter.peak.load(Ordering::SeqCst), 2);
         assert_eq!(job.checkpoint["cursor"], json!({ "index": 3 }));
         assert_eq!(store.list_drawers(None).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn dynamic_mapping_and_another_preset_file_the_same_source_in_independent_rooms() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let adapter = OutOfOrderReads {
+            active: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+        };
+        let options = Options::new();
+        let first = crate::domain::MiningPreset {
+            miner: Some("grouped".into()),
+            configuration: Some("test-source".into()),
+            mapping: Some(crate::domain::MinerMapping {
+                wing_from: Some("project".into()),
+                room_from: Some("group".into()),
+            }),
+            ..Default::default()
+        };
+        let second = crate::domain::MiningPreset {
+            miner: Some("fixed".into()),
+            configuration: Some("test-source".into()),
+            room: Some("other".into()),
+            ..Default::default()
+        };
+        for preset in [&first, &second] {
+            let mut job = Job::new(
+                JobKind::Mine {
+                    source: MiningSource::Named {
+                        source: adapter.name().into(),
+                        locator: None,
+                    },
+                    wing: None,
+                    full: false,
+                    options: Options::new(),
+                    embedding_space: None,
+                    preset: Some(Box::new(preset.clone())),
+                },
+                Priority::Background,
+                "test",
+            );
+            job.apply(JobEvent::Claim).unwrap();
+            let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+            mine(
+                &adapter,
+                &ctx,
+                &mut job,
+                Request {
+                    locator: None,
+                    options: &options,
+                    wing: None,
+                    full: false,
+                    preset: Some(preset),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(job.result.as_ref().unwrap()["ingested"], 3);
+        }
+        let wing = store.get_wing("wing-a").await.unwrap().unwrap();
+        assert!(
+            store
+                .get_room(wing.id, "conversations")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(store.list_drawers(None).await.unwrap().len(), 6);
+        assert_eq!(store.list_sources().await.unwrap().len(), 2);
     }
 }

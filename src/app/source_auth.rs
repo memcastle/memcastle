@@ -1,9 +1,9 @@
-//! Signing mining sources in with OAuth (docs/adr/039).
+//! Signing mining source configurations in with OAuth (docs/adr/039).
 //!
 //! Like installing a source, this changes what the daemon may do with someone's account, so it is administrative: REST
 //! and the CLI only, with no MCP tool, so an agent can never start a sign-in or widen what a source is allowed to read.
 //! The sign-in itself, and the storing and renewing of its tokens, are `crate::credential`'s; what lives here is
-//! finding the source, checking it declares a sign-in at all, and removing the credential with the source.
+//! finding the source, checking its sign-in declaration, and removing each configuration's credential with the source.
 
 use std::time::Duration;
 
@@ -22,7 +22,10 @@ impl AppServices {
     /// The installed source `name`, and what it declares to sign in with.
     ///
     /// Enabled or not: signing in before turning a source on is a reasonable order.
-    async fn oauth_source(&self, name: &str) -> Result<(SourcePackageRecord, OAuthRequirement)> {
+    pub(super) async fn oauth_source(
+        &self,
+        name: &str,
+    ) -> Result<(SourcePackageRecord, OAuthRequirement)> {
         let unsupported = || Error::CredentialOauthUnsupported {
             source_name: name.to_string(),
         };
@@ -51,6 +54,36 @@ impl AppServices {
     pub async fn begin_source_auth(&self, name: &str) -> Result<Challenge> {
         let (_, requirement) = self.oauth_source(name).await?;
         self.credentials.begin(name, &requirement).await
+    }
+
+    /// Sign in a named configuration under its own credential key, verifying its source's OAuth declaration.
+    pub async fn begin_source_config_auth(&self, id: &str) -> Result<Challenge> {
+        let config = self.source_config(id, None).await?;
+        let (record, requirement) = self.oauth_source(&config.source).await?;
+        if record.manifest.capabilities.single_account_auth && config.id != config.source {
+            return Err(Error::invalid_input(
+                "source_config",
+                format!(
+                    "`{}` supports one default web account; use `memcastle source auth {}`",
+                    config.source, config.source
+                ),
+            ));
+        }
+        self.credentials.begin(&config.id, &requirement).await
+    }
+
+    /// Wait for a configuration's sign-in, without returning its token.
+    pub async fn wait_source_config_auth(
+        &self,
+        id: &str,
+        flow: &str,
+        window: Duration,
+    ) -> Result<FlowStatus> {
+        let config = self.source_config(id, None).await?;
+        self.oauth_source(&config.source).await?;
+        self.credentials
+            .wait(&config.id, flow, window.min(MAX_WAIT))
+            .await
     }
 
     /// Wait for the sign-in `flow` of `name`: up to `window` (at most [`MAX_WAIT`]), after which it says it is still
@@ -113,12 +146,19 @@ impl AppServices {
     /// Forget the credential of `name`, as removing the source does.
     pub(super) async fn forget_source_credential(&self, name: &str) -> Result<()> {
         let credentials = self.credentials.clone();
-        let name = name.to_string();
-        tokio::task::spawn_blocking(move || credentials.forget(&name))
-            .await
-            .map_err(|e| Error::CredentialStoreFailed {
-                message: format!("forgetting the credential was interrupted: {e}"),
-            })?
+        let mut ids = self.source_configuration_ids(name).await?;
+        ids.sort();
+        ids.dedup();
+        tokio::task::spawn_blocking(move || {
+            for id in ids {
+                credentials.forget(&id)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| Error::CredentialStoreFailed {
+            message: format!("forgetting the credential was interrupted: {e}"),
+        })?
     }
 }
 
@@ -240,10 +280,15 @@ mod tests {
         MinerDefinition {
             name: "m".to_string(),
             source: source.to_string(),
+            source_config: None,
             enabled: true,
             locator: Some("x".to_string()),
             wing: None,
+            room: None,
+            mapping: None,
+            max_documents: None,
             embedding_profile: None,
+            schedule: None,
             credential,
             options: serde_json::Map::new(),
         }
@@ -333,6 +378,63 @@ mod tests {
             .await
             .unwrap();
         assert!(!again.auth.unwrap().signed_in);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn named_source_sign_ins_are_isolated_and_shared_by_miners_using_the_same_configuration()
+    {
+        let mut fixture = fixture().await;
+        fixture.app = fixture
+            .app
+            .with_source_configs(crate::app::SourceConfigRegistry::new(
+                None,
+                vec![
+                    crate::domain::SourceConfiguration {
+                        id: "demo-work".into(),
+                        source: "demo".into(),
+                        credential: Some(CredentialRef::Oauth),
+                        options: Default::default(),
+                    },
+                    crate::domain::SourceConfiguration {
+                        id: "demo-personal".into(),
+                        source: "demo".into(),
+                        credential: Some(CredentialRef::Oauth),
+                        options: Default::default(),
+                    },
+                ],
+            ));
+        install(&fixture, "demo", Some(fixture.provider.requirement())).await;
+        let challenge = fixture
+            .app
+            .begin_source_config_auth("demo-work")
+            .await
+            .unwrap();
+        loop {
+            match fixture
+                .app
+                .wait_source_config_auth("demo-work", &challenge.flow, Duration::from_millis(100))
+                .await
+                .unwrap()
+            {
+                FlowStatus::SignedIn(_) => break,
+                FlowStatus::Pending => {}
+            }
+        }
+        let mut work = miner("demo", None);
+        work.source_config = Some("demo-work".into());
+        fixture.app.check_credential(&work).await.unwrap();
+        work.name = "another".into();
+        fixture.app.check_credential(&work).await.unwrap();
+        let mut personal = miner("demo", None);
+        personal.source_config = Some("demo-personal".into());
+        assert!(fixture.app.check_credential(&personal).await.is_err());
+        let view = fixture
+            .app
+            .show_source_config("demo-work", crate::domain::MemoryMode::Full)
+            .await
+            .unwrap();
+        assert!(view.credential_available);
+        assert!(!serde_json::to_string(&view).unwrap().contains("access-"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

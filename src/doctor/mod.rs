@@ -940,10 +940,15 @@ mod tests {
         config.miners.push(crate::domain::MinerDefinition {
             name: "missing-directory".into(),
             source: "directory".into(),
+            source_config: None,
             enabled: false,
             locator: Some(temp.path().join("absent").display().to_string()),
             wing: None,
+            room: None,
+            mapping: None,
+            max_documents: None,
             embedding_profile: None,
+            schedule: None,
             credential: Some(CredentialRef::File {
                 path: temp.path().join("missing-secret").display().to_string(),
             }),

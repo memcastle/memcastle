@@ -109,7 +109,8 @@ Sizes count characters, so a cut never lands inside a character.
 
 ### Limits
 
-One job files at most `mining.max_documents` documents (2000 by default).
+By default jobs are unlimited (`mining.max_documents = 0`) but discover in bounded pages and checkpoint every document.
+Set a positive `mining.max_documents` to limit every job, or a positive `max_documents` on one miner to override it.
 If the source has more, the job completes with `"truncated": true`, its progress message says to run it again, and the
 next job continues from the cursor.
 
@@ -128,7 +129,8 @@ memcastle mine chatgpt /path/to/chatgpt-export.zip            # ChatGPT data exp
 memcastle mine github include=acme/docs wiki_include=acme/docs # selected GitHub repository and wiki history
 ```
 
-The first word is a source, and what follows is that source's own: at most one place to read, then `key=value` options
+An existing configured miner ID takes precedence over a same-named source; otherwise the first word is a source,
+and what follows is that source's own: at most one place to read, then `key=value` options
 that the source declares (`memcastle sources` lists them; an unknown key is refused before anything is queued).
 A word that is not shaped like a source name (`.`, `~/project`, `./pi`) is a directory.
 See [`mine`](cli.md#mine) for the whole grammar.
@@ -145,21 +147,31 @@ Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot 
 ### Remembering what to mine
 
 `memcastle mine` names a source and where to read every time.
-A **miner** is a named definition of one, kept as `[[miners]]` in the configuration file:
-a source, a locator, saved options and a reference to a credential
+A **miner** is a named definition, kept as `[[miners]]` or a file under the miners directory:
+a source (or named source configuration), locator, saved options, destination, limit and optional schedule
 ([Configuration](configuration.md#miners), [`memcastle miner`](cli.md#miner)).
 `memcastle miner run <name>` submits the same job `mine` would, with the miner's saved options,
 so a miner continues from the cursor its source already has.
-The cursor belongs to the source, which is the `source` and `locator`, and not to the miner:
-renaming, disabling, re-scoping or removing a miner never loses it or what it mined.
+The cursor belongs to the effective source identity (adapter/account/locator and, when needed, source configuration and
+destination mapping), not the miner's name.
+Renaming, disabling or removing a miner never deletes what it mined; changing a mapping can select an independent cursor.
+Each durable mining job pins its resolved `kind.preset` (miner, source configuration, mapping and limit).
+Drawers retain their job ID and source item origin, so the producing preset can be recovered without storing credentials
+or rewriting historical drawers.
 An agent can read the miners (`memcastle_miner_list`, `memcastle_miner_get`) but only the user changes them.
 
 A miner runs when asked.
+Its optional timetable remains off until explicitly enabled with `miner schedule-enable`.
 To have it run on its own (daily, when files change, when a service calls a webhook) the user defines a
 [trigger](triggers.md) for it, which starts disabled and which no source, install or miner ever enables.
 The trigger only decides when; the source still decides how to read.
 
-The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
+The job's `result` reports `documents`, `discovered`, `filtered`, `ingested`, `created`, `superseded`, `retired`,
+`unchanged`, `skipped`, `similar`, `truncated` and the effective `limit` (`null` when unlimited).
+A fatal discovery/read error fails the job before advancing past the failed item; adapter-filtered items are excluded from
+`discovered`, and the source reports a skipped candidate separately when it cannot read it.
+The directory adapter reports an exact `filtered` count for include/exclude/date exclusions;
+an installed source currently reports zero unless its contract offers such a count.
 
 ## Available sources
 
@@ -483,10 +495,12 @@ Exports and raw retained documents contain private conversations.
 An **experimental** alternative uses the undocumented ChatGPT web API:
 
 ```sh
-memcastle mine chatgpt mode=web account=personal
+memcastle source auth chatgpt
+memcastle mine chatgpt
 ```
 
-`account` is a non-secret label that keeps different accounts' cursors separate.
+The sole signed-in web account is selected automatically; named ChatGPT web accounts are not yet supported.
+An explicit legacy `account` label retains the corresponding cursor but is not needed for a new run.
 Without a project filter, the web backend combines ordinary conversations and the full paginated history of each
 project, including archived projects; the sidebar's preview alone is never treated as complete history.
 `projects=id:PROJECT_ID` or `projects=name:Exact Name` selects one project; comma-separated selectors choose several.

@@ -20,6 +20,10 @@ import type {
   JobRequest,
   JobStatus,
   MemoryMode,
+  Miner,
+  MinerPatch,
+  MinersReport,
+  SourceConfiguration,
   Mention,
   Relationship,
   SearchHit,
@@ -198,6 +202,28 @@ export class MemCastleClient {
 
   sources(): Promise<SourcesReport> {
     return this.request("GET", "/api/sources")
+  }
+
+  miners(): Promise<MinersReport> {
+    return this.request("GET", "/api/miners")
+  }
+  setMiner(id: string, patch: MinerPatch): Promise<{ miner: Miner }> {
+    return this.request("PUT", `/api/miners/${encodeURIComponent(id)}`, { body: patch })
+  }
+  removeMiner(id: string): Promise<{ removed: string }> {
+    return this.request("DELETE", `/api/miners/${encodeURIComponent(id)}`)
+  }
+  scheduleMiner(id: string, enabled: boolean): Promise<{ miner: Miner }> {
+    return this.request("POST", `/api/miners/${encodeURIComponent(id)}/schedule/${enabled ? "enable" : "disable"}`)
+  }
+  runMiner(id: string, full: boolean): Promise<Job> {
+    return this.request("POST", `/api/miners/${encodeURIComponent(id)}/run`, { body: { full, requested_by: "web" } })
+  }
+  sourceConfigs(): Promise<SourceConfiguration[]> {
+    return this.request("GET", "/api/source-configs")
+  }
+  setSourceConfig(id: string, patch: { source: string; options: Record<string, string>; allow_broaden?: boolean; credential?: { type: "oauth" } | { type: "env"; name: string } | { type: "file"; path: string } }): Promise<SourceConfiguration> {
+    return this.request("PUT", `/api/source-configs/${encodeURIComponent(id)}`, { body: patch })
   }
 
   wings(): Promise<Wing[]> {

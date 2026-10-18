@@ -14,6 +14,8 @@ mod miners;
 mod palace;
 mod plugins;
 mod source_auth;
+mod source_configs;
+pub use source_configs::{SourceConfigRegistry, SourceConfigurationPatch, SourceConfigurationView};
 mod source_packages;
 mod source_registry;
 mod triggers;
@@ -72,6 +74,7 @@ struct MiningSubmission {
     full: bool,
     options: Options,
     embedding_space: Option<crate::domain::EmbeddingSpace>,
+    preset: Option<crate::domain::MiningPreset>,
 }
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
@@ -352,6 +355,7 @@ pub struct AppServices {
     plugins: crate::config::PluginsConfig,
     /// The `[[miners]]` of the configuration file, read back from it and rewritten through it.
     miners: Arc<MinerRegistry>,
+    source_configs: Arc<SourceConfigRegistry>,
     /// The `[[triggers]]` of the configuration file, and the webhook listener's settings (docs/adr/043).
     triggers: Arc<TriggerRegistry>,
     /// The OAuth sign-ins of the sources that need one (docs/adr/039).
@@ -378,6 +382,7 @@ impl AppServices {
             mining: MiningConfig::default(),
             plugins: crate::config::PluginsConfig::default(),
             miners: Arc::new(MinerRegistry::default()),
+            source_configs: Arc::new(SourceConfigRegistry::default()),
             triggers: Arc::new(TriggerRegistry::default()),
             credentials: crate::credential::Credentials::from_config(
                 &crate::config::CredentialsConfig::default(),
@@ -813,13 +818,66 @@ impl AppServices {
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
+        Self::require_write(mode, "mine")?;
+        let source_name = match &source {
+            MiningSource::Directory { .. } => "directory",
+            MiningSource::Named { source, .. } => source,
+        };
+        let defaults = self.source_config(source_name, Some(source_name)).await?;
+        let mut effective = defaults
+            .options()
+            .map_err(|reason| Error::invalid_input("options", reason))?;
+        effective.extend(options);
+        // Ad-hoc runs remain jobs, never miner definitions: pin their effective defaults and limit for recovery.
+        let preset = crate::domain::MiningPreset {
+            configuration: Some(source_name.to_string()),
+            max_documents: Some(self.mining.max_documents),
+            ..Default::default()
+        };
+        self.submit_mine_preset(
+            source,
+            wing,
+            full,
+            effective,
+            Some(preset),
+            requested_by,
+            mode,
+        )
+        .await
+    }
+
+    /// Submit a run with the effective preset and embedding space pinned to the durable job.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn submit_mine_preset(
+        &self,
+        source: MiningSource,
+        wing: Option<String>,
+        full: bool,
+        options: Options,
+        preset: Option<crate::domain::MiningPreset>,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        let embedding_space = preset
+            .as_ref()
+            .and_then(|preset| preset.embedding_profile.as_deref())
+            .map(|profile| {
+                self.embeddings.select(Some(profile)).and_then(|handle| {
+                    handle
+                        .space()
+                        .cloned()
+                        .ok_or(Error::EmbeddingsNotConfigured)
+                })
+            })
+            .transpose()?;
         self.submit_mine_with_embedding(
             MiningSubmission {
                 source,
                 wing,
                 full,
                 options,
-                embedding_space: None,
+                embedding_space,
+                preset,
             },
             requested_by,
             mode,
@@ -827,7 +885,7 @@ impl AppServices {
         .await
     }
 
-    /// Submit a miner run with its resolved embedding-space override pinned beside the source job.
+    /// Submit a mine job after resolving its source, options, preset and embedding space.
     async fn submit_mine_with_embedding(
         &self,
         submission: MiningSubmission,
@@ -840,6 +898,7 @@ impl AppServices {
             full,
             options,
             embedding_space,
+            preset,
         } = submission;
         Self::require_write(mode, "mine")?;
         let source = self.checked_mining_source(source, &options).await?;
@@ -857,6 +916,7 @@ impl AppServices {
                     full,
                     options,
                     embedding_space,
+                    preset: preset.map(Box::new),
                 },
                 Priority::Background,
                 requested_by,

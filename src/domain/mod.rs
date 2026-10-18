@@ -28,6 +28,7 @@ mod resolution;
 mod search;
 mod secret;
 mod source;
+mod source_config;
 mod source_index;
 mod source_package;
 mod trigger;
@@ -51,12 +52,13 @@ pub use fingerprint::{
 pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, SourceId, WingId};
 pub(crate) use job::default_dry_run;
 pub use job::{
-    InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, MiningSource, Priority,
-    TransitionError,
+    InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, MiningPreset, MiningSource,
+    Priority, TransitionError,
 };
 pub use memory_mode::MemoryMode;
 pub use miner::{
-    MAX_MINER_NAME_LEN, MinerDefinition, is_valid_miner_name, option_broadening, validate_miners,
+    MAX_MINER_NAME_LEN, MinerDefinition, MinerMapping, MinerSchedule, is_valid_miner_name,
+    option_broadening, validate_miners,
 };
 pub use resolution::{
     EntityCandidate, MIN_TYPO_KEY_CHARS, PossibleMatch, Resolution, ResolutionRule, entity_key,
@@ -71,6 +73,7 @@ pub use source::{
     OptionSpec, Options, RawDocument, Segment, SourceCapabilities, SourceDocumentRecord,
     SourceRecord, SourceRef, is_option_key, parse_since, unknown_option,
 };
+pub use source_config::{SourceConfiguration, validate_source_configs};
 pub use source_index::{
     INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex, is_repository,
 };

@@ -52,6 +52,23 @@ describe("a request", () => {
     expect(requests[0]).toMatchObject({ method: "POST", url: "/api/jobs", body: { type: "repair", dry_run: true, requested_by: "web" } })
   })
 
+  it("edits a miner and its schedule through authenticated resource routes", async () => {
+    const { api, requests } = client({ body: {} }, { token: "t" })
+
+    await api.setMiner("my miner", { source: "directory", room: "imports", schedule: { every: "1d", enabled: false } })
+    await api.scheduleMiner("my miner", true)
+    await api.runMiner("my miner", false)
+
+    expect(requests.map((request) => [request.method, request.url])).toEqual([
+      ["PUT", "/api/miners/my%20miner"],
+      ["POST", "/api/miners/my%20miner/schedule/enable"],
+      ["POST", "/api/miners/my%20miner/run"],
+    ])
+    expect(requests[0]?.body).toMatchObject({ room: "imports", schedule: { enabled: false } })
+    expect(requests[2]?.body).toMatchObject({ full: false, requested_by: "web" })
+    expect(requests.every((request) => request.headers.Authorization === "Bearer t")).toBe(true)
+  })
+
   it("escapes each segment of a drawer path but keeps the slashes of a drawer name", async () => {
     const { api, requests } = client({ body: {} })
 

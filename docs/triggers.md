@@ -37,6 +37,12 @@ ask for by hand, and a manual firing, a timetable and a webhook all take one pat
 ## Defining a trigger
 
 Triggers are the `[[triggers]]` entries of the configuration file, next to the `[[miners]]` they ask to run.
+For a miner's own timetable, use `[miners.schedule]` in the global file or `[schedule]` in its individual miner file.
+It accepts `every` and optional UTC `at` in the same syntax as a standalone schedule trigger.
+Writing it down does not start it: `memcastle miner schedule-enable <name>` opts in explicitly,
+and `schedule-disable` or removal stops it without changing any already mined data.
+The daemon reconciles enabled miner schedules through the same trigger supervisor and run path;
+standalone `[[triggers]]` continue to work independently.
 They are managed from the file or from [`memcastle trigger`](cli.md#trigger), and read (never changed) over MCP.
 The daemon rewrites only that section, in place, so your comments and the rest of the file survive.
 

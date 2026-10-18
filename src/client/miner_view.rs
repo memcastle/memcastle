@@ -46,7 +46,15 @@ pub fn render_miners(report: &MinersReport, painter: Painter, width: Option<u16>
         ));
     } else {
         out.push_str(&render_table(
-            &["NAME", "SOURCE", "STATE", "SCOPE", "LAST RUN", "DOCUMENTS"],
+            &[
+                "NAME",
+                "SOURCE",
+                "STATE",
+                "SCOPE",
+                "SCHEDULE",
+                "LAST RUN",
+                "DOCUMENTS",
+            ],
             report
                 .miners
                 .iter()
@@ -56,6 +64,16 @@ pub fn render_miners(report: &MinersReport, painter: Painter, width: Option<u16>
                         miner.source.clone(),
                         state_label(miner, painter),
                         flat(&miner.options),
+                        miner.schedule.as_ref().map_or_else(
+                            || "manual".to_string(),
+                            |schedule| {
+                                format!(
+                                    "{} ({})",
+                                    schedule.every,
+                                    if schedule.enabled { "on" } else { "off" }
+                                )
+                            },
+                        ),
                         miner
                             .last_run_at
                             .map_or_else(|| "never".to_string(), local_minute),
@@ -106,6 +124,42 @@ pub fn render_miner(miner: &MinerView, painter: Painter) -> String {
     if let Some(wing) = &miner.wing {
         lines.push(format!("  wing:       {wing}"));
     }
+    if let Some(room) = &miner.room {
+        lines.push(format!("  room:       {room}"));
+    }
+    if let Some(config) = &miner.source_config {
+        lines.push(format!("  source config: {config}"));
+    }
+    if let Some(mapping) = &miner.mapping {
+        lines.push(format!(
+            "  mapping:    wing from {:?}, room from {:?}",
+            mapping.wing_from, mapping.room_from
+        ));
+    }
+    if let Some(limit) = miner.max_documents {
+        lines.push(format!("  limit:      {limit} documents per job"));
+    }
+    if let Some(profile) = &miner.embedding_profile {
+        lines.push(format!("  embedding profile: {profile}"));
+    }
+    if let Some(schedule) = &miner.schedule {
+        lines.push(format!(
+            "  schedule:   every {}{} ({})",
+            schedule.every,
+            schedule
+                .at
+                .as_ref()
+                .map_or_else(String::new, |at| format!(" at {at} UTC")),
+            if schedule.enabled {
+                "enabled"
+            } else {
+                "off; use miner schedule-enable"
+            }
+        ));
+    }
+    if let Some(file) = &miner.config_file {
+        lines.push(format!("  file:       {file}"));
+    }
     if let Some(credential) = &miner.credential {
         lines.push(format!(
             "  credential: {} ({})",
@@ -149,7 +203,7 @@ pub fn render_change(change: &MinerChange, painter: Painter) -> String {
         out.push_str(&format!(
             "\n{}",
             painter.warn(
-                "it now reads a different source or locator, so it starts from that source's own cursor"
+                "its source, configuration or mapping changed, so it may start from a different cursor"
             )
         ));
     }
@@ -160,10 +214,11 @@ pub fn render_change(change: &MinerChange, painter: Painter) -> String {
 #[must_use]
 pub fn render_reload(reload: &MinersReload, painter: Painter) -> String {
     let diff = &reload.diff;
-    if diff.is_empty() {
-        return format!("No change: {} miner(s) configured.", reload.miners);
-    }
-    let mut lines = vec![format!("Reloaded: {} miner(s) configured.", reload.miners)];
+    let mut lines = vec![if diff.is_empty() {
+        format!("No change: {} miner(s) configured.", reload.miners)
+    } else {
+        format!("Reloaded: {} miner(s) configured.", reload.miners)
+    }];
     for (label, names) in [
         ("added", &diff.added),
         ("removed", &diff.removed),
@@ -183,6 +238,9 @@ pub fn render_reload(reload: &MinersReload, painter: Painter) -> String {
                 diff.broadened.join(", ")
             ))
         ));
+    }
+    if let Some(error) = &reload.error {
+        lines.push(painter.error(&format!("invalid miner configuration: {error}")));
     }
     lines.join("\n")
 }
@@ -257,13 +315,14 @@ mod tests {
         };
         let text = render_change(&change, Painter::PLAIN);
         assert!(text.starts_with("Updated signal-personal"), "{text}");
-        assert!(text.contains("different source or locator"), "{text}");
+        assert!(text.contains("different cursor"), "{text}");
     }
 
     #[test]
     fn a_reload_lists_what_changed_and_flags_possibly_widened_options() {
         let reload = MinersReload {
             miners: 2,
+            error: None,
             diff: MinersDiff {
                 changed: vec!["chat".to_string()],
                 broadened: vec!["chat".to_string()],
@@ -278,6 +337,7 @@ mod tests {
         );
         let none = MinersReload {
             miners: 1,
+            error: None,
             diff: MinersDiff::default(),
         };
         assert_eq!(

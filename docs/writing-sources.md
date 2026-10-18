@@ -136,6 +136,10 @@ fixtures = "fixtures"
 | `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. A declared `callback_path` replaces `/callback` on the same loopback listener; `on_demand = true` lets an offline mode proceed without a sign-in while the online mode must ask for its token at `identify`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
 
+An OAuth source that cannot select more than one web account declares `single_account_auth = true` under `[capabilities]`.
+The daemon then refuses named web sign-ins while permitting offline export configurations with locators.
+This capability describes what the source can select; it grants no permission and is not part of the consent digest.
+
 ## Options
 
 A user narrows one run of a source with `key=value` words (`memcastle mine my-notes ~/notes since=2026-09`).
@@ -164,6 +168,11 @@ An option either narrows or selects, and the two are not the same to the cursor,
   within a history that holds many projects) must be folded
   into `account` or `locator` by `identify`, so each slice has a cursor of its own;
   otherwise a run for one slice would move the cursor past documents another slice has not read yet.
+
+The miner's `mapping.wing_from` and `mapping.room_from` use valid string fields in a raw document's JSON metadata;
+sources can supply project or grouping names there without choosing a palace destination themselves.
+Missing or invalid destination names fall back to the miner's fixed Wing/Room and then to the source defaults.
+`mining.max_documents = 0` processes pages until exhausted; `discover` still receives a bounded limit per call.
 
 A case in the conformance fixtures can carry the options of a run in `options`, and runs through the same checks.
 

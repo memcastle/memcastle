@@ -663,8 +663,42 @@ async fn cmd_wake_up(config: &Config, mode: Option<MemoryMode>, args: WakeUpArgs
 async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> Result<()> {
     use memcastle::client::mine;
 
-    let parsed = mine::parse(args.target, args.args)?;
+    let parsed = mine::parse(args.target, args.args.clone())?;
     let daemon = client(config, mode);
+    // The daemon owns miner identity and validation; the CLI only chooses which existing route to call.
+    // An explicit ./name stays a path even when a miner has the same name.
+    if !parsed.target.contains(['/', '\\'])
+        && parsed.target != "."
+        && parsed.target != ".."
+        && !parsed.target.starts_with('~')
+    {
+        let miners = daemon.list_miners().await?;
+        if miners
+            .miners
+            .iter()
+            .any(|miner| miner.name == parsed.target)
+        {
+            if let Some(place) = &parsed.positional {
+                return Err(Error::invalid_input(
+                    "args",
+                    format!(
+                        "`{}` is a configured miner; `{place}` is an extra locator. Change its configuration with `memcastle miner set`, or use `memcastle mine ./{}` for a path",
+                        parsed.target, parsed.target
+                    ),
+                ));
+            }
+            if args.wing.is_some() {
+                return Err(Error::invalid_input(
+                    "wing",
+                    "a configured miner owns its destination; edit it with `memcastle miner set --wing`",
+                ));
+            }
+            let job = daemon
+                .run_miner_with_options(&parsed.target, args.full, &args.args, false)
+                .await?;
+            return print_submitted(&job);
+        }
+    }
     // The list of sources is asked for only when the first word could be one: a path or `directory` needs no lookup,
     // and a plain `memcastle mine ./project` costs the one request it always did.
     let adapters = if parsed.needs_sources() {
@@ -1265,6 +1299,72 @@ async fn cmd_source(
 ) -> Result<()> {
     match command {
         SourceCommand::List => cmd_sources(config, mode).await,
+        SourceCommand::Config { command } => {
+            let daemon = client(config, mode);
+            match command {
+                cli::SourceConfigCommand::List => {
+                    let views = daemon.list_source_configs().await?;
+                    print_for_terminal_or_json(
+                        |_, _| serde_json::to_string_pretty(&views).unwrap_or_default(),
+                        &views,
+                    )
+                }
+                cli::SourceConfigCommand::Get { id } => {
+                    let view = daemon.show_source_config(&id).await?;
+                    print_for_terminal_or_json(
+                        |_, _| serde_json::to_string_pretty(&view).unwrap_or_default(),
+                        &view,
+                    )
+                }
+                cli::SourceConfigCommand::Auth { id } => cmd_source_config_auth(config, &id).await,
+                cli::SourceConfigCommand::Set {
+                    id,
+                    source,
+                    options,
+                    credential_env,
+                    credential_file,
+                    credential_oauth,
+                    allow_broaden,
+                } => {
+                    let mut patch = memcastle::app::SourceConfigurationPatch {
+                        source,
+                        allow_broaden,
+                        ..Default::default()
+                    };
+                    for option in options {
+                        let (key, value) = option
+                            .split_once('=')
+                            .filter(|(key, _)| !key.is_empty())
+                            .ok_or_else(|| Error::invalid_input("--option", "give KEY=VALUE"))?;
+                        patch.options.insert(
+                            key.to_string(),
+                            serde_json::Value::String(value.to_string()),
+                        );
+                    }
+                    patch.credential = credential_env
+                        .map(|name| memcastle::domain::CredentialRef::Env { name })
+                        .or_else(|| {
+                            credential_file
+                                .map(|path| memcastle::domain::CredentialRef::File { path })
+                        })
+                        .or_else(|| {
+                            credential_oauth.then_some(memcastle::domain::CredentialRef::Oauth)
+                        });
+                    let view = client(config, None).set_source_config(&id, &patch).await?;
+                    print_for_terminal_or_json(
+                        |_, _| serde_json::to_string_pretty(&view).unwrap_or_default(),
+                        &view,
+                    )
+                }
+                cli::SourceConfigCommand::Remove { id } => {
+                    client(config, None).remove_source_config(&id).await?;
+                    print_for_terminal_or_json(
+                        |_, _| format!("Removed source configuration {id}"),
+                        &serde_json::json!({"removed": id}),
+                    )
+                }
+            }
+        }
         SourceCommand::Show(args) => {
             let source = client(config, mode).show_source(&args.name).await?;
             print_for_terminal_or_json(
@@ -1337,11 +1437,23 @@ async fn cmd_source(
 /// when there is one, and waits. The instructions go to stderr like every prompt, so stdout holds the one answer, and
 /// that answer carries no token.
 async fn cmd_source_auth(config: &Config, name: &str) -> Result<()> {
+    cmd_sign_source(config, name, false).await
+}
+
+async fn cmd_source_config_auth(config: &Config, id: &str) -> Result<()> {
+    cmd_sign_source(config, id, true).await
+}
+
+async fn cmd_sign_source(config: &Config, name: &str, named: bool) -> Result<()> {
     use memcastle::app::{FlowKind, FlowStatus};
 
     // Administrative, like `source install`: no memory mode.
     let daemon = client(config, None);
-    let challenge = daemon.begin_source_auth(name).await?;
+    let challenge = if named {
+        daemon.begin_source_config_auth(name).await?
+    } else {
+        daemon.begin_source_auth(name).await?
+    };
     let painter = Painter::for_stderr();
     match challenge.kind {
         FlowKind::Device => {
@@ -1386,7 +1498,13 @@ async fn cmd_source_auth(config: &Config, name: &str) -> Result<()> {
     // A long poll, repeated: the daemon holds each request for a few seconds and then says it is still waiting, so no
     // proxy or timeout sits between the user and the end of their sign-in.
     let signed_in = loop {
-        match daemon.wait_source_auth(name, &challenge.flow).await? {
+        match if named {
+            daemon
+                .wait_source_config_auth(name, &challenge.flow)
+                .await?
+        } else {
+            daemon.wait_source_auth(name, &challenge.flow).await?
+        } {
             FlowStatus::Pending => {}
             FlowStatus::SignedIn(done) => break done,
         }
@@ -1436,11 +1554,18 @@ async fn cmd_miner(config: &Config, mode: Option<MemoryMode>, command: MinerComm
         MinerCommand::Set(args) => {
             let patch = SetFlags {
                 source: args.source.as_deref(),
+                source_config: args.source_config.as_deref(),
                 locator: args.locator.as_deref(),
                 wing: args.wing.as_deref(),
+                room: args.room.as_deref(),
+                wing_from: args.wing_from.as_deref(),
+                room_from: args.room_from.as_deref(),
+                max_documents: args.max_documents,
+                embedding_profile: args.embedding_profile.as_deref(),
+                schedule_every: args.schedule_every.as_deref(),
+                schedule_at: args.schedule_at.as_deref(),
                 credential_env: args.credential_env.as_deref(),
                 credential_file: args.credential_file.as_deref(),
-                embedding_profile: args.embedding_profile.as_deref(),
                 credential_oauth: args.credential_oauth,
                 options: &args.option,
                 unset_options: &args.unset_option,
@@ -1458,6 +1583,14 @@ async fn cmd_miner(config: &Config, mode: Option<MemoryMode>, command: MinerComm
         }
         MinerCommand::Disable(args) => {
             let change = daemon.set_miner_enabled(&args.name, false).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        MinerCommand::ScheduleEnable(args) => {
+            let change = daemon.set_miner_schedule_enabled(&args.name, true).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        MinerCommand::ScheduleDisable(args) => {
+            let change = daemon.set_miner_schedule_enabled(&args.name, false).await?;
             print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
         }
         MinerCommand::Remove(args) => {

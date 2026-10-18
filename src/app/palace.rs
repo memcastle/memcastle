@@ -1035,6 +1035,7 @@ mod tests {
                 full: false,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Normal,
             "test",

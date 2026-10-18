@@ -177,6 +177,14 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/miners/x/enable"),
         (Method::POST, "/api/miners/x/disable"),
         (Method::POST, "/api/miners/x/run"),
+        (Method::POST, "/api/miners/x/schedule/enable"),
+        (Method::POST, "/api/miners/x/schedule/disable"),
+        (Method::GET, "/api/source-configs"),
+        (Method::GET, "/api/source-configs/x"),
+        (Method::PUT, "/api/source-configs/x"),
+        (Method::DELETE, "/api/source-configs/x"),
+        (Method::POST, "/api/source-configs/x/auth"),
+        (Method::GET, "/api/source-configs/x/auth?flow=y"),
         // Triggers decide what the daemon does unattended (docs/adr/043): reading, every change and firing are guarded.
         // A webhook delivery is not among them: it goes to the separate opt-in listener, never to this router.
         (Method::GET, "/api/triggers"),

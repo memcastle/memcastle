@@ -31,7 +31,30 @@ pub fn options() -> Vec<OptionSpec> {
         "only files modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)",
         OptionKind::Date,
     )
-    .with_breadth(crate::domain::OptionBreadth::Since)]
+    .with_breadth(crate::domain::OptionBreadth::Since),
+    OptionSpec::new("include", "only relative paths matching these comma-separated glob patterns", OptionKind::String)
+        .with_breadth(crate::domain::OptionBreadth::Include),
+    OptionSpec::new("exclude", "ignore relative paths matching these comma-separated glob patterns", OptionKind::String)
+        .with_breadth(crate::domain::OptionBreadth::Exclude)]
+}
+
+fn globs(value: &str) -> Result<globset::GlobSet> {
+    let mut builder = globset::GlobSetBuilder::new();
+    if value.split(',').any(|pattern| pattern.trim().is_empty()) {
+        return Err(Error::invalid_input(
+            "glob",
+            "use nonempty comma-separated patterns, such as docs/**/*.md",
+        ));
+    }
+    for pattern in value.split(',') {
+        builder.add(
+            globset::Glob::new(pattern.trim())
+                .map_err(|e| Error::invalid_input("glob", e.to_string()))?,
+        );
+    }
+    builder
+        .build()
+        .map_err(|e| Error::invalid_input("glob", e.to_string()))
 }
 
 /// What can trigger a run of the `directory` source: a change under the directory, and a call from whatever tells you
@@ -99,6 +122,7 @@ impl SourceAdapter for DirectoryAdapter {
             // The file is itself durable and local: keeping a second copy would only double the palace.
             retains_raw: false,
             needs_credentials: false,
+            single_account_auth: false,
         }
     }
 
@@ -128,15 +152,29 @@ impl SourceAdapter for DirectoryAdapter {
                         .map_err(|message| Error::invalid_input("since", message))?;
                     normalised.insert(key.clone(), since.to_rfc3339());
                 }
+                "include" | "exclude" => {
+                    globs(value)?;
+                    normalised.insert(key.clone(), value.clone());
+                }
                 other => {
                     return Err(Error::invalid_input(
                         "options",
-                        format!("the directory source has no option `{other}`; it accepts `since`"),
+                        format!(
+                            "the directory source has no option `{other}`; it accepts `since`, `include`, `exclude`"
+                        ),
                     ));
                 }
             }
         }
-        Ok(SourceRef::new(NAME, None, canonical.display().to_string()).with_options(normalised))
+        // A different selection must not inherit a cursor that already passed its earlier files.
+        let selection = ["include", "exclude"]
+            .iter()
+            .filter_map(|key| normalised.get(*key).map(|value| format!("{key}={value}")))
+            .collect::<Vec<_>>()
+            .join("\0");
+        let account = (!selection.is_empty())
+            .then(|| format!("filter:{}", crate::domain::sha256_hex(selection.as_bytes())));
+        Ok(SourceRef::new(NAME, account, canonical.display().to_string()).with_options(normalised))
     }
 
     fn default_wing(&self, source: &SourceRef) -> String {
@@ -162,11 +200,30 @@ impl SourceAdapter for DirectoryAdapter {
         let after = Watermark::parse(NAME, cursor)?;
         let root = PathBuf::from(&source.locator);
         let since = source.options.get("since").cloned();
+        let include = source
+            .options
+            .get("include")
+            .map(|value| globs(value))
+            .transpose()?;
+        let exclude = source
+            .options
+            .get("exclude")
+            .map(|value| globs(value))
+            .transpose()?;
         let max_file_bytes = self.max_file_bytes;
         // A large tree can take seconds to enumerate and sort. Never pin an HTTP worker on that synchronous walk.
         tokio::task::spawn_blocking(move || {
             let mut entries = Vec::new();
             collect(&root, "", max_file_bytes, &mut entries);
+            let before = entries.len();
+            entries.retain(|entry| {
+                include
+                    .as_ref()
+                    .is_none_or(|patterns| patterns.is_match(&entry.key))
+                    && exclude
+                        .as_ref()
+                        .is_none_or(|patterns| !patterns.is_match(&entry.key))
+            });
             if let Some(since) = since {
                 // `identify` wrote this value; a hand-built invalid one reads everything. Saturate at year 2262.
                 if let Ok(instant) = DateTime::parse_from_rfc3339(&since) {
@@ -174,10 +231,12 @@ impl SourceAdapter for DirectoryAdapter {
                     entries.retain(|entry| entry.mtime_ns >= floor);
                 }
             }
+            let filtered = before.saturating_sub(entries.len());
             let (candidates, exhausted) = page(entries, after.as_ref(), limit);
             Discovery {
                 candidates,
                 exhausted,
+                filtered,
             }
         })
         .await
@@ -286,6 +345,37 @@ fn collect(dir: &Path, prefix: &str, max_bytes: u64, out: &mut Vec<Entry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn include_and_exclude_are_directory_only_and_have_independent_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/a.md"), "a").unwrap();
+        std::fs::write(dir.path().join("docs/private.md"), "private").unwrap();
+        std::fs::write(dir.path().join("readme.txt"), "text").unwrap();
+        let options = Options::from([
+            ("include".into(), "docs/*.md".into()),
+            ("exclude".into(), "**/private.md".into()),
+        ]);
+        let selected = adapter().identify(dir.path().to_str(), &options).unwrap();
+        let all = source_of(dir.path());
+        assert_ne!(selected.id(), all.id());
+        let discovered = adapter()
+            .discover(&selected, &Cursor::Null, 100)
+            .await
+            .unwrap();
+        assert_eq!(discovered.candidates.len(), 1);
+        assert_eq!(discovered.filtered, 2);
+        assert_eq!(discovered.candidates[0].external_id, "docs/a.md");
+        assert!(
+            adapter()
+                .identify(
+                    dir.path().to_str(),
+                    &Options::from([("include".into(), "[".into())])
+                )
+                .is_err()
+        );
+    }
 
     fn adapter() -> DirectoryAdapter {
         DirectoryAdapter::new(1024)

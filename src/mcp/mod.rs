@@ -398,6 +398,12 @@ struct MinerNameArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SourceConfigIdArgs {
+    /// The configuration ID from `memcastle_source_config_list`.
+    id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct TriggerNameArgs {
     /// The trigger's name, as `memcastle_trigger_list` shows it.
     name: String,
@@ -844,6 +850,49 @@ impl McpTools {
         tool_result(
             "memcastle_miner_get",
             self.app.show_miner(&args.name, mode).await,
+        )
+    }
+
+    #[tool(
+        title = "List source configurations",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Show reusable named source configurations without credentials. Configuration changes and sign-in are administrative REST/CLI actions"
+    )]
+    async fn memcastle_source_config_list(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        tool_result(
+            "memcastle_source_config_list",
+            self.app.list_source_configs(self.mode_for(&parts)).await,
+        )
+    }
+
+    #[tool(
+        title = "Get source configuration",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Inspect a source configuration by ID, including safe credential availability; changes and sign-in are REST/CLI only"
+    )]
+    async fn memcastle_source_config_get(
+        &self,
+        Parameters(args): Parameters<SourceConfigIdArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        tool_result(
+            "memcastle_source_config_get",
+            self.app
+                .show_source_config(&args.id, self.mode_for(&parts))
+                .await,
         )
     }
 
@@ -1630,7 +1679,7 @@ mod tests {
     async fn every_tool_declares_its_title_and_all_four_hints() {
         // (name, read-only, destructive, idempotent, open-world): the behaviour
         // each handler actually has, so a wrong hint fails here, not in a host.
-        let expected: [(&str, bool, bool, bool, bool); 23] = [
+        let expected: [(&str, bool, bool, bool, bool); 25] = [
             ("memcastle_set_mode", false, false, true, false),
             ("memcastle_status", true, false, true, false),
             ("memcastle_search", true, false, true, true),
@@ -1641,6 +1690,8 @@ mod tests {
             ("memcastle_mine", false, false, true, true),
             ("memcastle_miner_list", true, false, true, false),
             ("memcastle_miner_get", true, false, true, false),
+            ("memcastle_source_config_list", true, false, true, false),
+            ("memcastle_source_config_get", true, false, true, false),
             ("memcastle_trigger_list", true, false, true, false),
             ("memcastle_trigger_get", true, false, true, false),
             ("memcastle_checkpoint", false, true, false, false),

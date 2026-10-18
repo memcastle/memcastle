@@ -105,6 +105,12 @@ pub fn default_config_file() -> Option<PathBuf> {
     resolve_from_process(XdgDir::Config).map(|dir| dir.join("config.toml"))
 }
 
+/// Each user-owned miner may live in its own TOML file under this directory.
+#[must_use]
+pub fn default_miners_dir() -> Option<PathBuf> {
+    resolve_from_process(XdgDir::Config).map(|dir| dir.join("miners"))
+}
+
 /// The default palace directory: `$XDG_DATA_HOME/memcastle/default`.
 ///
 /// When nothing resolves, the result is a *relative* path on purpose:
@@ -207,6 +213,13 @@ mod tests {
                 || default_agents_dir().ends_with("agents")
         );
         assert_eq!(default_agents_dir().parent(), default_palace_dir().parent());
+    }
+
+    #[test]
+    fn the_default_miners_directory_is_next_to_the_xdg_configuration_file() {
+        if let (Some(file), Some(dir)) = (default_config_file(), default_miners_dir()) {
+            assert_eq!(dir, file.parent().unwrap().join("miners"));
+        }
     }
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {

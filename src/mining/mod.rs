@@ -46,6 +46,8 @@ pub struct MiningParams {
     pub full: bool,
     /// What the run was asked beyond the source and where to read (`since`, `dir`).
     pub options: crate::domain::Options,
+    /// Miner-specific resolved settings pinned when the job was submitted.
+    pub preset: Option<Box<crate::domain::MiningPreset>>,
 }
 
 /// Where a source comes from: built in, a local package, a bundled one or one from a registry (docs/adr/033,
@@ -89,6 +91,9 @@ pub struct AdapterInfo {
     /// layer, which is the one that can ask where credentials are kept; `None` for every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<crate::domain::SourceAuth>,
+    /// Configuration IDs for this source, including its implicit default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<String>,
     /// The options a run of it accepts (`memcastle mine <name> key=value`). Absent from an older daemon's answer, which
     /// reads as accepting none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -117,6 +122,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         wing,
         full,
         options,
+        preset,
     } = params;
     // A directory job and a `directory` source job are the same source: one wire form predates the other.
     let (name, locator) = match &source {
@@ -130,8 +136,18 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         options: &options,
         wing: wing.as_deref(),
         full,
+        preset: preset.as_deref(),
     };
-    let adapter = registry::resolve(ctx.store(), ctx.mining(), ctx.credentials(), name).await?;
+    let adapter = registry::resolve(
+        ctx.store(),
+        ctx.mining(),
+        ctx.credentials(),
+        name,
+        preset
+            .as_ref()
+            .and_then(|preset| preset.configuration.as_deref()),
+    )
+    .await?;
     pipeline::mine(&adapter, ctx, job, request).await
 }
 
@@ -168,6 +184,7 @@ mod tests {
                 full: false,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             requested_by,
@@ -182,6 +199,7 @@ mod tests {
             wing,
             full,
             options,
+            preset,
             ..
         } = job.kind.clone()
         else {
@@ -192,6 +210,7 @@ mod tests {
             wing,
             full,
             options,
+            preset,
         }
     }
 
@@ -353,6 +372,7 @@ mod tests {
             full: false,
             options: Default::default(),
             embedding_space: None,
+            preset: None,
         };
 
         let outcome = run_job(&store, &mut job, MiningConfig::default()).await;
@@ -381,6 +401,7 @@ mod tests {
             full: true,
             options: Default::default(),
             embedding_space: None,
+            preset: None,
         };
         run_job(&store, &mut job, MiningConfig::default())
             .await
@@ -608,6 +629,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_pinned_miner_limit_overrides_the_common_default_and_unset_is_unlimited() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            write(dir.path(), name, name);
+        }
+        let mut limited = directory_job(dir.path(), "test");
+        if let JobKind::Mine { preset, .. } = &mut limited.kind {
+            *preset = Some(Box::new(crate::domain::MiningPreset {
+                max_documents: Some(1),
+                ..Default::default()
+            }));
+        }
+        run_job(&store, &mut limited, MiningConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(result(&limited)["documents"], 1);
+        assert_eq!(result(&limited)["truncated"], true);
+
+        let rest = mine(&store, dir.path(), MiningConfig::default()).await;
+        assert_eq!(result(&rest)["documents"], 2);
+        assert_eq!(result(&rest)["truncated"], false);
+        assert_eq!(result(&rest)["limit"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
     async fn replaying_a_job_whose_checkpoint_was_never_saved_files_no_duplicates() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let dir = tempfile::tempdir().unwrap();
@@ -790,6 +837,7 @@ mod tests {
             full: true,
             options: Default::default(),
             embedding_space: None,
+            preset: None,
         };
         assert_eq!(
             run_job(&store, &mut full, MiningConfig::default())
@@ -813,6 +861,7 @@ mod tests {
                 full: false,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             "test",
@@ -879,6 +928,7 @@ mod tests {
                 incremental: true,
                 retains_raw: true,
                 needs_credentials: false,
+                single_account_auth: false,
             }
         }
 
@@ -919,6 +969,7 @@ mod tests {
                     }]
                 },
                 exhausted: true,
+                filtered: 0,
             })
         }
 
@@ -975,6 +1026,7 @@ mod tests {
                 full: false,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             "test",
@@ -986,6 +1038,7 @@ mod tests {
             options: &Default::default(),
             wing: None,
             full: false,
+            preset: None,
         };
         assert_eq!(
             pipeline::mine(transcript, &ctx, &mut job, request)

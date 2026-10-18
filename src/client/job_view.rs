@@ -32,6 +32,7 @@ fn parameters(kind: &JobKind, painter: Painter) -> Vec<String> {
             full,
             options,
             embedding_space,
+            preset,
         } => {
             match source {
                 MiningSource::Directory { path } => {
@@ -51,6 +52,38 @@ fn parameters(kind: &JobKind, painter: Painter) -> Vec<String> {
             wing(&mut lines, w);
             if let Some(space) = embedding_space {
                 lines.push(field(painter, "Embedding profile", &space.profile));
+            }
+            if let Some(preset) = preset {
+                if let Some(miner) = &preset.miner {
+                    lines.push(field(painter, "Miner", miner));
+                }
+                if let Some(config) = &preset.configuration {
+                    lines.push(field(painter, "Source configuration", config));
+                }
+                if let Some(room) = &preset.room {
+                    lines.push(field(painter, "Room", room));
+                }
+                if let Some(mapping) = &preset.mapping {
+                    lines.push(field(
+                        painter,
+                        "Mapping",
+                        format!(
+                            "wing from {:?}, room from {:?}",
+                            mapping.wing_from, mapping.room_from
+                        ),
+                    ));
+                }
+                if let Some(limit) = preset.max_documents {
+                    lines.push(field(
+                        painter,
+                        "Document limit",
+                        if limit == 0 {
+                            "unlimited".to_string()
+                        } else {
+                            limit.to_string()
+                        },
+                    ));
+                }
             }
             if *full {
                 // A full re-read costs more than an incremental one, so say it was asked for.
@@ -173,6 +206,7 @@ mod tests {
                 full: false,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             "cli",
@@ -255,6 +289,7 @@ mod tests {
                 full: true,
                 options: Default::default(),
                 embedding_space: None,
+                preset: None,
             },
             Priority::Background,
             "cli",

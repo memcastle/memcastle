@@ -1,12 +1,74 @@
 //! The client side of the miner routes (`/api/miners`).
 
-use crate::app::{MinerChange, MinerPatch, MinerView, MinersReload, MinersReport};
+use crate::app::{
+    MinerChange, MinerPatch, MinerView, MinersReload, MinersReport, SourceConfigurationPatch,
+    SourceConfigurationView,
+};
 use crate::domain::Job;
 use crate::error::Result;
 
 use super::DaemonClient;
 
 impl DaemonClient {
+    /// Inspect all explicit reusable source configurations.
+    pub async fn list_source_configs(&self) -> Result<Vec<SourceConfigurationView>> {
+        self.send(self.http.get(self.api_url(&["source-configs"], None)?))
+            .await
+    }
+
+    /// Inspect the selected source configuration, or a source's implicit default.
+    pub async fn show_source_config(&self, id: &str) -> Result<SourceConfigurationView> {
+        self.send(self.http.get(self.api_url(&["source-configs", id], None)?))
+            .await
+    }
+
+    /// Save nonsecret source defaults and a credential reference.
+    pub async fn set_source_config(
+        &self,
+        id: &str,
+        patch: &SourceConfigurationPatch,
+    ) -> Result<SourceConfigurationView> {
+        self.send(
+            self.http
+                .put(self.api_url(&["source-configs", id], None)?)
+                .json(patch),
+        )
+        .await
+    }
+
+    /// Remove an explicit source configuration; the source's implicit default remains.
+    pub async fn remove_source_config(&self, id: &str) -> Result<()> {
+        let _: serde_json::Value = self
+            .send(
+                self.http
+                    .delete(self.api_url(&["source-configs", id], None)?),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Begin OAuth sign-in for the selected source configuration.
+    pub async fn begin_source_config_auth(&self, id: &str) -> Result<crate::app::Challenge> {
+        self.send(
+            self.http
+                .post(self.api_url(&["source-configs", id, "auth"], None)?),
+        )
+        .await
+    }
+
+    /// Long-poll for a sign-in, with the same bounded window as the legacy source route.
+    pub async fn wait_source_config_auth(
+        &self,
+        id: &str,
+        flow: &str,
+    ) -> Result<crate::app::FlowStatus> {
+        self.send(
+            self.http
+                .get(self.api_url(&["source-configs", id, "auth"], None)?)
+                .query(&[("flow", flow), ("seconds", "30")]),
+        )
+        .await
+    }
     /// Every configured miner (`GET /api/miners`).
     ///
     /// # Errors
@@ -51,6 +113,20 @@ impl DaemonClient {
         self.send(
             self.http
                 .post(self.api_url(&["miners", name, action], None)?),
+        )
+        .await
+    }
+
+    /// Opt in or out of a miner-owned schedule.
+    pub async fn set_miner_schedule_enabled(
+        &self,
+        name: &str,
+        enabled: bool,
+    ) -> Result<MinerChange> {
+        let action = if enabled { "enable" } else { "disable" };
+        self.send(
+            self.http
+                .post(self.api_url(&["miners", name, "schedule", action], None)?),
         )
         .await
     }
@@ -134,12 +210,26 @@ impl DaemonClient {
 pub struct SetFlags<'a> {
     /// `--source`.
     pub source: Option<&'a str>,
+    /// `--source-config`.
+    pub source_config: Option<&'a str>,
     /// `--locator`.
     pub locator: Option<&'a str>,
     /// `--wing`.
     pub wing: Option<&'a str>,
+    /// `--room`.
+    pub room: Option<&'a str>,
+    /// `--wing-from`.
+    pub wing_from: Option<&'a str>,
+    /// `--room-from`.
+    pub room_from: Option<&'a str>,
+    /// `--max-documents`.
+    pub max_documents: Option<usize>,
     /// `--embedding-profile`.
     pub embedding_profile: Option<&'a str>,
+    /// `--schedule-every`.
+    pub schedule_every: Option<&'a str>,
+    /// `--schedule-at`.
+    pub schedule_at: Option<&'a str>,
     /// `--credential-env`.
     pub credential_env: Option<&'a str>,
     /// `--credential-file`.
@@ -184,9 +274,25 @@ impl SetFlags<'_> {
     pub fn into_patch(self) -> Result<MinerPatch> {
         let mut patch = MinerPatch {
             source: self.source.map(str::to_string),
+            source_config: self.source_config.map(str::to_string),
             locator: self.locator.map(str::to_string),
             wing: self.wing.map(str::to_string),
+            room: self.room.map(str::to_string),
+            mapping: (self.wing_from.is_some() || self.room_from.is_some()).then(|| {
+                crate::domain::MinerMapping {
+                    wing_from: self.wing_from.map(str::to_string),
+                    room_from: self.room_from.map(str::to_string),
+                }
+            }),
+            max_documents: self.max_documents,
             embedding_profile: self.embedding_profile.map(str::to_string),
+            schedule: self
+                .schedule_every
+                .map(|every| crate::domain::MinerSchedule {
+                    every: every.to_string(),
+                    at: self.schedule_at.map(str::to_string),
+                    enabled: false,
+                }),
             enabled: self.disabled.then_some(false),
             allow_broaden: self.allow_broaden,
             unset_options: self.unset_options.to_vec(),

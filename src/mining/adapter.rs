@@ -29,6 +29,8 @@ pub struct Discovery {
     pub candidates: Vec<Candidate>,
     /// Whether nothing is left past the last candidate. `false` means a further run would find more.
     pub exhausted: bool,
+    /// Candidates excluded before paging by the adapter's own filters, when it can count them (zero otherwise).
+    pub filtered: usize,
 }
 
 /// One kind of source. Implementations are stateless apart from configuration, and every method may run on any

@@ -17,6 +17,7 @@ mod miners;
 mod mode;
 mod palace;
 mod plugins;
+mod source_configs;
 mod source_packages;
 mod source_registry;
 mod triggers;
@@ -149,6 +150,17 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         // source, so an agent can see what is configured but not widen what the daemon mines (docs/adr/037).
         // `reload` is a fixed segment, so it wins over `{name}`, and `domain::miner` reserves it as a name.
         .route("/api/miners", get(miners::list))
+        .route("/api/source-configs", get(source_configs::list))
+        .route(
+            "/api/source-configs/{id}",
+            get(source_configs::show)
+                .put(source_configs::set)
+                .delete(source_configs::remove),
+        )
+        .route(
+            "/api/source-configs/{id}/auth",
+            post(source_configs::auth_begin).get(source_configs::auth_wait),
+        )
         .route("/api/miners/reload", post(miners::reload))
         .route(
             "/api/miners/{name}",
@@ -157,6 +169,14 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/miners/{name}/enable", post(miners::enable))
         .route("/api/miners/{name}/disable", post(miners::disable))
         .route("/api/miners/{name}/run", post(miners::run))
+        .route(
+            "/api/miners/{name}/schedule/enable",
+            post(miners::enable_schedule),
+        )
+        .route(
+            "/api/miners/{name}/schedule/disable",
+            post(miners::disable_schedule),
+        )
         // Triggers follow the miners: reading is also offered to MCP, changing is administrative and REST-only, so an
         // agent can see what runs unattended but not decide it (docs/adr/043). A webhook delivery is not a route here:
         // it goes to the separate opt-in listener, so every route in this file stays behind the authentication layer.

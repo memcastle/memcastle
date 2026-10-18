@@ -255,8 +255,8 @@ pub fn build(parsed: Parsed, adapters: Option<&[AdapterInfo]>) -> Result<(Mining
         return Err(Error::invalid_input(
             "source",
             format!(
-                "`{target}` is neither a source nor a directory; known sources: {known} \
-                 (a directory with this name is `memcastle mine ./{target}`)"
+                "`{target}` is neither a configured miner, a source nor a directory; known sources: {known}. \
+                 Use `memcastle miner list` for saved miner IDs, or `memcastle mine ./{target}` for a directory"
             ),
         ));
     };
@@ -329,6 +329,7 @@ mod tests {
             registry: None,
             signed_by: None,
             auth: None,
+            configurations: Vec::new(),
             options,
             triggers: Vec::new(),
         }

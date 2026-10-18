@@ -190,6 +190,288 @@ async fn several_miners_coexist_with_their_own_settings_and_survive_in_the_file(
 }
 
 #[tokio::test]
+async fn per_miner_files_derive_slugs_and_updates_only_their_own_file() {
+    let daemon = TestDaemon::start_configured(|config| {
+        let dir = config
+            .config_file
+            .as_ref()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("team-miners");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("ChatGPT Dev.toml"),
+            "source = \"directory\"\nenabled = false\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("Other.toml"),
+            "name = \"other\"\nsource = \"directory\"\nenabled = false\n",
+        )
+        .unwrap();
+        config.mining.miner_dirs = vec![dir];
+    })
+    .await;
+    let (_, report) = get(&daemon, "/api/miners").await;
+    assert_eq!(names(&report), ["chatgpt-dev", "other"]);
+    let path = report["miners"][0]["config_file"].as_str().unwrap();
+    let untouched = report["miners"][1]["config_file"].as_str().unwrap();
+    let other_text = std::fs::read_to_string(untouched).unwrap();
+    let (status, answer) = put(&daemon, "chatgpt-dev", json!({"wing": "dev"})).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert!(
+        std::fs::read_to_string(path)
+            .unwrap()
+            .contains("wing = \"dev\"")
+    );
+    assert_eq!(std::fs::read_to_string(untouched).unwrap(), other_text);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn duplicate_ids_across_directories_report_both_origins_without_hiding_the_first() {
+    let daemon = TestDaemon::start_configured(|config| {
+        let root = config.config_file.as_ref().unwrap().parent().unwrap();
+        let dirs = [root.join("a"), root.join("b")];
+        for dir in &dirs {
+            std::fs::create_dir(dir).unwrap();
+            std::fs::write(
+                dir.join("same.toml"),
+                "source = \"directory\"\nenabled = false\n",
+            )
+            .unwrap();
+        }
+        config.mining.miner_dirs = dirs.to_vec();
+    })
+    .await;
+    let (_, report) = get(&daemon, "/api/miners").await;
+    assert_eq!(names(&report), ["same"]);
+    let error = report["error"].as_str().unwrap();
+    assert!(
+        error.contains("a/same.toml") && error.contains("b/same.toml"),
+        "{error}"
+    );
+    let (status, reload) = post(&daemon, "/api/miners/reload").await;
+    assert_eq!(status, StatusCode::OK, "{reload}");
+    assert!(reload["error"].as_str().unwrap().contains("b/same.toml"));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn two_miners_reuse_one_source_configuration_without_sharing_destination_cursors() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    let (status, config) = request(
+        &daemon,
+        Method::PUT,
+        "/api/source-configs/shared",
+        Some(json!({
+            "source": "directory", "options": { "include": "*.txt" }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{config}");
+    let (_, shown) = get(&daemon, "/api/source-configs/shared").await;
+    assert_eq!(shown["source"], "directory");
+    for (miner, room) in [("one", "first"), ("two", "second")] {
+        let (status, result) = put(
+            &daemon,
+            miner,
+            json!({
+                "source": "directory", "source_config": "shared", "locator": dir.path(),
+                "wing": "notes", "room": room,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        let (status, queued) = post(&daemon, &format!("/api/miners/{miner}/run")).await;
+        assert_eq!(status, StatusCode::OK, "{queued}");
+        let job: Job = serde_json::from_value(queued).unwrap();
+        let done = wait_for_job_status(
+            &reqwest::Client::new(),
+            &daemon.base_url,
+            job.id,
+            JobStatus::Completed,
+        )
+        .await;
+        assert_eq!(done.result.as_ref().unwrap()["documents"], 1);
+        assert!(matches!(
+            done.kind,
+            memcastle::domain::JobKind::Mine {
+                preset: Some(_),
+                ..
+            }
+        ));
+    }
+    let (_, wings) = get(&daemon, "/api/wings/notes").await;
+    let rooms = wings["rooms"].as_array().unwrap();
+    assert!(rooms.iter().any(|room| room["name"] == "first"));
+    assert!(rooms.iter().any(|room| room["name"] == "second"));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn different_fixed_wings_keep_separate_document_records_for_the_same_input() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    for wing in ["work", "personal"] {
+        let (status, miner) = put(
+            &daemon,
+            wing,
+            json!({ "source": "directory", "locator": dir.path(), "wing": wing }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{miner}");
+        let (_, queued) = post(&daemon, &format!("/api/miners/{wing}/run")).await;
+        let job: Job = serde_json::from_value(queued).unwrap();
+        let done = wait_for_job_status(
+            &reqwest::Client::new(),
+            &daemon.base_url,
+            job.id,
+            JobStatus::Completed,
+        )
+        .await;
+        assert_eq!(done.result.as_ref().unwrap()["ingested"], 1);
+    }
+    let (_, sources) = get(&daemon, "/api/sources").await;
+    assert_eq!(sources["sources"].as_array().unwrap().len(), 2);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn shared_source_defaults_need_explicit_approval_before_they_select_a_different_slice() {
+    let daemon = TestDaemon::start().await;
+    let (ok, _, stderr) = cli(
+        &daemon,
+        &[
+            "source",
+            "config",
+            "set",
+            "docs",
+            "--source",
+            "directory",
+            "--option",
+            "include=*.md",
+        ],
+    )
+    .await;
+    assert!(ok, "{stderr}");
+    let (ok, _, stderr) = cli(
+        &daemon,
+        &[
+            "source",
+            "config",
+            "set",
+            "docs",
+            "--option",
+            "include=*.txt",
+        ],
+    )
+    .await;
+    assert!(!ok);
+    assert!(stderr.contains("allow_broaden"), "{stderr}");
+    let (ok, config, stderr) = cli(
+        &daemon,
+        &[
+            "source",
+            "config",
+            "set",
+            "docs",
+            "--option",
+            "include=*.txt",
+            "--allow-broaden",
+        ],
+    )
+    .await;
+    assert!(ok, "{stderr}");
+    assert_eq!(config["options"]["include"], "*.txt");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_disabled() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    let (status, answer) = put(
+        &daemon,
+        "periodic",
+        json!({
+            "source": "directory", "locator": dir.path(),
+            "schedule": {"every": "1s"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["miner"]["schedule"]["enabled"], false);
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let (_, idle) = get(&daemon, "/api/jobs?kind=mine").await;
+    assert_eq!(
+        idle.as_array().unwrap().len(),
+        0,
+        "adding a schedule must never enable it"
+    );
+    let (status, enabled) = post(&daemon, "/api/miners/periodic/schedule/enable").await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    assert_eq!(enabled["miner"]["schedule"]["enabled"], true);
+    let mut fired = false;
+    for _ in 0..35 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let (_, jobs) = get(&daemon, "/api/jobs?kind=mine").await;
+        if !jobs.as_array().unwrap().is_empty() {
+            fired = true;
+            break;
+        }
+    }
+    assert!(
+        fired,
+        "the enabled timetable should ask for the existing miner run"
+    );
+    let (status, disabled) = post(&daemon, "/api/miners/periodic/schedule/disable").await;
+    assert_eq!(status, StatusCode::OK, "{disabled}");
+    assert_eq!(disabled["miner"]["schedule"]["enabled"], false);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn mine_resolves_a_configured_miner_before_the_same_named_source() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    let (_, miner) = put(
+        &daemon,
+        "directory",
+        json!({ "source": "directory", "locator": dir.path(), "wing": "saved" }),
+    )
+    .await;
+    assert_eq!(miner["miner"]["state"], "ready");
+    let (ok, job, stderr) = cli(&daemon, &["mine", "directory"]).await;
+    assert!(ok, "{stderr}");
+    assert_eq!(job["kind"]["wing"], "saved");
+    assert_eq!(job["kind"]["preset"]["miner"], "directory");
+    let (ok, _, stderr) = cli(
+        &daemon,
+        &["mine", "directory", dir.path().to_str().unwrap()],
+    )
+    .await;
+    assert!(!ok);
+    assert!(
+        stderr.contains("configured miner") && stderr.contains("extra locator"),
+        "{stderr}"
+    );
+    let (_, saved) = put(
+        &daemon,
+        "docs_work",
+        json!({ "source": "directory", "locator": dir.path() }),
+    )
+    .await;
+    assert_eq!(saved["miner"]["state"], "ready");
+    let (ok, underscored, stderr) = cli(&daemon, &["mine", "docs_work"]).await;
+    assert!(ok, "{stderr}");
+    assert_eq!(underscored["kind"]["preset"]["miner"], "docs_work");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_miner_can_be_changed_disabled_enabled_and_removed() {
     let daemon = TestDaemon::start().await;
     let dir = notes_dir();
