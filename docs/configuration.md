@@ -444,6 +444,64 @@ pin the revision at the provider, or change the configured model/profile deliber
 
 ### Named connections and profiles
 
+Provider accounts share a credential across compatible connections, independently of their endpoints and models:
+
+```toml
+[provider_accounts.openai-main]
+provider_id = "openai"
+auth = { type = "bearer", credential = { type = "env", name = "OPENAI_API_KEY" } }
+
+[provider_accounts.openrouter-main]
+provider_id = "openrouter"
+auth = { type = "bearer", credential = { type = "file", path = "/run/secrets/openrouter-key" } }
+
+[provider_accounts.openai-budget]
+provider_id = "openai"
+auth = { type = "api_key", header = "x-api-key", credential = { type = "env", name = "OPENAI_OTHER_KEY" } }
+
+[embeddings.providers.openai-direct]
+type = "openai"
+provider_id = "openai"
+account = "openai-main"
+base_url = "https://api.openai.com/v1"
+
+[embeddings.providers.openai-second-endpoint]
+type = "openai"
+provider_id = "openai"
+account = "openai-main"
+base_url = "https://api.openai.com/v1"
+
+[embeddings.providers.router]
+type = "openai"
+provider_id = "openrouter"
+account = "openrouter-main"
+base_url = "https://openrouter.ai/api/v1"
+
+[embeddings.profiles.openai]
+provider = "openai-direct"
+model = "text-embedding-3-small"
+dimensions = 1536
+```
+
+The provider ID on a connection must match the selected account; it identifies the service, while `type` identifies
+the embedding protocol (OpenRouter speaks the OpenAI-compatible protocol).
+More than one account per provider can separate projects or budgets; a future LLM connection can select the same
+account without duplicating its credential, once an LLM provider runtime exists.
+`bearer` uses `Authorization: Bearer`; `api_key` uses `x-api-key` unless a different safe `header` is configured.
+An account's `credential` accepts only an environment variable in the daemon's environment or an absolute file path;
+source OAuth and interactive sessions are not interchangeable provider credentials.
+The daemon reads the token when the selected provider requests it, so changing the referenced token needs no restart;
+changing the account definition or connection selection does.
+`GET /api/config` and the dashboard show account availability, provider and auth kind without showing the reference location
+or token. A missing credential fails the selected embedding request and tells you which account to check.
+To migrate an existing plugin connection, move its `credential` reference into the account's `auth.credential`, remove
+the inline `credential`, and set matching `provider_id` and `account` on the connection.
+Existing inline plugin references, named HTTP `api_key` values and legacy `[embeddings]` settings still work.
+Credential references and account IDs do not form part of a vector-space fingerprint; changing the endpoint, provider,
+non-secret plugin settings or model still does. Older plugin fingerprints included a credential-reference hash, so their
+vectors need an explicit re-embedding job after upgrading to this account boundary.
+See [ADR-052](adr/052-reusable-provider-accounts.md) for the interactive-authentication extension boundary.
+
 ```toml
 [embeddings]
 default = "local"

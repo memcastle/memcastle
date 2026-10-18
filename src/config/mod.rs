@@ -12,6 +12,8 @@
 pub mod miners_file;
 pub mod paths;
 pub mod preferences;
+pub mod provider_accounts;
+pub use provider_accounts::ProviderAccount;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -348,6 +350,10 @@ pub struct EmbeddingConnection {
     /// Provider implementation (`openai` accepts any OpenAI-compatible endpoint).
     #[serde(rename = "type")]
     pub provider: EmbeddingProvider,
+    /// Provider identity must match the selected account; distinct from the embedding protocol.
+    pub provider_id: Option<String>,
+    /// Named reusable provider account, with no inline credential on this connection.
+    pub account: Option<String>,
     /// Executable and arguments, for the command provider.
     pub command: Vec<String>,
     /// API base URL, for the OpenAI-compatible provider.
@@ -375,6 +381,8 @@ impl Default for EmbeddingConnection {
     fn default() -> Self {
         Self {
             provider: EmbeddingProvider::None,
+            provider_id: None,
+            account: None,
             command: Vec::new(),
             url: None,
             api_key: None,
@@ -1007,6 +1015,9 @@ pub struct Config {
     /// Embedding provider settings.
     #[serde(default)]
     pub embeddings: EmbeddingsConfig,
+    /// Named provider accounts shared by compatible capability connections.
+    #[serde(default)]
+    pub provider_accounts: std::collections::BTreeMap<String, ProviderAccount>,
     /// Mining settings.
     #[serde(default)]
     pub mining: MiningConfig,
@@ -1512,6 +1523,7 @@ impl Config {
                  generate a strong one with `memcastle auth generate`"
             )));
         }
+        self.validate_provider_accounts()?;
         self.validate_embeddings()?;
         self.validate_extraction()?;
         self.validate_mining()?;
@@ -1839,6 +1851,44 @@ impl Config {
             }
         }
         for (name, provider) in &embeddings.providers {
+            if let Some(id) = &provider.provider_id
+                && !crate::domain::is_valid_source_name(id)
+            {
+                return Err(Error::config(format!(
+                    "embedding provider `{name}` has an invalid provider_id; use a lowercase slug"
+                )));
+            }
+            if let Some(account_id) = &provider.account {
+                let account = self.provider_accounts.get(account_id).ok_or_else(|| {
+                    Error::config(format!(
+                        "embedding provider `{name}` refers to unknown provider account `{account_id}`; define [provider_accounts.{account_id}]"
+                    ))
+                })?;
+                if provider.provider_id.as_deref() != Some(account.provider_id.as_str()) {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` needs provider_id = {:?} to use account `{account_id}`",
+                        account.provider_id
+                    )));
+                }
+                if !matches!(
+                    provider.provider,
+                    EmbeddingProvider::Http | EmbeddingProvider::Openai | EmbeddingProvider::Plugin
+                ) || provider.api_key.is_some()
+                    || provider.credential.is_some()
+                {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` cannot combine an account with inline credentials or an unauthenticated provider type; remove the inline credential or account"
+                    )));
+                }
+                if let Some(url) = &provider.url
+                    && reqwest::Url::parse(url)
+                        .is_ok_and(|url| !url.username().is_empty() || url.password().is_some())
+                {
+                    return Err(Error::config(format!(
+                        "embedding provider `{name}` must not put credentials in its URL; use provider account `{account_id}` instead"
+                    )));
+                }
+            }
             match provider.provider {
                 EmbeddingProvider::None => {
                     return Err(Error::config(format!(
@@ -1910,6 +1960,20 @@ impl Config {
                     "embedding provider `{name}` needs timeout_secs in 1..=3600 and batch_size in 1..=1024"
                 )));
             }
+        }
+        Ok(())
+    }
+
+    fn validate_provider_accounts(&self) -> Result<()> {
+        for (id, account) in &self.provider_accounts {
+            if !crate::domain::is_valid_source_name(id)
+                || !crate::domain::is_valid_source_name(&account.provider_id)
+            {
+                return Err(Error::config(format!(
+                    "provider account `{id}` and its provider_id must be lowercase slugs"
+                )));
+            }
+            account.auth.validate(id)?;
         }
         Ok(())
     }
@@ -3001,6 +3065,104 @@ dimensions = 1536
             .unwrap()
             .settings = serde_json::json!({"api_key": "a-secret"});
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn provider_accounts_validate_compatibility_without_exposing_their_credential_location() {
+        let mut config = valid_config();
+        config.provider_accounts.insert(
+            "work".into(),
+            toml::from_str(
+                r#"
+provider_id = "openai"
+auth = { type = "bearer", credential = { type = "env", name = "PRIVATE_PROVIDER_KEY" } }
+"#,
+            )
+            .unwrap(),
+        );
+        for id in ["primary", "secondary"] {
+            config.embeddings.providers.insert(
+                id.into(),
+                EmbeddingConnection {
+                    provider: EmbeddingProvider::Openai,
+                    provider_id: Some("openai".into()),
+                    account: Some("work".into()),
+                    url: Some("https://api.openai.com/v1".into()),
+                    ..Default::default()
+                },
+            );
+        }
+        config.validate().unwrap();
+        config.provider_accounts.insert(
+            "budget".into(),
+            toml::from_str(
+                r#"
+provider_id = "openai"
+auth = { type = "api_key", credential = { type = "env", name = "OTHER_PROVIDER_KEY" } }
+"#,
+            )
+            .unwrap(),
+        );
+        config
+            .embeddings
+            .providers
+            .get_mut("secondary")
+            .unwrap()
+            .account = Some("budget".into());
+        config
+            .validate()
+            .expect("two accounts at one provider can be selected independently");
+        assert!(
+            !toml::to_string(&config)
+                .unwrap()
+                .contains("PRIVATE_PROVIDER_KEY")
+        );
+        assert!(
+            !toml::to_string(&config)
+                .unwrap()
+                .contains("OTHER_PROVIDER_KEY")
+        );
+        config
+            .embeddings
+            .providers
+            .get_mut("secondary")
+            .unwrap()
+            .provider_id = Some("openrouter".into());
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("provider_id")
+        );
+        config
+            .embeddings
+            .providers
+            .get_mut("secondary")
+            .unwrap()
+            .account = Some("absent".into());
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("unknown provider account")
+        );
+    }
+
+    #[test]
+    fn provider_accounts_reject_source_oauth_and_unsafe_http_headers() {
+        let mut config = valid_config();
+        for auth in [
+            r#"{ type = "bearer", credential = { type = "oauth" } }"#,
+            r#"{ type = "api_key", header = "authorization", credential = { type = "env", name = "KEY" } }"#,
+        ] {
+            config.provider_accounts.insert(
+                "work".into(),
+                toml::from_str(&format!("provider_id = 'openai'\nauth = {auth}")).unwrap(),
+            );
+            assert!(config.validate().is_err());
+        }
     }
 
     #[test]

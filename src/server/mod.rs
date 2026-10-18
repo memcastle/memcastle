@@ -97,7 +97,8 @@ pub async fn run(config: Config) -> Result<()> {
     // One provider handle for the scheduler's embed jobs and the services'
     // query vectors. Built before anything serves so a bad `[embeddings]`
     // section fails startup, not the first search.
-    let embeddings = Embeddings::from_config(&config.embeddings)?;
+    let embeddings =
+        Embeddings::from_config_with_accounts(&config.embeddings, &config.provider_accounts)?;
     embeddings.load_plugins(
         &config.embeddings,
         &store.list_plugins().await?,

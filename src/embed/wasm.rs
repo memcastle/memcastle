@@ -9,6 +9,7 @@ use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
+use crate::config::ProviderAccount;
 use crate::domain::CredentialRef;
 use crate::error::{Error, Result};
 use crate::plugin::embedding::Manifest;
@@ -27,6 +28,7 @@ struct State {
     table: ResourceTable,
     limits: StoreLimits,
     credential: Option<CredentialRef>,
+    account: Option<ProviderAccount>,
 }
 
 impl WasiView for State {
@@ -40,6 +42,15 @@ impl WasiView for State {
 
 impl bindings::memcastle::embedding::host::Host for State {
     fn access_token(&mut self) -> std::result::Result<String, String> {
+        if let Some(account) = &self.account {
+            return crate::provider_auth::resolve(account)
+                .map(|token| token.expose().to_owned())
+                .map_err(|reason| {
+                    format!(
+                        "embedding account {reason}; check its credential reference on the daemon"
+                    )
+                });
+        }
         match &self.credential {
             Some(CredentialRef::Env { name }) => std::env::var(name)
                 .ok()
@@ -102,12 +113,21 @@ struct Inner {
     dimensions: u32,
     settings: String,
     credential: Option<CredentialRef>,
+    account: Option<(String, ProviderAccount)>,
     timeout: Duration,
 }
 
 /// A selected and verified module generation, shared by search and background jobs.
 #[derive(Clone)]
 pub struct WasmEmbedder(Arc<Inner>);
+
+/// Exactly one selected connection's legacy reference or shared account; never the account registry.
+pub struct WasmAccess {
+    /// Existing connection-local reference, when no account was selected.
+    pub credential: Option<CredentialRef>,
+    /// Named account selected by the connection, used only during embedding calls.
+    pub account: Option<(String, ProviderAccount)>,
+}
 
 impl WasmEmbedder {
     /// Validate the component and its advertised capabilities before it is selected.
@@ -120,7 +140,35 @@ impl WasmEmbedder {
         credential: Option<CredentialRef>,
         timeout: Duration,
     ) -> Result<Self> {
-        if credential.is_some() && !manifest.credential {
+        Self::load_with_account(
+            manifest,
+            bytes,
+            model,
+            dimensions,
+            settings,
+            WasmAccess {
+                credential,
+                account: None,
+            },
+            timeout,
+        )
+    }
+
+    /// Bind only the selected account to this component, never the entire account registry.
+    pub fn load_with_account(
+        manifest: Manifest,
+        bytes: &[u8],
+        model: String,
+        dimensions: usize,
+        settings: String,
+        access: WasmAccess,
+        timeout: Duration,
+    ) -> Result<Self> {
+        let WasmAccess {
+            credential,
+            account,
+        } = access;
+        if (credential.is_some() || account.is_some()) && !manifest.credential {
             return Err(Error::EmbeddingFailed {
                 message: format!(
                     "embedding module `{}` did not declare credential access",
@@ -155,6 +203,7 @@ impl WasmEmbedder {
             dimensions,
             settings,
             credential,
+            account,
             timeout,
         }));
         provider.check()?;
@@ -175,6 +224,11 @@ impl WasmEmbedder {
                 .build(),
             credential: if granted {
                 self.0.credential.clone()
+            } else {
+                None
+            },
+            account: if granted {
+                self.0.account.as_ref().map(|(_, account)| account.clone())
             } else {
                 None
             },
@@ -229,6 +283,13 @@ impl WasmEmbedder {
     }
 
     fn embed_blocking(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if let Some((id, account)) = &self.0.account {
+            crate::provider_auth::resolve(account).map_err(|reason| Error::EmbeddingFailed {
+                message: format!(
+                    "provider account `{id}` {reason}; check its credential reference on the daemon"
+                ),
+            })?;
+        }
         let (mut store, guest) = self.instantiate(true)?;
         guest
             .memcastle_embedding_provider()

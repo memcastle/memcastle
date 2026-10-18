@@ -41,6 +41,8 @@ export interface ConfigReport {
   assets: { source: "override" | "installed" | "embedded"; root: string | null }
   jobs: { max_concurrency: number; drain_timeout_secs: number; lease_ttl_secs: number }
   embeddings: { provider: string; model: string | null }
+  provider_accounts: { id: string; provider_id: string; auth: string; available: boolean }[]
+  embedding_connections: { id: string; provider_id: string | null; account: string | null }[]
   extraction: { provider: string; model: string | null }
   mining: { chunk_chars: number; max_documents: number; registries: number; dedup_enabled: boolean }
 }

@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::{EmbedFuture, Embedder};
+use crate::config::{ProviderAccount, provider_accounts::ProviderAuth};
 use crate::domain::{EMBEDDING_DIMENSION, Secret};
 use crate::error::{Error, Result};
 
@@ -19,6 +20,7 @@ pub struct HttpEmbedder {
     endpoint: String,
     model: String,
     api_key: Option<Secret>,
+    account: Option<(String, ProviderAccount)>,
     dimensions: usize,
 }
 
@@ -57,6 +59,7 @@ impl HttpEmbedder {
             endpoint: format!("{}/embeddings", base_url.trim_end_matches('/')),
             model,
             api_key,
+            account: None,
             dimensions: EMBEDDING_DIMENSION,
         })
     }
@@ -65,6 +68,13 @@ impl HttpEmbedder {
     #[must_use]
     pub fn with_dimensions(mut self, dimensions: usize) -> Self {
         self.dimensions = dimensions;
+        self
+    }
+
+    /// Resolve a shared account for each request so secret rotation needs no restart.
+    #[must_use]
+    pub fn with_account(mut self, id: String, account: ProviderAccount) -> Self {
+        self.account = Some((id, account));
         self
     }
 
@@ -77,7 +87,17 @@ impl HttpEmbedder {
             // support it ignore the field.
             "dimensions": self.dimensions,
         }));
-        if let Some(key) = &self.api_key {
+        if let Some((id, account)) = &self.account {
+            let key = crate::provider_auth::resolve(account).map_err(|reason| Error::EmbeddingFailed {
+                message: format!("provider account `{id}` {reason}; check its credential reference in the daemon environment or file"),
+            })?;
+            request = match &account.auth {
+                ProviderAuth::Bearer { .. } => request.bearer_auth(key.expose()),
+                ProviderAuth::ApiKey { header, .. } => {
+                    request.header(header.as_deref().unwrap_or("x-api-key"), key.expose())
+                }
+            };
+        } else if let Some(key) = &self.api_key {
             request = request.bearer_auth(key.expose());
         }
         // `without_url`: the message must not echo a URL that may carry
@@ -90,8 +110,19 @@ impl HttpEmbedder {
             })?;
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            let body: String = body.trim().chars().take(300).collect();
+            // A remote endpoint can echo the request's token; never surface its body for authenticated calls.
+            let body = if self.account.is_some() || self.api_key.is_some() {
+                "check the provider's account credential and endpoint".to_owned()
+            } else {
+                response
+                    .text()
+                    .await
+                    .unwrap_or_default()
+                    .trim()
+                    .chars()
+                    .take(300)
+                    .collect()
+            };
             return Err(Error::EmbeddingFailed {
                 message: format!("the endpoint answered {status}: {body}"),
             });
@@ -147,6 +178,7 @@ mod tests {
                      Json(body): Json<Value>| async move {
                         let auth = headers
                             .get("authorization")
+                            .or_else(|| headers.get("x-vendor-key"))
                             .map(|v| v.to_str().unwrap_or_default().to_string());
                         seen.lock().unwrap().push((auth, body));
                         (status, Json(answer))
@@ -304,8 +336,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_connections_share_one_account_and_read_a_rotated_file_on_each_request() {
+        let (url, seen) = stub(
+            StatusCode::OK,
+            json!({"data": [{"index": 0, "embedding": [1.0, 0.0, 0.0]}]}),
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("provider-key");
+        std::fs::write(&path, "first-key\n").unwrap();
+        let account: ProviderAccount = toml::from_str(&format!(
+            "provider_id = 'openai'\nauth = {{ type = 'bearer', credential = {{ type = 'file', path = {:?} }} }}",
+            path.display().to_string()
+        )).unwrap();
+        let mut config = crate::config::EmbeddingsConfig::default();
+        for id in ["primary", "secondary"] {
+            config.providers.insert(
+                id.into(),
+                crate::config::EmbeddingConnection {
+                    provider: crate::config::EmbeddingProvider::Openai,
+                    url: Some(url.clone()),
+                    provider_id: Some("openai".into()),
+                    account: Some("shared".into()),
+                    ..Default::default()
+                },
+            );
+            config.profiles.insert(
+                id.into(),
+                crate::config::EmbeddingProfileConfig {
+                    provider: id.into(),
+                    model: "model".into(),
+                    dimensions: 3,
+                },
+            );
+        }
+        let accounts = std::iter::once(("shared".into(), account)).collect();
+        let profiles =
+            super::super::Embeddings::from_config_with_accounts(&config, &accounts).unwrap();
+        let first_space = profiles
+            .select(Some("primary"))
+            .unwrap()
+            .space()
+            .unwrap()
+            .fingerprint
+            .clone();
+        profiles
+            .select(Some("primary"))
+            .unwrap()
+            .embed_one("one")
+            .await
+            .unwrap();
+        profiles
+            .select(Some("secondary"))
+            .unwrap()
+            .embed_one("two")
+            .await
+            .unwrap();
+        std::fs::write(&path, "second-key\n").unwrap();
+        profiles
+            .select(Some("primary"))
+            .unwrap()
+            .embed_one("three")
+            .await
+            .unwrap();
+        let other = dir.path().join("other-provider-key");
+        std::fs::write(&other, "budget-key").unwrap();
+        let other_account: ProviderAccount = toml::from_str(&format!(
+            "provider_id = 'openai'\nauth = {{ type = 'bearer', credential = {{ type = 'file', path = {:?} }} }}",
+            other.display().to_string()
+        )).unwrap();
+        let other_connection = HttpEmbedder::new(url, "model".into(), None, Duration::from_secs(5))
+            .unwrap()
+            .with_account("budget".into(), other_account);
+        other_connection.run(&["four".into()]).await.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.iter()
+                .map(|(header, _)| header.as_deref())
+                .collect::<Vec<_>>(),
+            [
+                Some("Bearer first-key"),
+                Some("Bearer first-key"),
+                Some("Bearer second-key"),
+                Some("Bearer budget-key")
+            ]
+        );
+        assert_eq!(
+            first_space,
+            profiles
+                .select(Some("primary"))
+                .unwrap()
+                .space()
+                .unwrap()
+                .fingerprint
+        );
+    }
+
+    #[tokio::test]
+    async fn a_key_header_uses_only_the_selected_account_and_missing_secrets_are_redacted() {
+        let (url, seen) = stub(
+            StatusCode::OK,
+            json!({"data": [{"index": 0, "embedding": vector(1.0)}]}),
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+        std::fs::write(&path, "key-value").unwrap();
+        let account: ProviderAccount = toml::from_str(&format!(
+            "provider_id = 'vendor'\nauth = {{ type = 'api_key', header = 'x-vendor-key', credential = {{ type = 'file', path = {:?} }} }}",
+            path.display().to_string()
+        )).unwrap();
+        let provider = HttpEmbedder::new(url, "model".into(), None, Duration::from_secs(5))
+            .unwrap()
+            .with_account("chosen".into(), account);
+        provider.run(&["one".into()]).await.unwrap();
+        assert_eq!(seen.lock().unwrap()[0].0.as_deref(), Some("key-value"));
+        std::fs::remove_file(&path).unwrap();
+        let error = provider.run(&["two".into()]).await.unwrap_err().to_string();
+        assert!(error.contains("chosen"));
+        assert!(!error.contains("key-value"));
+        assert!(!error.contains(path.to_str().unwrap()));
+    }
+
+    #[tokio::test]
     async fn an_error_status_is_reported_with_the_servers_message_and_never_the_key() {
-        let (url, _) = stub(StatusCode::UNAUTHORIZED, json!({"error": "bad key"})).await;
+        let (url, _) = stub(StatusCode::UNAUTHORIZED, json!({"error": "sk-secret"})).await;
         let embedder = HttpEmbedder::new(
             url,
             "m".into(),
@@ -319,7 +474,10 @@ mod tests {
             .expect_err("401")
             .to_string();
         assert!(message.contains("401"), "{message}");
-        assert!(message.contains("bad key"), "{message}");
+        assert!(
+            message.contains("check the provider's account credential"),
+            "{message}"
+        );
         assert!(!message.contains("sk-secret"), "{message}");
     }
 

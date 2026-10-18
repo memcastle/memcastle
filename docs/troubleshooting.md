@@ -406,7 +406,9 @@ so a fact that became true later that day is not there yet.
   Configure an `[embeddings]` provider, or search with `--ranking lexical` (the default `auto` falls back by itself).
 - `memcastle::embed::not_configured`: `memcastle embed` or an embedding request needs a provider, and none is set.
 - `memcastle::embed::failed`: the provider answered with an error or not at all.
-  The message carries what it said; for a `command` provider that is its exit status and the start of its standard error.
+  For an authenticated HTTP connection the message gives its status without repeating the remote response body,
+  which might contain your token; check the selected account's daemon environment variable or file and its endpoint.
+  For a `command` provider the message includes its exit status and the start of standard error.
   Searches with `auto` ranking keep working lexically meanwhile.
 - `memcastle::embed::dimension_mismatch`: the model returns another vector length than the 768 the palace stores.
   Ask it for 768 (`dimensions`), or choose a model that produces it.

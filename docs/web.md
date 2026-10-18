@@ -37,7 +37,7 @@ The REST API and MCP are unaffected.
 | Miners | List and edit saved miner files, source-configuration defaults, destination overrides, limits and opt-in timetables. |
 | Triggers | What asks for mining runs on its own, read only: each trigger's miner, type, status (`disabled`, `active`, `failing`, `unavailable`), settings, when it last fired and is next due, and what last went wrong, and where the [webhook listener](triggers.md#the-webhook-listener) is. Defining, enabling and firing are `memcastle trigger`, never the page. |
 | Maintenance | Run an audit or a repair (a dry run first), and see the last report of each. |
-| Settings | The configuration in effect, from `GET /api/config`: no secret, and nothing read from the files. |
+| Settings | The configuration in effect, including provider account availability and embedding connection links, from `GET /api/config`: no secret or credential location, and nothing read from the files by the UI. |
 
 The app fills the available window width; reading surfaces such as dialogs keep their own sensible widths.
 On narrow screens the sidebar and split views stack,

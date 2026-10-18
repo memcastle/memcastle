@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use memcastle::config::{
     EmbeddingConnection, EmbeddingProfileConfig, EmbeddingProvider, EmbeddingsConfig,
+    ProviderAccount,
 };
 use memcastle::domain::{
     CredentialRef, PluginInfo, PluginManifest, PluginModule, PluginModuleKind, PluginRecord,
@@ -100,6 +101,57 @@ async fn a_component_receives_only_the_explicitly_selected_credential() {
     assert_eq!(token.embed(&["text".into()]).await.unwrap().len(), 1);
 }
 
+#[tokio::test]
+async fn a_component_receives_a_shared_account_only_with_declared_credential_permission() {
+    let bytes = component();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provider-token");
+    std::fs::write(&path, "selected-token").unwrap();
+    let account: ProviderAccount = toml::from_str(&format!(
+        "provider_id = 'openai'\nauth = {{ type = 'bearer', credential = {{ type = 'file', path = {:?} }} }}",
+        path.display().to_string()
+    )).unwrap();
+    let provider = WasmEmbedder::load_with_account(
+        manifest(),
+        &bytes,
+        "synthetic".into(),
+        3,
+        "{\"require_token\":true}".into(),
+        memcastle::embed::wasm::WasmAccess {
+            credential: None,
+            account: Some(("selected".into(), account.clone())),
+        },
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(provider.embed(&["test".into()]).await.unwrap().len(), 1);
+    let mut denied = manifest();
+    denied.credential = false;
+    assert!(
+        WasmEmbedder::load_with_account(
+            denied,
+            &bytes,
+            "synthetic".into(),
+            3,
+            "{}".into(),
+            memcastle::embed::wasm::WasmAccess {
+                credential: None,
+                account: Some(("selected".into(), account)),
+            },
+            Duration::from_secs(5),
+        )
+        .is_err()
+    );
+    std::fs::remove_file(path).unwrap();
+    let error = provider
+        .embed(&["test".into()])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("selected"));
+    assert!(!error.contains("selected-token"));
+}
+
 #[test]
 fn a_component_that_lies_about_its_capabilities_cannot_load() {
     let mut claimed = manifest();
@@ -187,6 +239,9 @@ async fn an_installed_module_becomes_selectable_without_replacing_other_profiles
             provider: EmbeddingProvider::Plugin,
             plugin: Some("demo".into()),
             module: Some("mock-embedding".into()),
+            credential: Some(CredentialRef::Env {
+                name: "PATH".into(),
+            }),
             ..Default::default()
         },
     );
@@ -288,6 +343,14 @@ async fn an_installed_module_becomes_selectable_without_replacing_other_profiles
         embeddings.select(Some("caller")).unwrap().space(),
         Some(&other_space)
     );
+    // Rotating a credential reference changes access, not the vectors' semantic identity.
+    config.providers.get_mut("mock").unwrap().credential = Some(CredentialRef::Env {
+        name: "HOME".into(),
+    });
+    embeddings
+        .load_plugins(&config, std::slice::from_ref(&record), root.path())
+        .unwrap();
+    assert_eq!(embeddings.select(None).unwrap().space(), selected.space());
     let changed_descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\ncredential = true\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
     std::fs::write(base.join("memcastle-embedding.toml"), changed_descriptor).unwrap();
     let mut replacement = record;

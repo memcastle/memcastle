@@ -52,6 +52,30 @@ pub struct ProviderInfo {
     pub model: Option<String>,
 }
 
+/// Safe account status, excluding the credential reference's name/path and value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderAccountInfo {
+    /// The configured account ID.
+    pub id: String,
+    /// Provider identity, independent of protocol and model.
+    pub provider_id: String,
+    /// Generic scheme used by Core.
+    pub auth: String,
+    /// Whether the daemon can resolve the referenced credential right now.
+    pub available: bool,
+}
+
+/// An embedding connection's safe linkage to a shared account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConnectionInfo {
+    /// Connection ID.
+    pub id: String,
+    /// Provider identity, when configured.
+    pub provider_id: Option<String>,
+    /// Account selected by this connection, if any.
+    pub account: Option<String>,
+}
+
 /// Mining and deduplication settings that decide what a job does.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MiningInfo {
@@ -86,6 +110,12 @@ pub struct ConfigReport {
     pub jobs: JobsInfo,
     /// Embeddings.
     pub embeddings: ProviderInfo,
+    /// Named provider accounts; no credential locations or tokens.
+    #[serde(default)]
+    pub provider_accounts: Vec<ProviderAccountInfo>,
+    /// The embedding connections that select those accounts.
+    #[serde(default)]
+    pub embedding_connections: Vec<EmbeddingConnectionInfo>,
     /// Entity extraction.
     pub extraction: ProviderInfo,
     /// Mining and deduplication.
@@ -144,6 +174,26 @@ impl ConfigReport {
                     .map(|profile| profile.model.clone())
                     .or_else(|| config.embeddings.model.clone()),
             },
+            provider_accounts: config
+                .provider_accounts
+                .iter()
+                .map(|(id, account)| ProviderAccountInfo {
+                    id: id.clone(),
+                    provider_id: account.provider_id.clone(),
+                    auth: account.auth.kind().to_string(),
+                    available: crate::provider_auth::available(account),
+                })
+                .collect(),
+            embedding_connections: config
+                .embeddings
+                .providers
+                .iter()
+                .map(|(id, connection)| EmbeddingConnectionInfo {
+                    id: id.clone(),
+                    provider_id: connection.provider_id.clone(),
+                    account: connection.account.clone(),
+                })
+                .collect(),
             extraction: ProviderInfo {
                 provider: config.extraction.provider.as_str().to_string(),
                 model: config.extraction.model.clone(),

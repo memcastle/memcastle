@@ -53,6 +53,7 @@ pub mod migrate;
 pub mod mining;
 pub mod plugin;
 pub mod project;
+pub mod provider_auth;
 pub mod repair;
 pub mod search;
 pub mod server;
