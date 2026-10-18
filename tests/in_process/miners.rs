@@ -248,13 +248,16 @@ async fn duplicate_ids_across_directories_report_both_origins_without_hiding_the
     let (_, report) = get(&daemon, "/api/miners").await;
     assert_eq!(names(&report), ["same"]);
     let error = report["error"].as_str().unwrap();
+    let root = daemon.config_path.parent().unwrap();
+    let first = root.join("a").join("same.toml").display().to_string();
+    let second = root.join("b").join("same.toml").display().to_string();
     assert!(
-        error.contains("a/same.toml") && error.contains("b/same.toml"),
+        error.contains(&first) && error.contains(&second),
         "{error}"
     );
     let (status, reload) = post(&daemon, "/api/miners/reload").await;
     assert_eq!(status, StatusCode::OK, "{reload}");
-    assert!(reload["error"].as_str().unwrap().contains("b/same.toml"));
+    assert!(reload["error"].as_str().unwrap().contains(&second));
     daemon.shutdown().await;
 }
 
@@ -404,7 +407,8 @@ async fn a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_dis
     .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
     assert_eq!(answer["miner"]["schedule"]["enabled"], false);
-    tokio::time::sleep(Duration::from_millis(1200)).await;
+    // The supervisor checks desired schedules every five seconds; let an entire tick pass before asserting it is off.
+    tokio::time::sleep(Duration::from_secs(6)).await;
     let (_, idle) = get(&daemon, "/api/jobs?kind=mine").await;
     assert_eq!(
         idle.as_array().unwrap().len(),
@@ -415,8 +419,9 @@ async fn a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_dis
     assert_eq!(status, StatusCode::OK, "{enabled}");
     assert_eq!(enabled["miner"]["schedule"]["enabled"], true);
     let mut fired = false;
-    for _ in 0..35 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    // Account for a full supervisor tick plus the one-second timetable on instrumented Windows/macOS runners.
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
         let (_, jobs) = get(&daemon, "/api/jobs?kind=mine").await;
         if !jobs.as_array().unwrap().is_empty() {
             fired = true;
