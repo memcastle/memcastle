@@ -251,10 +251,7 @@ async fn duplicate_ids_across_directories_report_both_origins_without_hiding_the
     let root = daemon.config_path.parent().unwrap();
     let first = root.join("a").join("same.toml").display().to_string();
     let second = root.join("b").join("same.toml").display().to_string();
-    assert!(
-        error.contains(&first) && error.contains(&second),
-        "{error}"
-    );
+    assert!(error.contains(&first) && error.contains(&second), "{error}");
     let (status, reload) = post(&daemon, "/api/miners/reload").await;
     assert_eq!(status, StatusCode::OK, "{reload}");
     assert!(reload["error"].as_str().unwrap().contains(&second));
