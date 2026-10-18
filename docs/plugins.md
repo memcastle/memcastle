@@ -101,7 +101,7 @@ additionalProperties = false
 type = "string"
 ```
 
-Compile the `memcastle:embedding@0.1.0` world in `wit/memcastle-embedding.wit` as a
+Compile the `memcastle:embedding@0.1.0` world in `wit/embedding/memcastle-embedding.wit` as a
 `wasm32-wasip2` component before `plugin package`; the packager does not compile module code.
 `models` must return the same models and dimensions as the manifest; `embed` receives a model, dimension,
 JSON settings object and ordered text batch, returning one vector per input.

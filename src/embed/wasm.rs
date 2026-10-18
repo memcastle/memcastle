@@ -17,7 +17,7 @@ use super::{EmbedFuture, Embedder};
 
 mod bindings {
     wasmtime::component::bindgen!({
-        path: "wit/memcastle-embedding.wit",
+        path: "wit/embedding/memcastle-embedding.wit",
         world: "embedding-provider",
     });
 }

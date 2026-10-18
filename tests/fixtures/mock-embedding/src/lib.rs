@@ -1,7 +1,7 @@
 //! Synthetic embedding module for Core's capability and runtime checks.
 
 wit_bindgen::generate!({
-    path: "../../../wit/memcastle-embedding.wit",
+    path: "../../../wit/embedding/memcastle-embedding.wit",
     world: "embedding-provider",
 });
 
