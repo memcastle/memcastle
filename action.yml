@@ -26,6 +26,10 @@ runs:
       run: |
         set -euo pipefail
         selected="$VERSION"
+        # Keep existing plugin CI working while its generated workflows migrate to development.
+        if [[ "$selected" == main ]]; then
+          selected=development
+        fi
         if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
           # Only release trees require discovery; exact tags fail naturally on download.
           selected="$(gh api --paginate 'repos/memcastle/memcastle/releases?per_page=100' \
