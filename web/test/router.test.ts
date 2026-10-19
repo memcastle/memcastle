@@ -50,6 +50,18 @@ describe("the route guard", () => {
     expect(router.currentRoute.value.name).toBe("overview")
   })
 
+  it("redirects old launch links into the Jobs launcher through the login guard", async () => {
+    const { router } = app(true)
+    await router.push("/launch")
+    expect(router.currentRoute.value.query.redirect).toBe("/jobs?launch=1")
+  })
+
+  it("keeps job deep links intact", async () => {
+    const { router } = app(false)
+    await router.push("/jobs?job=job%3Aone")
+    expect(router.currentRoute.value.query.job).toBe("job:one")
+  })
+
   it("returns to the login from wherever the user is when the token is refused", async () => {
     const { router, session } = app(true)
     await session.signIn(LOGIN_USER, TOKEN)

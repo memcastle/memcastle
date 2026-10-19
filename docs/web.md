@@ -28,18 +28,29 @@ The REST API and MCP are unaffected.
 | Page | What you can do |
 |---|---|
 | Overview | The palace and daemon at a glance: health, address, pid, start time, datastore and migration state, drawer count, queued, running and paused jobs, and how the newest 200 jobs ended. |
-| Palace | Browse wings, rooms and drawers, open a drawer to read it verbatim with its source, validity, history and likely duplicates. |
+| Palace | Browse wings, rooms and drawers; select a drawer to read it beside the list with its source, validity, history and likely duplicates. |
 | Search | The retrieval an agent gets, with its options (wing, room, ranking, `as_of`, historical memory, graph expansion), each hit's score and signals. |
 | Graph | The knowledge graph: an overview, or the neighbourhood of one entity up to three hops, with each fact's provenance and the drawers that mention an entity. |
 | Diary | Read an agent's diary by identity and wing, and write an entry. |
-| Jobs | Active jobs and history, filtered by state and kind, with progress, parameters and results; pause, resume, cancel and retry. |
-| Launch | Submit a mine job (a directory, installed source or saved miner), an extract job or an embed job. |
+| Jobs | Active jobs and history, filtered by state and kind; select a row to read its progress, parameters and results, pause, resume, cancel and retry, or launch mining, extract, embed, audit and repair jobs. |
 | Miners | List and edit saved miner files, source-configuration defaults, destination overrides, limits and opt-in timetables. |
 | Triggers | What asks for mining runs on its own, read only: each trigger's miner, type, status (`disabled`, `active`, `failing`, `unavailable`), settings, when it last fired and is next due, and what last went wrong, and where the [webhook listener](triggers.md#the-webhook-listener) is. Defining, enabling and firing are `memcastle trigger`, never the page. |
 | Maintenance | Run an audit or a repair (a dry run first), and see the last report of each. |
 | Settings | The configuration in effect, including provider account availability and embedding connection links, from `GET /api/config`: no secret or credential location, and nothing read from the files by the UI. |
 
-The app fills the available window width; reading surfaces such as dialogs keep their own sensible widths.
+Selecting a job row or a Palace drawer opens a non-modal side panel with its own scroll;
+the list remains visible and keeps its scroll position.
+Use the panel's Close button or Escape to return to the list, and select another entry to change the panel.
+Job rows and Palace drawers support keyboard selection.
+Links to `/ui/#/jobs?job=<id>` and `/ui/#/palace?wing=<wing>&room=<room>&drawer=<id>` open the selected detail;
+browser history restores it.
+On narrow screens the panel stacks above the list.
+The `/ui/#/launch` link opens the Jobs launcher.
+Jobs' **Launch** dialog distinguishes ad-hoc directory and enabled-source mining (using the source's default configuration)
+from running a ready configured miner (which may use a named source configuration and its own destination/options).
+Schedules and triggers are separate from a manual miner run.
+The same dialog offers extract, embed, audit and repair jobs with only their relevant inputs;
+repair defaults to a dry run and asks before applying changes.
 On narrow screens the sidebar and split views stack,
 while wide tables scroll within their own region rather than widening the page.
 

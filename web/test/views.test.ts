@@ -7,7 +7,6 @@ import type { Component } from "vue"
 import { createAppRouter } from "../src/router.ts"
 import { createSession, SESSION } from "../src/session.ts"
 import JobsView from "../src/views/JobsView.vue"
-import LaunchView from "../src/views/LaunchView.vue"
 import MinersView from "../src/views/MinersView.vue"
 import AppShell from "../src/layout/AppShell.vue"
 import GraphView from "../src/views/GraphView.vue"
@@ -88,9 +87,11 @@ async function show(view: Component, answer: (request: Recorded) => Answer, mode
   const wrapper = mount(view, {
     global: { plugins: [router, ToastService, [OpenVue, { theme: { preset: Aura } }]], provide: { [SESSION as symbol]: session } },
   })
+  if (view === JobsView) await router.push("/jobs")
+  if (view === PalaceView) await router.push("/palace")
   await flushPromises()
   // The session's own status probe is not what a page asked for.
-  return { wrapper, requests: seen }
+  return { wrapper, requests: seen, router }
 }
 
 const path = (request: Recorded) => new URL(request.url, "http://daemon").pathname
@@ -401,22 +402,22 @@ describe("the jobs page", () => {
     expect(requests.at(-1)!.url).toContain("status=failed")
   })
 
-  it("opens the details of a job with its parameters and result", async () => {
-    const { wrapper } = await show(JobsView, answer)
+  it("opens a job by selecting its row and keeps the list visible", async () => {
+    const { wrapper, router } = await show(JobsView, answer)
 
-    await button(wrapper, "Details").at(-1)!.trigger("click")
+    await wrapper.findAll('tr[data-p-selectable-row="true"]').at(-1)!.trigger("click")
     await flushPromises()
 
-    expect(document.body.textContent).toContain("Parameters")
-    expect(document.body.textContent).toContain('"drawers": 3')
-    expect(document.body.textContent).toContain("Progress")
-    expect(document.body.textContent).toContain("1 / 1")
+    expect(router.currentRoute.value.query.job).toBe(jobs.at(-1)!.id)
+    expect(wrapper.get('.detail-drawer').text()).toContain('"drawers": 3')
+    expect(wrapper.findAll(".table-scroll")).toHaveLength(2)
+    expect(button(wrapper, "Details")).toHaveLength(0)
   }, 15_000)
 
   it("updates the active indicator and open details when a new job response arrives", async () => {
     let current = 1
     const { wrapper } = await show(JobsView, () => ({ body: [job("run", "running", { progress: { current, total: 4, message: null } })] }))
-    await button(wrapper, "Details")[0]!.trigger("click")
+    await wrapper.find('tr[data-p-selectable-row="true"]').trigger("click")
     await flushPromises()
 
     current = 3
@@ -424,66 +425,197 @@ describe("the jobs page", () => {
     await flushPromises()
 
     expect(wrapper.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("75")
-    expect(document.body.textContent).toContain("75% · 3 / 4")
+    expect(wrapper.get('.detail-drawer').text()).toContain("75% · 3 / 4")
+  })
+
+  it("does not select a row when controlling it, and closes details on Escape", async () => {
+    const { wrapper, router, requests } = await show(JobsView, answer)
+    await button(wrapper, "pause")[0]!.trigger("click")
+    await flushPromises()
+    expect(router.currentRoute.value.query.job).toBeUndefined()
+    expect(requests.some((request) => request.method === "POST")).toBe(true)
+    await wrapper.find('tr[data-p-selectable-row="true"]').trigger("click")
+    await flushPromises()
+    expect(wrapper.find('.detail-drawer').exists()).toBe(true)
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+    await flushPromises()
+    expect(wrapper.find('.detail-drawer').exists()).toBe(false)
+  })
+
+  it("opens a linked job outside the current filtered list", async () => {
+    const { wrapper, router, requests } = await show(JobsView, (request) => path(request).startsWith("/api/jobs/job") ? { body: jobs[4] } : { body: [] })
+    await router.push({ name: "jobs", query: { job: jobs[4]!.id } })
+    await flushPromises()
+    expect(requests.some((request) => path(request) === `/api/jobs/${encodeURIComponent(jobs[4]!.id)}`)).toBe(true)
+    expect(wrapper.get('.detail-drawer').text()).toContain('"drawers": 3')
+  })
+
+  it("keeps a selected job readable when a state filter hides its row", async () => {
+    const { wrapper, router } = await show(JobsView, (request) => path(request) === `/api/jobs/${encodeURIComponent(jobs[0]!.id)}` ? { body: jobs[0] } : request.url.includes('status=failed') ? { body: [jobs[3]] } : { body: jobs })
+    await wrapper.get('tr[data-p-selectable-row="true"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find((candidate) => candidate.text() === 'failed')!.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query.job).toBe(jobs[0]!.id)
+    expect(wrapper.get('.resource-list').text()).not.toContain('run0000000000')
+    expect(wrapper.get('.detail-drawer').text()).toContain('Parameters')
+  })
+
+  it("changes selected rows without leaving Jobs and closes while preserving the list", async () => {
+    const { wrapper, router } = await show(JobsView, answer)
+    const rows = wrapper.findAll('tr[data-p-selectable-row="true"]')
+    await rows[0]!.trigger("click")
+    await flushPromises()
+    await rows[1]!.trigger("click")
+    await flushPromises()
+    expect(router.currentRoute.value.query.job).toBe(jobs[1]!.id)
+    expect(wrapper.get('.detail-drawer').attributes('role')).toBe('region')
+    await wrapper.get('button[aria-label="Close details"]').trigger("click")
+    await flushPromises()
+    expect(router.currentRoute.value.query.job).toBeUndefined()
+    expect(wrapper.findAll('tr[data-p-selectable-row="true"]')).toHaveLength(5)
+  })
+
+  it("selects a job with the table keyboard action", async () => {
+    const { wrapper, router } = await show(JobsView, answer)
+    const row = wrapper.find('tr[data-p-selectable-row="true"]')
+    expect(row.attributes('tabindex')).toBeDefined()
+    await row.trigger('keydown', { code: 'Enter', key: 'Enter' })
+    await flushPromises()
+    expect(router.currentRoute.value.query.job).toBe(jobs[0]!.id)
+    expect(wrapper.get('.detail-drawer').text()).toContain('Parameters')
+  })
+
+  it("returns keyboard focus to the selected row on close", async () => {
+    const { wrapper } = await show(JobsView, answer)
+    const root = wrapper.element
+    document.body.appendChild(root)
+    const row = wrapper.get('tr[data-p-selectable-row="true"]')
+    ;(row.element as HTMLElement).focus()
+    await row.trigger('keydown', { code: 'Enter', key: 'Enter' })
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('.detail-drawer h2').element)
+    await wrapper.get('button[aria-label="Close details"]').trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(row.element)
+    wrapper.unmount()
+    root.remove()
   })
 })
 
-describe("the launch page", () => {
+describe("the jobs launcher", () => {
   const sources = { adapters: [{ name: "pi", state: "enabled", options: [{ name: "since", description: "a date" }] }, { name: "off", state: "disabled", options: [] }], sources: [] }
-  const answer = (request: Recorded): Answer => (request.method === "POST" ? { body: JOB } : { body: sources })
+  const answer = (request: Recorded): Answer => (request.method === "POST" || path(request).startsWith("/api/jobs/job")) ? { body: JOB } : path(request) === "/api/sources" ? { body: sources } : path(request) === "/api/miners" ? { body: { miners: [{ name: "saved", source: "pi", source_config: "pi-work", state: "ready", enabled: true, options: {} }] } } : path(request) === "/api/source-configs" ? { body: [{ id: "pi-work", source: "pi", options: {}, credential_kind: "oauth", credential_available: true }] } : { body: [] }
   const submitted = (requests: Recorded[]) => requests.filter((request) => request.method === "POST").map((request) => request.body as Record<string, unknown>)
+  const open = async (wrapper: Awaited<ReturnType<typeof show>>["wrapper"]) => {
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Launch")!.trigger("click")
+    await flushPromises()
+  }
 
   it("mines a directory by absolute path", async () => {
-    const { wrapper, requests } = await show(LaunchView, answer)
-
+    const { wrapper, requests } = await show(JobsView, answer)
+    await open(wrapper)
     await wrapper.find("input#mine-path").setValue("/work/project")
-    await wrapper.findAll("button").find((candidate) => candidate.text() === "Submit mine job")!.trigger("click")
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Launch job")!.trigger("click")
     await flushPromises()
 
     expect(submitted(requests)[0]).toMatchObject({ type: "mine" })
   })
 
   it("will not mine a relative path", async () => {
-    const { wrapper } = await show(LaunchView, answer)
-
+    const { wrapper } = await show(JobsView, answer)
+    await open(wrapper)
     await wrapper.find("input#mine-path").setValue("relative/path")
 
-    expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Submit mine job")!.attributes("disabled")).toBeDefined()
+    expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Launch job")!.attributes("disabled")).toBeDefined()
+    expect(wrapper.text()).toContain("Enter an absolute path")
   })
 
   it("offers only the sources that are enabled", async () => {
-    const { wrapper } = await show(LaunchView, answer)
-
-    await wrapper.findAll("button").find((candidate) => candidate.text() === "Installed source")!.trigger("click")
-
+    const { wrapper } = await show(JobsView, answer)
+    await open(wrapper)
+    await wrapper.find("select#mine-kind").setValue("source")
     expect(wrapper.find("input#mine-locator").exists()).toBe(true)
-    expect(wrapper.text()).not.toContain("off")
+    expect(wrapper.find("select#mine-source").text()).not.toContain("off")
   })
 
-  it("submits an extract job and an embed job for a wing", async () => {
-    const { wrapper, requests } = await show(LaunchView, answer)
-
-    await wrapper.find("input#extract-wing").setValue("castle")
-    await wrapper.findAll("button").find((candidate) => candidate.text() === "Submit extract job")!.trigger("click")
+  it("runs a configured miner with its named source configuration without presenting it as an ad-hoc source", async () => {
+    const { wrapper, requests } = await show(JobsView, answer)
+    await open(wrapper)
+    await wrapper.find('select#mine-kind').setValue('miner')
+    await wrapper.find('select#mine-miner').setValue('saved')
+    expect(wrapper.text()).toContain('configuration pi-work')
+    await wrapper.findAll('button').find((candidate) => candidate.text() === 'Launch job')!.trigger('click')
     await flushPromises()
-    await wrapper.findAll("button").find((candidate) => candidate.text() === "Submit embed job")!.trigger("click")
-    await flushPromises()
-
-    expect(submitted(requests).map((body) => [body.type, body.wing])).toEqual([["extract", "castle"], ["embed", "castle"]])
+    expect(requests.some((request) => path(request) === '/api/miners/saved/run' && request.method === 'POST')).toBe(true)
   })
 
-  it("does not let a read only session submit anything", async () => {
-    const { wrapper } = await show(LaunchView, answer, "read_only")
+  it("does not carry options from a previously selected source into another launch", async () => {
+    const { wrapper, requests } = await show(JobsView, answer)
+    await open(wrapper)
+    await wrapper.find('select#mine-kind').setValue('source')
+    await wrapper.find('select#mine-source').setValue('pi')
+    await wrapper.find('input#mine-option-since').setValue('yesterday')
+    await wrapper.find('select#mine-kind').setValue('directory')
+    await wrapper.find('input#mine-path').setValue('/work')
+    await wrapper.findAll('button').find((candidate) => candidate.text() === 'Launch job')!.trigger('click')
+    await flushPromises()
+    expect(submitted(requests)[0]).not.toHaveProperty('options.since')
+  })
 
-    expect(wrapper.text()).toContain("The session is read only")
-    expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Submit extract job")!.attributes("disabled")).toBeDefined()
+  it("offers type-specific inputs for extract and embed", async () => {
+    const { wrapper, requests } = await show(JobsView, answer)
+    await open(wrapper)
+    await wrapper.find("select#launch-type").setValue("embed")
+    await wrapper.find("input#launch-wing").setValue("castle")
+    await wrapper.find("select#embed-refresh").setValue("stale")
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Launch job")!.trigger("click")
+    await flushPromises()
+
+    expect(submitted(requests)[0]).toMatchObject({ type: "embed", wing: "castle", refresh: "stale" })
+  })
+
+  it("allows audit and dry-run repair in read-only mode but refuses applied repair", async () => {
+    const { wrapper, requests } = await show(JobsView, answer, "read_only")
+    await open(wrapper)
+    await wrapper.find("select#launch-type").setValue("audit")
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Launch job")!.trigger("click")
+    await flushPromises()
+    expect(submitted(requests)[0]).toMatchObject({ type: "audit" })
+    await open(wrapper)
+    await wrapper.find("select#launch-type").setValue("repair")
+    expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Launch job")!.attributes("disabled")).toBeUndefined()
+    await wrapper.find("input[type=checkbox]").setValue(false)
+    expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Launch job")!.attributes("disabled")).toBeDefined()
+  })
+
+  it("does not apply a repair when its confirmation is declined", async () => {
+    const { wrapper, requests } = await show(JobsView, answer)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await open(wrapper)
+    await wrapper.find('select#launch-type').setValue('repair')
+    await wrapper.find('input[type=checkbox]').setValue(false)
+    await wrapper.findAll('button').find((candidate) => candidate.text() === 'Launch job')!.trigger('click')
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(submitted(requests)).toHaveLength(0)
+    confirm.mockRestore()
+  })
+
+  it("shows submission failures inside the launcher without losing the form", async () => {
+    const { wrapper } = await show(JobsView, (request) => request.method === 'POST' ? { status: 400, body: { error: 'invalid wing', help: 'choose another' } } : answer(request))
+    await open(wrapper)
+    await wrapper.find('select#launch-type').setValue('extract')
+    await wrapper.findAll('button').find((candidate) => candidate.text() === 'Launch job')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('invalid wing')
+    expect(wrapper.find('select#launch-type').exists()).toBe(true)
   })
 
   it("keeps working when the list of sources cannot be read", async () => {
-    const { wrapper } = await show(LaunchView, () => ({ status: 500, body: { error: "down" } }))
-
+    const { wrapper } = await show(JobsView, (request) => path(request) === "/api/jobs" ? { body: [] } : { status: 500, body: { error: "down" } })
+    await open(wrapper)
     expect(wrapper.find("input#mine-path").exists()).toBe(true)
-    expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Installed source")!.attributes("disabled")).toBeDefined()
+    expect(wrapper.find('option[value="source"]').attributes("disabled")).toBeDefined()
   })
 })
 
@@ -628,10 +760,11 @@ describe("the palace page", () => {
     await click(wrapper, "castle")
     await click(wrapper, "design")
 
-    await click(wrapper, "Open")
+    await wrapper.find('.selectable-hit').trigger("click")
+    await flushPromises()
 
-    expect(document.body.textContent).toContain("this version")
-    expect(document.body.textContent).toContain("91% similar")
+    expect(wrapper.get('.detail-drawer').text()).toContain("this version")
+    expect(wrapper.get('.detail-drawer').text()).toContain("91% similar")
   })
 
   it("still shows the drawer when its history cannot be read", async () => {
@@ -639,9 +772,34 @@ describe("the palace page", () => {
     await click(wrapper, "castle")
     await click(wrapper, "design")
 
-    await click(wrapper, "Open")
+    await wrapper.find('.selectable-hit').trigger("click")
+    await flushPromises()
 
-    expect(document.body.textContent).toContain("Use SurrealDB.")
+    expect(wrapper.get('.detail-drawer').text()).toContain("Use SurrealDB.")
+  })
+
+  it("opens a keyboard-selected drawer from a shareable URL and closes it without losing the room", async () => {
+    const { wrapper, router } = await show(PalaceView, answer)
+    await router.push('/palace?wing=castle&room=design')
+    await flushPromises()
+    await wrapper.find('.selectable-hit').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(router.currentRoute.value.query.drawer).toBe(drawer.id)
+    expect(wrapper.get('.detail-drawer').text()).toContain('Use SurrealDB.')
+    await wrapper.get('button[aria-label="Close details"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toMatchObject({ wing: 'castle', room: 'design' })
+    expect(router.currentRoute.value.query.drawer).toBeUndefined()
+  })
+
+  it("restores a Palace drawer directly from a deep link and clears it when the room changes", async () => {
+    const { wrapper, router } = await show(PalaceView, answer)
+    await router.push({ name: 'palace', query: { wing: 'castle', room: 'design', drawer: drawer.id } })
+    await flushPromises()
+    expect(wrapper.get('.detail-drawer').text()).toContain('91% similar')
+    await wrapper.findAll('button.list-item').find((item) => item.text().includes('castle'))!.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query.drawer).toBeUndefined()
   })
 
   it("says so when there are no wings, and when a room is empty", async () => {
@@ -670,7 +828,8 @@ describe("the palace page", () => {
     await click(wrapper, "castle")
     await click(wrapper, "design")
 
-    await click(wrapper, "Open")
+    await wrapper.find('.selectable-hit').trigger("click")
+    await flushPromises()
 
     expect(wrapper.text()).toContain("no such drawer")
   })

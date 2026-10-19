@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import Button from "openvue/button"
-import Dialog from "openvue/dialog"
 import Skeleton from "openvue/skeleton"
 import Tag from "openvue/tag"
 import { computed, ref, watch } from "vue"
-import type { Drawer, DrawerHistory, DrawerSummary, SimilarDrawer } from "../api/types.ts"
+import { useRoute, useRouter } from "vue-router"
+import type { Drawer, DrawerHistory, SimilarDrawer } from "../api/types.ts"
 import EmptyState from "../components/EmptyState.vue"
+import DetailDrawer from "../components/DetailDrawer.vue"
 import ErrorNotice from "../components/ErrorNotice.vue"
 import RefreshButton from "../components/RefreshButton.vue"
 import PageHeader from "../components/PageHeader.vue"
@@ -15,6 +16,8 @@ import { useSession } from "../session.ts"
 
 // Wings, rooms and drawers: browse down the hierarchy, open a drawer to read it verbatim with its history.
 const { client } = useSession()
+const route = useRoute()
+const router = useRouter()
 
 const wing = ref<string>()
 const room = ref<string>()
@@ -27,7 +30,6 @@ const detail = useLoad(async () => (wing.value ? await client.wing(wing.value) :
 const drawers = useLoad(async () => (wing.value && room.value ? await client.drawers(wing.value, room.value, limit.value) : undefined), changes)
 
 watch(wing, () => {
-  room.value = undefined
   limit.value = 50
   void detail.refresh()
   void drawers.refresh()
@@ -41,22 +43,41 @@ async function refreshAll(): Promise<void> {
 
 const opened = ref<{ drawer: Drawer; history?: DrawerHistory; similar?: SimilarDrawer[] }>()
 const openError = ref<ReturnType<typeof asApiError> | null>(null)
+const selectedId = computed(() => typeof route.query.drawer === "string" ? route.query.drawer : undefined)
+let openRequest = 0
 
-async function open(summary: DrawerSummary): Promise<void> {
-  if (!wing.value || !room.value) return
+function choose(patch: Record<string, string | undefined>): void {
+  const query = { ...route.query, ...patch }
+  for (const key of Object.keys(query)) if (query[key] === undefined) delete query[key]
+  void router.push({ name: "palace", query })
+}
+
+// Hierarchy and detail are addressable without a separate page; selection remains when the list reloads.
+watch(() => [route.query.wing, route.query.room, selectedId.value] as const, ([nextWing, nextRoom, drawer]) => {
+  wing.value = typeof nextWing === "string" ? nextWing : undefined
+  room.value = typeof nextRoom === "string" && wing.value ? nextRoom : undefined
+  if (drawer && wing.value && room.value) void open(drawer, wing.value, room.value)
+  else { ++openRequest; opened.value = undefined; openError.value = null }
+}, { immediate: true })
+
+async function open(id: string, selectedWing: string, selectedRoom: string): Promise<void> {
+  const request = ++openRequest
+  opened.value = undefined
   openError.value = null
   try {
-    const drawer = await client.drawer(wing.value, room.value, summary.name ?? summary.id)
+    const drawer = await client.drawer(selectedWing, selectedRoom, id)
+    if (request !== openRequest) return
     opened.value = { drawer }
     // History and duplicates are extra: a failure of either must not hide the drawer.
     const [history, similar] = await Promise.allSettled([client.drawerHistory(drawer.id), client.drawerDuplicates(drawer.id)])
+    if (request !== openRequest) return
     opened.value = {
       drawer,
       history: history.status === "fulfilled" ? history.value : undefined,
       similar: similar.status === "fulfilled" ? similar.value.similar : undefined,
     }
   } catch (caught) {
-    openError.value = asApiError(caught)
+    if (request === openRequest) openError.value = asApiError(caught)
   }
 }
 
@@ -69,13 +90,14 @@ const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.va
   </PageHeader>
   <ErrorNotice :error="wings.error.value ?? detail.error.value ?? drawers.error.value ?? openError" @retry="wings.refresh()" />
 
-  <div class="split">
+  <div class="resource-layout" :class="{ 'has-detail': !!selectedId }">
+  <div class="resource-list split">
     <section class="panel">
       <h2>Wings</h2>
       <Skeleton v-if="!wings.data.value && !wings.error.value" height="6rem" />
       <EmptyState v-else-if="!wings.data.value?.length" title="No wings yet" hint="Mine a directory or write a diary entry to create one." />
       <template v-for="entry in wings.data.value" :key="entry.id">
-        <button type="button" class="list-item" :class="{ active: wing === entry.name }" @click="wing = entry.name">
+        <button type="button" class="list-item" :class="{ active: wing === entry.name }" @click="choose({ wing: entry.name, room: undefined, drawer: undefined })">
           {{ entry.name }} <small>{{ entry.rooms }} rooms · {{ entry.drawers }} drawers</small>
         </button>
         <template v-if="wing === entry.name">
@@ -86,7 +108,7 @@ const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.va
             class="list-item"
             style="padding-left: 1.6rem"
             :class="{ active: room === child.name }"
-            @click="room = child.name"
+            @click="choose({ room: child.name, drawer: undefined })"
           >
             {{ child.name }} <small>{{ child.drawers }}</small>
           </button>
@@ -98,7 +120,7 @@ const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.va
       <h2>Drawers <span v-if="wing" class="muted" style="text-transform: none">{{ wing }}<template v-if="room"> / {{ room }}</template></span></h2>
       <EmptyState v-if="!room" title="Choose a room" hint="Pick a wing, then one of its rooms." />
       <EmptyState v-else-if="drawers.data.value && !drawers.data.value.length" title="This room is empty" />
-      <div v-for="entry in drawers.data.value" :key="entry.id" class="hit">
+      <div v-for="entry in drawers.data.value" :key="entry.id" class="hit selectable-hit" role="button" tabindex="0" :aria-pressed="selectedId === entry.id" :aria-label="`Read drawer ${entry.name ?? shortId(entry.id)}`" @click="choose({ drawer: entry.id })" @keydown.enter.prevent="choose({ drawer: entry.id })" @keydown.space.prevent="choose({ drawer: entry.id })">
         <div class="hit-meta">
           <strong style="color: var(--p-text-color)">{{ entry.name ?? shortId(entry.id) }}</strong>
           <Tag :value="entry.source.kind" severity="secondary" />
@@ -106,14 +128,14 @@ const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.va
           <span>{{ ago(entry.created_at) }}</span>
         </div>
         <div>{{ entry.preview }}</div>
-        <Button label="Open" size="small" text @click="open(entry)" />
       </div>
       <Button v-if="canLoadMore" label="Load more" size="small" severity="secondary" outlined @click="limit = Math.min(200, limit + 50)" />
     </section>
   </div>
-
-  <Dialog :visible="!!opened" modal :header="opened?.drawer.name ?? (opened ? shortId(opened.drawer.id) : '')" :style="{ width: 'min(52rem, 95vw)' }" @update:visible="opened = undefined">
-    <template v-if="opened">
+  <DetailDrawer v-if="selectedId" :title="opened?.drawer.name ?? shortId(selectedId)" :selection-key="selectedId" @close="choose({ drawer: undefined })">
+    <p v-if="openError" role="alert">{{ openError.message }}</p>
+    <p v-else-if="!opened" role="status">Loading drawer…</p>
+    <template v-else>
       <dl class="facts" style="margin-bottom: 1rem">
         <div><dt>Id</dt><dd class="mono">{{ opened.drawer.id }}</dd></div>
         <div><dt>Source</dt><dd>{{ opened.drawer.source.kind }} <span class="muted">{{ opened.drawer.source.uri ?? opened.drawer.source.origin?.document ?? "" }}</span></dd></div>
@@ -138,5 +160,6 @@ const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.va
         </div>
       </template>
     </template>
-  </Dialog>
+  </DetailDrawer>
+  </div>
 </template>
