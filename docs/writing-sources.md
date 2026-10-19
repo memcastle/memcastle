@@ -232,6 +232,9 @@ Set `needs_credentials = true` under `[capabilities]` when every miner needs a s
 leave it `false` for a source that can also mine public material without one.
 An enabled miner without a reference can run the optional source, but `source-credential` returns an error when called
 without a selection, so the source must handle that result and use its public mode or a separately consented fallback.
+That absent optional selection is not a permission denial: if the source later fails, the daemon reports the later
+failure rather than replacing it with the lookup error.
+Calling `source-credential` without the manifest's grant is a permission denial, including during `normalize`.
 When a miner or its source configuration does select a reference, the daemon still requires it to resolve before the
 miner can run.
 For example, a source may separately grant `GH_TOKEN` under `permissions.env`; that grant is independent of a job's

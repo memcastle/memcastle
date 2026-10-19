@@ -28,7 +28,7 @@ use crate::source::manifest::check_compatible;
 
 use super::adapter::{Discovery, SourceAdapter};
 use host::memcastle::source::types as wit;
-use host::{HostState, Source, SourcePre, TokenGrant};
+use host::{CredentialSelection, HostState, Source, SourcePre, TokenGrant};
 
 /// How often the engine's epoch advances, which is the resolution of a source's time limit.
 const EPOCH_TICK: Duration = Duration::from_millis(50);
@@ -274,7 +274,12 @@ impl Inner {
             self.memory_bytes,
             self.timeout,
             grant,
-            selected,
+            CredentialSelection {
+                value: selected,
+                optional: granted
+                    && self.permissions.credential
+                    && !self.capabilities.needs_credentials,
+            },
             self.selected_env.as_deref(),
         )
         .map_err(|message| self.failed(message))?;
