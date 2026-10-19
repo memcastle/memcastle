@@ -466,6 +466,9 @@ async fn shared_source_defaults_need_explicit_approval_before_they_select_a_diff
     daemon.shutdown().await;
 }
 
+// Waiting for a real supervisor tick proves a disabled schedule never runs, but costs several seconds per OS.
+// The Linux slow suite exercises it once instead of delaying every basic suite.
+#[cfg(feature = "slow-tests")]
 #[tokio::test]
 async fn a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_disabled() {
     let daemon = TestDaemon::start().await;
