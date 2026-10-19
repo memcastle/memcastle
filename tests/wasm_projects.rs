@@ -1,9 +1,9 @@
-//! Source projects end to end: `memcastle source init`, `build`, `test` and `package`, the sandbox a component runs
+//! Source projects end to end: local fixtures, `memcastle source build`, `test` and `package`, the sandbox a component runs
 //! in, and installing the result through the CLI (docs/adr/026, docs/writing-sources.md).
 //!
 //! Every project here is built for real with `cargo build --target wasm32-wasip2`, into one shared target directory
 //! and from one shared lockfile (`common::wasm`), so the dependencies compile once and nothing resolves against the
-//! network. A test that drives the CLI must call `share_target_of` after `source init`: forgetting it builds in release
+//! network. A test that drives the CLI must call `share_target_of` after creating a fixture: forgetting it builds in release
 //! into a `target/` of its own and recompiles every dependency, which was two of the slowest tests here. Where a test needs a misbehaving source it scaffolds a project and patches the
 //! source: the sandbox is only proven by running code that tries to leave it.
 
@@ -1057,15 +1057,9 @@ fn memcastle_in(dir: &Path) -> Blocking {
 }
 
 #[test]
-fn the_cli_takes_a_source_from_init_to_a_package_without_a_daemon() {
+fn the_cli_takes_a_local_source_project_to_a_package_without_a_daemon() {
     let work = tempfile::tempdir().unwrap();
-
-    memcastle_in(work.path())
-        .args(["source", "init", "notes", "--template", "rust"])
-        .assert()
-        .success()
-        .stdout(contains("Created"))
-        .stdout(contains("memcastle-source.toml"));
+    init(work.path(), "notes", Template::Rust).unwrap();
     share_target_of(work.path(), "notes");
     let project = work.path().join("notes");
     assert!(project.join("wit/memcastle-source.wit").is_file());
@@ -1097,16 +1091,24 @@ fn building_outside_a_source_project_says_how_to_make_one() {
         .assert()
         .failure()
         .stderr(contains("memcastle::source::manifest_invalid"))
-        .stderr(contains("source init"));
+        .stderr(contains("memcastle-source.tpl"));
+}
+
+#[test]
+fn source_init_is_no_longer_a_cli_scaffolding_command() {
+    let work = tempfile::tempdir().unwrap();
+    memcastle_in(work.path())
+        .args(["source", "init", "notes"])
+        .assert()
+        .failure()
+        .stderr(contains("unrecognized subcommand 'init'"));
+    assert!(!work.path().join("notes").exists());
 }
 
 #[test]
 fn a_failing_conformance_case_fails_the_test_command_and_names_what_broke() {
     let work = tempfile::tempdir().unwrap();
-    memcastle_in(work.path())
-        .args(["source", "init", "broken"])
-        .assert()
-        .success();
+    init(work.path(), "broken", Template::Rust).unwrap();
     share_target_of(work.path(), "broken");
     let project = work.path().join("broken");
     // The cases expect `alpha`; the source now disagrees about what the first file says.
@@ -1142,10 +1144,7 @@ async fn the_cli_installs_lists_disables_and_removes_a_source_and_never_consents
             .await;
 
     let work = tempfile::tempdir().unwrap();
-    memcastle_in(work.path())
-        .args(["source", "init", "notes"])
-        .assert()
-        .success();
+    init(work.path(), "notes", Template::Rust).unwrap();
     share_target_of(work.path(), "notes");
     let project = work.path().join("notes");
     memcastle_in(&project)
@@ -1226,23 +1225,11 @@ async fn the_cli_installs_lists_disables_and_removes_a_source_and_never_consents
 }
 
 #[test]
-fn init_can_create_the_project_somewhere_other_than_the_working_directory() {
+fn an_internal_project_fixture_is_written_to_the_requested_parent() {
     let here = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
 
-    memcastle_in(here.path())
-        .args([
-            "source",
-            "init",
-            "placed",
-            "--template",
-            "python",
-            "--parent",
-        ])
-        .arg(elsewhere.path())
-        .assert()
-        .success()
-        .stdout(contains("python template"));
+    init(elsewhere.path(), "placed", Template::Python).unwrap();
 
     assert!(elsewhere.path().join("placed/app.py").is_file());
     assert!(!here.path().join("placed").exists());

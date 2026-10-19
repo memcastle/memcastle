@@ -23,7 +23,7 @@
 //! daemon reads when available. `migrate` alone connects to storage from the CLI;
 //! `daemon start`/`daemon restart` also manage the daemon
 //! process (registry file plus spawning `serve`) — see `docs/architecture.md`
-//! for the full rationale. The local tooling (`source init|build|test|package|index|keygen` through [`source`], and
+//! for the full rationale. The local tooling (`source build|test|package|index|keygen` through [`source`], and
 //! `integration` through [`integration`]) works on files with no daemon and touches neither `store` nor `jobs`.
 
 #![allow(clippy::result_large_err)]

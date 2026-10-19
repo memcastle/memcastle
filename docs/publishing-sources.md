@@ -126,7 +126,8 @@ The first index that offers a name decides, in the order of `mining.registries`.
 
 Nothing here needs a service or an account: a registry is a directory of archives and one index file.
 
-1. **Scaffold, build and test**: `memcastle source init`, `memcastle source build`, `memcastle source test`.
+1. **Scaffold, build and test**: render `memcastle-source.tpl` with GitTPL, then run `memcastle source build` and
+   `memcastle source test` from the rendered project.
 2. **Bump `source.version`** in `memcastle-source.toml` for a new release.
    A version never changes once published.
 3. **Package**: `memcastle source package` writes `dist/<name>-<version>.tar.gz` and `dist/<name>-<version>.tar.gz.sha256`

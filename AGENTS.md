@@ -25,7 +25,7 @@ An invariant nothing checks is a comment, and it will be violated.
    directly (`completions` calls neither: it prints a script locally).
    (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
    via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.
-   `source init`, `build`, `test`, `package`, `index` and `keygen` work on a project directory or on archives with no
+   `source build`, `test`, `package`, `index` and `keygen` work on a project directory or on archives with no
    daemon at all, through `crate::source`, which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`
    nor the network, and `source install` of a file or a project directory reads it locally to show its permissions before
    calling the daemon.

@@ -1,4 +1,4 @@
-//! `memcastle source init`: a new source project that builds, passes the conformance cases and can be packaged
+//! Internal project fixtures used to exercise the runtime; new providers scaffold through memcastle-source.tpl.
 //! as soon as it is created.
 //!
 //! Every template is a complete, tiny source with the same behaviour (the `.txt` files of a flat directory) so that
