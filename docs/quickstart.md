@@ -95,6 +95,8 @@ memcastle wake-up --agent-identity me --wing my-project
 
 `search` matches the words you stored (and, once you configure an [embedding provider](configuration.md#embeddings),
 their meaning), and shows each hit with its score and the start of its content.
+To enable semantic search, configure a dedicated embedding model, start the daemon, run
+`memcastle doctor`, then `memcastle embed test --text 'a sample sentence'` before running `memcastle embed`.
 `wake-up` builds the context an agent would load at the start of a session.
 Piped, or with `--json`, they print JSON with each drawer's content verbatim,
 so `memcastle search formatter | jq '.[].content'` picks out what you need.

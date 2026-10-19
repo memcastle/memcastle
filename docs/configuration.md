@@ -424,6 +424,8 @@ and has not created the palace, migrated it or touched its jobs.
 
 Semantic and hybrid search rank by vectors, and a vector has to come from a model.
 MemCastle links no model; `[embeddings]` selects how to reach one and keeps credentials out of profile settings.
+Choose a dedicated embedding model that answers an embeddings API request with a numeric vector.
+A chat/completion model or an authenticated chat CLI session does not necessarily provide embeddings.
 Without it the palace works exactly as before and `search` is lexical.
 A vector is *derived* data: it is stored beside the drawer, never replaces its content, and can be recomputed at any time.
 
@@ -512,6 +514,8 @@ base_url = "http://localhost:11434/v1"
 
 [embeddings.providers.router]
 type = "openai"
+provider_id = "openrouter"
+account = "openrouter-main"
 base_url = "https://openrouter.ai/api/v1"
 
 [embeddings.profiles.local]
@@ -528,6 +532,28 @@ dimensions = 1536
 The `openai` type implements the OpenAI embeddings protocol, including compatible endpoints.
 `http` remains available for the legacy single-provider form.
 No OpenAI product plugin is needed to call OpenAI or an OpenAI-compatible service such as OpenRouter.
+Use the provider's documented embedding-capable model ID; a model listed for chat alone may reject `/embeddings`.
+For hosted connections, set the account credential in the *daemon's* environment or the referenced file, not in a
+private CLI credential store.
+With the daemon running, validate each configured profile independently before submitting a sweep:
+
+```sh
+memcastle doctor
+memcastle embed test --profile local --text 'A sample sentence to embed.'
+memcastle embed test --profile bulk --text 'A sample sentence to embed.'
+memcastle embed --profile local
+```
+
+The test is an explicit provider call: it transmits only the supplied sample to the selected endpoint, validates one
+finite vector of the profile's configured dimensions, and creates neither a job nor a stored embedding.
+Omit `--profile` to test the global default; `doctor` inspects configuration and local prerequisites but never sends text
+or confirms remote authentication, model support or endpoint availability.
+If the server rejects credentials, check the selected account; if it returns 404, check the base URL and `/embeddings`
+path before assuming the model is unavailable.
+A dimension mismatch means the provider's returned vector cannot enter the selected space: correct the profile dimensions
+or use a model that returns the configured length, then deliberately re-embed into the new space.
+An explicit `memcastle embed --profile NAME` selects that profile for its job; after a miner run its configured
+`embedding_profile` determines the source-scoped automatic sweep; otherwise the global default is used.
 An installed plugin with an explicit `embedding_provider` module can instead be selected through the same named
 connection/profile model:
 
@@ -591,6 +617,10 @@ This is a lightweight generic provider for a local program with its own client l
 the program owns those credentials, MemCastle never sees them, and the daemon's own `MEMCASTLE_*` variables
 (its auth token included) are removed from the program's environment.
 Everything else is inherited, so `PATH` and the program's own variables work.
+For example, a local adapter can read the JSON `texts` from standard input, invoke a documented embedding-capable CLI
+or SDK for each text, and print `{"embeddings":[...]}` to standard output; configure it as a named `command` connection
+and pin the CLI's actual embedding model and dimensions in a named profile.
+Do not pass ordinary completion output off as embedding vectors or read another CLI's private authentication files.
 
 ### The `http` provider
 

@@ -424,11 +424,95 @@ fn paths(report: &mut Report, config: &Config) {
 }
 
 fn providers(report: &mut Report, config: &Config) {
+    if !config.embeddings.profiles.is_empty() {
+        let default = config.embeddings.default.as_ref();
+        for (name, profile) in &config.embeddings.profiles {
+            let Some(connection) = config.embeddings.providers.get(&profile.provider) else {
+                continue;
+            };
+            // Configuration names may be user-controlled; the report must never echo a secret-looking value.
+            let is_default = default.is_some_and(|selected| selected == name);
+            let check = if is_default {
+                "embeddings"
+            } else {
+                "embeddings alternate"
+            };
+            let (status, summary, remedy) = match connection.provider {
+                EmbeddingProvider::Command
+                    if !connection
+                        .command
+                        .first()
+                        .is_some_and(|cmd| executable_present(cmd)) =>
+                {
+                    (
+                        CheckStatus::Error,
+                        "Configured embedding command is not present.",
+                        Some(
+                            "Install the command or correct its path; then run `memcastle embed test --text 'sample'`.",
+                        ),
+                    )
+                }
+                EmbeddingProvider::Command => (
+                    CheckStatus::Ok,
+                    "Embedding command is configured; its protocol and model have not been tested.",
+                    None,
+                ),
+                EmbeddingProvider::Http | EmbeddingProvider::Openai => {
+                    let available = connection
+                        .account
+                        .as_ref()
+                        .and_then(|id| config.provider_accounts.get(id))
+                        .is_none_or(crate::provider_auth::available);
+                    if !available {
+                        (
+                            CheckStatus::Warning,
+                            "Embedding account credential is unavailable in this process; the daemon may have a different environment.",
+                            Some(
+                                "Make the credential available to the daemon and run `memcastle embed test --text 'sample'`.",
+                            ),
+                        )
+                    } else {
+                        (
+                            CheckStatus::Ok,
+                            "OpenAI-compatible embedding connection and model are configured; endpoint and model have not been tested.",
+                            None,
+                        )
+                    }
+                }
+                EmbeddingProvider::Plugin => (
+                    CheckStatus::Ok,
+                    "Plugin embedding profile is configured; installation and model availability not tested.",
+                    None,
+                ),
+                EmbeddingProvider::External => (
+                    CheckStatus::Skipped,
+                    "External vectors are supplied by callers; no daemon provider to test.",
+                    None,
+                ),
+                EmbeddingProvider::None => (
+                    CheckStatus::Skipped,
+                    "This embedding profile has no provider.",
+                    None,
+                ),
+            };
+            report.add("Providers", check, status, summary, remedy);
+        }
+        if default.is_none() && config.embeddings.provider == EmbeddingProvider::None {
+            report.add("Providers", "embeddings default", CheckStatus::Warning,
+                "No global embedding profile is selected; automatic embedding is off.",
+                Some("Set `embeddings.default` to a configured profile, or select one explicitly for each job."));
+        }
+        report.add("Providers", "embeddings availability", CheckStatus::Skipped,
+            "Doctor never sends text to providers; run `memcastle embed test --profile NAME --text 'sample'` to validate one.", None);
+    }
     let checks = [
         (
             "embeddings",
             config.embeddings.provider == EmbeddingProvider::Command,
-            config.embeddings.provider == EmbeddingProvider::Http,
+            matches!(
+                config.embeddings.provider,
+                EmbeddingProvider::Http | EmbeddingProvider::Openai
+            ),
             &config.embeddings.command,
             config.embeddings.api_key.is_some(),
         ),
@@ -441,6 +525,13 @@ fn providers(report: &mut Report, config: &Config) {
         ),
     ];
     for (name, command, http, args, credential) in checks {
+        if name == "embeddings"
+            && !config.embeddings.profiles.is_empty()
+            && (config.embeddings.default.is_some()
+                || config.embeddings.provider == EmbeddingProvider::None)
+        {
+            continue;
+        }
         if name == "embeddings"
             && config
                 .embeddings
@@ -503,7 +594,9 @@ fn providers(report: &mut Report, config: &Config) {
                 name,
                 CheckStatus::Ok,
                 "No external provider is selected.",
-                None,
+                (name == "embeddings").then_some(
+                    "Configure a named `openai` (OpenAI-compatible) or `command` connection and a model profile in [embeddings]; see docs/configuration.md.",
+                ),
             );
         }
         if command || http {
@@ -1226,6 +1319,95 @@ mod tests {
                 .iter()
                 .any(|finding| finding.check == "embeddings"
                     && finding.summary.contains("Plugin embedding profile"))
+        );
+    }
+
+    #[test]
+    fn named_openai_profiles_are_reported_without_claiming_endpoint_readiness() {
+        let mut config = Config::default();
+        config.embeddings.default = Some("local".into());
+        for name in ["local", "remote"] {
+            config.embeddings.providers.insert(
+                name.into(),
+                crate::config::EmbeddingConnection {
+                    provider: EmbeddingProvider::Openai,
+                    url: Some("https://private-endpoint.invalid/v1".into()),
+                    ..Default::default()
+                },
+            );
+            config.embeddings.profiles.insert(
+                name.into(),
+                crate::config::EmbeddingProfileConfig {
+                    provider: name.into(),
+                    model: "private-model".into(),
+                    dimensions: 768,
+                },
+            );
+        }
+        let mut report = Report::default();
+        providers(&mut report, &config);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "embeddings" && f.summary.contains("OpenAI-compatible"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "embeddings alternate")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "embeddings availability" && f.status == CheckStatus::Skipped)
+        );
+        let output = serde_json::to_string(&report).unwrap();
+        assert!(!output.contains("private-endpoint"));
+        assert!(!output.contains("private-model"));
+    }
+
+    #[test]
+    fn a_missing_named_account_credential_is_a_hint_not_a_claim_about_the_daemon() {
+        let mut config = Config::default();
+        config.embeddings.default = Some("hosted".into());
+        config.embeddings.providers.insert(
+            "hosted".into(),
+            crate::config::EmbeddingConnection {
+                provider: EmbeddingProvider::Openai,
+                provider_id: Some("hosted".into()),
+                account: Some("missing-key".into()),
+                url: Some("https://example.invalid/v1".into()),
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "hosted".into(),
+            crate::config::EmbeddingProfileConfig {
+                provider: "hosted".into(),
+                model: "embedding-model".into(),
+                dimensions: 768,
+            },
+        );
+        let account = format!(
+            "provider_id = 'hosted'\nauth = {{ type = 'bearer', credential = {{ type = 'file', path = {:?} }} }}",
+            "/nonexistent-provider-key"
+        );
+        config
+            .provider_accounts
+            .insert("missing-key".into(), toml::from_str(&account).unwrap());
+        let mut report = Report::default();
+        providers(&mut report, &config);
+        assert_eq!(report.exit_code(), 0);
+        assert!(report.findings.iter().any(|f| f.check == "embeddings"
+            && f.status == CheckStatus::Warning
+            && f.summary.contains("different environment")));
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("nonexistent-provider-key")
         );
     }
 

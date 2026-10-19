@@ -106,25 +106,31 @@ impl HttpEmbedder {
             .send()
             .await
             .map_err(|source| Error::EmbeddingFailed {
-                message: format!("the request failed: {}", source.without_url()),
+                message: if source.is_timeout() {
+                    "embedding endpoint timed out; check its address, model server and timeout_secs".into()
+                } else {
+                    // Even transport errors may contain URL userinfo or provider-supplied text.
+                    "embedding endpoint is unreachable; check its address and that the server is running".into()
+                },
             })?;
         let status = response.status();
         if !status.is_success() {
-            // A remote endpoint can echo the request's token; never surface its body for authenticated calls.
-            let body = if self.account.is_some() || self.api_key.is_some() {
-                "check the provider's account credential and endpoint".to_owned()
-            } else {
-                response
-                    .text()
-                    .await
-                    .unwrap_or_default()
-                    .trim()
-                    .chars()
-                    .take(300)
-                    .collect()
+            // An upstream can echo credentials even without our authentication settings.
+            let hint = match status.as_u16() {
+                401 | 403 => {
+                    "authentication was refused; check the selected provider account and its credential"
+                }
+                404 => {
+                    "endpoint returned 404; check the base URL and that it exposes /embeddings (then check the model)"
+                }
+                400 | 422 => {
+                    "request was rejected; check the embedding model name and supported dimensions"
+                }
+                429 => "provider rate limit reached; retry later or use another configured profile",
+                _ => "check the endpoint and its embedding model",
             };
             return Err(Error::EmbeddingFailed {
-                message: format!("the endpoint answered {status}: {body}"),
+                message: format!("the endpoint answered {status}: {hint}"),
             });
         }
         let mut parsed: Response =
@@ -459,7 +465,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_error_status_is_reported_with_the_servers_message_and_never_the_key() {
+    async fn an_authentication_error_explains_the_credential_without_echoing_upstream_text() {
         let (url, _) = stub(StatusCode::UNAUTHORIZED, json!({"error": "sk-secret"})).await;
         let embedder = HttpEmbedder::new(
             url,
@@ -474,11 +480,23 @@ mod tests {
             .expect_err("401")
             .to_string();
         assert!(message.contains("401"), "{message}");
-        assert!(
-            message.contains("check the provider's account credential"),
-            "{message}"
-        );
+        assert!(message.contains("authentication was refused"), "{message}");
         assert!(!message.contains("sk-secret"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn a_missing_embedding_endpoint_does_not_pretend_a_model_is_unsupported() {
+        let (url, _) = stub(StatusCode::NOT_FOUND, json!({"error": "secret"})).await;
+        let embedder =
+            HttpEmbedder::new(url, "model".into(), None, Duration::from_secs(5)).unwrap();
+        let message = embedder
+            .run(&["sample".into()])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("404"));
+        assert!(message.contains("base URL"));
+        assert!(!message.contains("secret"));
     }
 
     #[tokio::test]

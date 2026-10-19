@@ -77,6 +77,152 @@ async fn daemon_with_embeddings(url: &str) -> TestDaemon {
     .await
 }
 
+#[tokio::test]
+async fn testing_named_profiles_uses_each_endpoint_without_creating_a_job() {
+    use memcastle::config::{EmbeddingConnection, EmbeddingProfileConfig};
+    let first = embedding_stub().await;
+    let second = embedding_stub().await;
+    let daemon = TestDaemon::start_configured(move |config| {
+        config.embeddings.default = Some("local".into());
+        for (name, url) in [("local", first), ("other", second)] {
+            config.embeddings.providers.insert(
+                name.into(),
+                EmbeddingConnection {
+                    provider: EmbeddingProvider::Openai,
+                    url: Some(url),
+                    ..Default::default()
+                },
+            );
+            config.embeddings.profiles.insert(
+                name.into(),
+                EmbeddingProfileConfig {
+                    provider: name.into(),
+                    model: "stub".into(),
+                    dimensions: DIMENSION,
+                },
+            );
+        }
+        config.embeddings.profiles.insert(
+            "wrong-size".into(),
+            EmbeddingProfileConfig {
+                provider: "local".into(),
+                model: "stub".into(),
+                dimensions: 3,
+            },
+        );
+        config.embeddings.providers.insert(
+            "external".into(),
+            EmbeddingConnection {
+                provider: EmbeddingProvider::External,
+                ..Default::default()
+            },
+        );
+        config.embeddings.profiles.insert(
+            "external".into(),
+            EmbeddingProfileConfig {
+                provider: "external".into(),
+                model: "caller".into(),
+                dimensions: 3,
+            },
+        );
+    })
+    .await;
+    let base = &daemon.base_url;
+    let initial_jobs: Value = client()
+        .get(format!("{base}/api/jobs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    for (profile, expected) in [(None, "local"), (Some("other"), "other")] {
+        let response = client()
+            .post(format!("{base}/api/embeddings/test"))
+            .json(&json!({ "profile": profile, "text": "sample sentence" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let result: Value = response.json().await.unwrap();
+        assert_eq!(result["profile"], expected);
+        assert_eq!(result["dimensions"], DIMENSION);
+        assert!(result.get("text").is_none());
+        assert!(result.get("embedding").is_none());
+    }
+    // The CLI and every other client must use the daemon's same provider-selection path.
+    let selected = memcastle::client::DaemonClient::discover(
+        &daemon.palace_path,
+        "127.0.0.1:1".parse().unwrap(),
+    )
+    .test_embedding(Some("other".into()), "client sample")
+    .await
+    .unwrap();
+    assert_eq!(selected.profile, "other");
+    assert_eq!(selected.dimensions, DIMENSION);
+    let output = tokio::process::Command::new(assert_cmd::cargo::cargo_bin("memcastle"))
+        .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
+        .args([
+            "--json",
+            "embed",
+            "test",
+            "--profile",
+            "other",
+            "--text",
+            "CLI sample",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let answer: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer["profile"], "other");
+    assert_eq!(answer["dimensions"], DIMENSION);
+    assert!(answer.get("embedding").is_none());
+    let jobs: Value = client()
+        .get(format!("{base}/api/jobs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        jobs.as_array().unwrap().len(),
+        initial_jobs.as_array().unwrap().len()
+    );
+    let response = client()
+        .post(format!("{base}/api/embeddings/test"))
+        .json(&json!({ "profile": "missing", "text": "sample" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    for (profile, text, status, diagnostic) in [
+        ("wrong-size", "sample", 502, "dimension_mismatch"),
+        ("external", "sample", 400, "invalid"),
+        ("local", " ", 400, "invalid"),
+    ] {
+        let response = client()
+            .post(format!("{base}/api/embeddings/test"))
+            .json(&json!({ "profile": profile, "text": text }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        let error: Value = response.json().await.unwrap();
+        assert!(
+            error["code"].as_str().unwrap().contains(diagnostic),
+            "{error}"
+        );
+    }
+    daemon.shutdown().await;
+}
+
 fn client() -> reqwest::Client {
     reqwest::Client::new()
 }

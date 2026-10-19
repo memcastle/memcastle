@@ -1117,6 +1117,9 @@ pub struct AuditArgs {
 /// Arguments for `memcastle embed`.
 #[derive(Debug, Args)]
 pub struct EmbedArgs {
+    /// Test a selected profile without creating an embedding job.
+    #[command(subcommand)]
+    pub action: Option<EmbedAction>,
     /// Only embed the drawers of this wing, by name.
     #[arg(long)]
     pub wing: Option<String>,
@@ -1126,6 +1129,67 @@ pub struct EmbedArgs {
     /// Recompute stale or all vectors in this profile (default: missing only).
     #[arg(long, value_parser = ["missing", "stale", "all"], default_value = "missing")]
     pub refresh: String,
+}
+
+/// Explicit embedding operations that do not submit a job.
+#[derive(Debug, Subcommand)]
+pub enum EmbedAction {
+    /// Send sample text to a configured profile and validate its response.
+    Test {
+        /// Select a profile instead of the global default.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Text sent to the provider; no vector or text is stored.
+        #[arg(long)]
+        text: String,
+    },
+}
+
+#[cfg(test)]
+mod embed_command_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn an_embedding_test_requires_sample_text_and_keeps_job_flags_separate() {
+        let Cli {
+            command: Command::Embed(args),
+            ..
+        } = Cli::try_parse_from([
+            "memcastle",
+            "embed",
+            "test",
+            "--profile",
+            "local",
+            "--text",
+            "sample",
+        ])
+        .unwrap()
+        else {
+            panic!("expected embed command")
+        };
+        assert!(
+            matches!(args.action, Some(EmbedAction::Test { profile: Some(name), text }) if name == "local" && text == "sample")
+        );
+        assert!(Cli::try_parse_from(["memcastle", "embed", "test"]).is_err());
+        let Cli {
+            command: Command::Embed(args),
+            ..
+        } = Cli::try_parse_from([
+            "memcastle",
+            "embed",
+            "--profile",
+            "local",
+            "--refresh",
+            "stale",
+        ])
+        .unwrap()
+        else {
+            panic!("expected embed command")
+        };
+        assert!(args.action.is_none());
+        assert_eq!(args.profile.as_deref(), Some("local"));
+    }
 }
 
 /// Arguments for `memcastle extract`.

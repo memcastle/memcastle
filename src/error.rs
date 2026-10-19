@@ -725,7 +725,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::embed::not_configured),
         help(
-            "set `provider = \"command\"` or `\"http\"` in the `[embeddings]` section of the config file (see docs/configuration.md), or send vectors yourself with `PUT /api/drawers/{{id}}/embedding`"
+            "configure a named `[embeddings.providers.NAME]` connection and `[embeddings.profiles.NAME]` model, set `embeddings.default` or select --profile, then run `memcastle embed test --text 'sample'`; see docs/configuration.md"
         )
     )]
     EmbeddingsNotConfigured,
@@ -750,7 +750,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::embed::failed),
         help(
-            "check the `[embeddings]` section of the config and that the provider is reachable; semantic search falls back to lexical until it works"
+            "check the selected embedding connection, model, credential and endpoint, then run `memcastle embed test --profile NAME --text 'sample'`; semantic search falls back to lexical until it works"
         )
     )]
     EmbeddingFailed {

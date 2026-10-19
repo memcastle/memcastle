@@ -149,6 +149,7 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/source-packages"),
         (Method::GET, "/api/plugins"),
         (Method::GET, "/api/embedding-providers"),
+        (Method::POST, "/api/embeddings/test"),
         (Method::POST, "/api/plugins"),
         (Method::GET, "/api/plugins/example"),
         (Method::DELETE, "/api/plugins/example"),

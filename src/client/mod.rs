@@ -862,6 +862,20 @@ impl DaemonClient {
         .await
     }
 
+    /// Test one configured profile without submitting a job or storing a vector.
+    pub async fn test_embedding(
+        &self,
+        profile: Option<String>,
+        text: &str,
+    ) -> Result<crate::app::EmbeddingTestResult> {
+        self.send(
+            self.http
+                .post(format!("{}/api/embeddings/test", self.base_url))
+                .json(&json!({ "profile": profile, "text": text })),
+        )
+        .await
+    }
+
     /// Submit an entity extraction sweep — see `AppServices::submit_extract`.
     ///
     /// # Errors
