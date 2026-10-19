@@ -3,9 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 const chromium = ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"].find(existsSync)
+// Hosted CI's installed Chromium can hang on startup under the coverage runner; run the browser check explicitly there.
+const browserAvailable = !!chromium && (!process.env.CI || process.env.MEMCASTLE_BROWSER_TESTS === "1")
 
 // Happy DOM cannot evaluate viewport media rules; check the shipped CSS in a real rendering engine when available.
-describe.skipIf(!chromium)("the details panel at browser viewport widths", () => {
+describe.skipIf(!browserAvailable)("the details panel at browser viewport widths", () => {
   const stylesheet = readFileSync("src/styles.css", "utf8")
   function layout(width: number): { columns: string; list: number; panel: number; listTop: number; panelTop: number } {
     const page = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${stylesheet}</style>
