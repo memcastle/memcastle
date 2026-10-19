@@ -155,6 +155,11 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
             )));
         }
     }
+    if manifest.permissions.credential && !manifest.capabilities.needs_credentials {
+        return Err(invalid(
+            "permissions.credential is set, so capabilities.needs_credentials must be true",
+        ));
+    }
     if let Some(oauth) = &manifest.permissions.oauth {
         oauth.validate().map_err(invalid)?;
         // The flag is what `source list` and a miner's activation check read, so a source that signs in must say so.
@@ -359,6 +364,17 @@ read = ["locator"]
     }
 
     const OAUTH: &str = "\n[capabilities]\nneeds_credentials = true\n\n[permissions.oauth]\nclient_id = \"abc\"\nscopes = [\"read\"]\ntoken_url = \"https://auth.example.com/token\"\ndevice_authorization_url = \"https://auth.example.com/device\"\n";
+
+    #[test]
+    fn selected_credential_permission_requires_a_credential_capability() {
+        let unflagged = format!("{GOOD}\n[permissions]\ncredential = true\n");
+        let error = parse(&unflagged, &[]).unwrap_err().to_string();
+        assert!(error.contains("needs_credentials"), "{error}");
+        let flagged = format!(
+            "{GOOD}\n[capabilities]\nneeds_credentials = true\n\n[permissions]\ncredential = true\n"
+        );
+        assert!(parse(&flagged, &[]).unwrap().permissions.credential);
+    }
 
     #[test]
     fn a_source_that_signs_in_declares_its_endpoints_and_says_it_needs_credentials() {

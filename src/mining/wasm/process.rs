@@ -5,6 +5,7 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -36,6 +37,8 @@ pub(super) struct ProcessGrant {
     pub allowed: Vec<String>,
     /// The environment variables the child may see, resolved from the daemon's own environment.
     pub env: Vec<(String, String)>,
+    /// Do not implicitly inherit the selected credential even when its reference is PATH or HOME.
+    pub excluded_env: Option<String>,
     /// How long one run may take.
     pub timeout: Duration,
 }
@@ -99,7 +102,34 @@ pub(super) fn run(
     // something the guest is granted.
     let mut stdout_file = scratch_file(program)?;
     let mut stderr_file = scratch_file(program)?;
-    let mut command = Command::new(program);
+    // If PATH itself is the selected credential, resolve the granted program on the host first,
+    // rather than passing the credential on to the child just so Command can find its executable.
+    let executable = if grant.excluded_env.as_deref() == Some("PATH")
+        && !grant.env.iter().any(|(name, _)| name == "PATH")
+    {
+        std::env::var_os("PATH")
+            .and_then(|paths| {
+                std::env::split_paths(&paths).find_map(|dir| {
+                    let path = dir.join(program);
+                    if path.is_file() {
+                        return Some(path);
+                    }
+                    #[cfg(windows)]
+                    if path.with_extension("exe").is_file() {
+                        return Some(path.with_extension("exe"));
+                    }
+                    None
+                })
+            })
+            .ok_or_else(|| {
+                ProcessError::Failed(format!(
+                    "`{program}` could not be found on the daemon's PATH"
+                ))
+            })?
+    } else {
+        PathBuf::from(program)
+    };
+    let mut command = Command::new(executable);
     command
         .args(args)
         .env_clear()
@@ -114,6 +144,9 @@ pub(super) fn run(
     // No other variable is inherited, so a token in the daemon's environment is not one a granted `git` can read
     // unless the manifest asked for it.
     for inherited in ["PATH", "SystemRoot", "HOME"] {
+        if grant.excluded_env.as_deref() == Some(inherited) {
+            continue;
+        }
         if let Ok(value) = std::env::var(inherited) {
             command.env(inherited, value);
         }
@@ -195,6 +228,7 @@ mod tests {
         ProcessGrant {
             allowed: allowed.iter().map(|s| (*s).to_string()).collect(),
             env: vec![],
+            excluded_env: None,
             timeout: Duration::from_secs(5),
         }
     }
@@ -207,6 +241,27 @@ mod tests {
             run(&grant(&[]), "echo", &[], None),
             Err(ProcessError::Denied(_))
         ));
+    }
+
+    #[test]
+    fn a_selected_path_reference_is_not_inherited_by_a_host_run_program() {
+        let mut granted = grant(&["env"]);
+        granted.excluded_env = Some("PATH".into());
+        let output = run(&granted, "env", &[], None).unwrap();
+        let lines = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            !lines.lines().any(|line| line.starts_with("PATH=")),
+            "{lines}"
+        );
+        // A separately declared manifest env grant is deliberate rather than ambient inheritance.
+        let path = std::env::var("PATH").unwrap();
+        granted.env.push(("PATH".into(), path.clone()));
+        let output = run(&granted, "env", &[], None).unwrap();
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains(&format!("PATH={path}"))
+        );
     }
 
     #[test]

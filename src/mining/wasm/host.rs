@@ -13,7 +13,7 @@ use wasmtime::StoreLimits;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::domain::{AccessTokens, OAuthRequirement, Permissions};
+use crate::domain::{AccessTokens, OAuthRequirement, Permissions, Secret};
 
 use super::process::{self, ProcessError, ProcessGrant};
 
@@ -45,6 +45,8 @@ pub(super) struct HostState {
     pub denied: Option<String>,
     /// How `access-token` is answered; none for a source that declared no sign-in, and for `normalize`.
     tokens: Option<TokenGrant>,
+    /// Kept separate from WASI and the process environment.
+    credential: Option<Secret>,
     /// Why the last token was not given, kept so that a failure the source makes of it is reported as what it is: a
     /// credential that needs signing in again, and not whatever message the source wrote.
     pub credential_failure: Option<crate::Error>,
@@ -103,6 +105,15 @@ impl memcastle::source::host::Host for HostState {
             }
         }
     }
+
+    fn source_credential(&mut self) -> Result<String, String> {
+        let Some(value) = &self.credential else {
+            let message = "no selected source credential is available here: grant `[permissions] credential = true` and select an env or file reference for this job".to_string();
+            self.denied.get_or_insert_with(|| message.clone());
+            return Err(message);
+        };
+        Ok(value.expose().to_owned())
+    }
 }
 
 /// The directories a source may read, given what the manifest asked for and the place being mined.
@@ -154,6 +165,8 @@ pub(super) fn state(
     memory_bytes: usize,
     timeout: Duration,
     tokens: Option<TokenGrant>,
+    credential: Option<Secret>,
+    selected_env: Option<&str>,
 ) -> Result<HostState, String> {
     let mut wasi = WasiCtxBuilder::new();
     for directory in readable_directories(permissions, locator) {
@@ -183,10 +196,14 @@ pub(super) fn state(
         process: ProcessGrant {
             allowed: permissions.process.clone(),
             env,
+            excluded_env: selected_env
+                .filter(|name| !permissions.env.iter().any(|allowed| allowed == name))
+                .map(str::to_string),
             timeout,
         },
         denied: None,
         tokens,
+        credential,
         credential_failure: None,
     })
 }
@@ -258,6 +275,8 @@ mod tests {
             16 * 1024 * 1024,
             Duration::from_secs(5),
             None,
+            None,
+            None,
         )
         .unwrap()
     }
@@ -296,6 +315,45 @@ mod tests {
             .collect();
         assert_eq!(names, ["PATH"]);
         assert!(host_state(&Permissions::default()).process.env.is_empty());
+    }
+
+    #[test]
+    fn a_selected_credential_is_only_available_from_its_host_function() {
+        use self::memcastle::source::host::Host as _;
+
+        let permissions = Permissions {
+            credential: true,
+            ..Permissions::default()
+        };
+        let mut granted = state(
+            &permissions,
+            None,
+            1024 * 1024,
+            Duration::from_secs(1),
+            None,
+            Some(Secret::new("selected-value")),
+            None,
+        )
+        .unwrap();
+        assert_eq!(granted.source_credential().unwrap(), "selected-value");
+        assert!(granted.process.env.is_empty());
+        let state = state(
+            &permissions,
+            None,
+            1024 * 1024,
+            Duration::from_secs(1),
+            None,
+            Some(Secret::new("selected-value")),
+            Some("PATH"),
+        )
+        .unwrap();
+        assert_eq!(state.process.excluded_env.as_deref(), Some("PATH"));
+        assert!(host_state(&permissions).source_credential().is_err());
+        assert!(
+            host_state(&Permissions::default())
+                .source_credential()
+                .is_err()
+        );
     }
 
     #[test]

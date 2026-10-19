@@ -78,6 +78,10 @@ struct Inner {
     name: String,
     /// Credential key selected by the durable job; absent is the legacy source-keyed default.
     token_key: Option<String>,
+    /// Only an explicitly selected, consented credential; never part of the component cache.
+    credential: Option<crate::domain::Secret>,
+    /// An env reference might itself name a normally inherited process variable such as PATH.
+    selected_env: Option<String>,
     description: String,
     capabilities: SourceCapabilities,
     permissions: Permissions,
@@ -137,6 +141,19 @@ impl WasmAdapter {
         tokens: Option<Arc<dyn AccessTokens>>,
         configuration: Option<String>,
     ) -> Result<Self> {
+        Self::load_with_credential(manifest, bytes, mining, tokens, configuration, None, None)
+    }
+
+    /// Load a job's consented source with its in-memory selected credential.
+    pub fn load_with_credential(
+        manifest: &SourceManifest,
+        bytes: &[u8],
+        mining: &MiningConfig,
+        tokens: Option<Arc<dyn AccessTokens>>,
+        configuration: Option<String>,
+        credential: Option<crate::domain::Secret>,
+        selected_env: Option<String>,
+    ) -> Result<Self> {
         check_compatible(manifest)?;
         let name = manifest.source.name.clone();
         let incompatible = |reason: String| Error::SourceIncompatible {
@@ -185,6 +202,8 @@ impl WasmAdapter {
         );
         let mut inner = Inner {
             token_key: configuration,
+            credential,
+            selected_env,
             name,
             description: manifest.source.description.clone(),
             capabilities: manifest.capabilities,
@@ -244,8 +263,21 @@ impl Inner {
             }),
             _ => None,
         };
-        let state = host::state(permissions, locator, self.memory_bytes, self.timeout, grant)
-            .map_err(|message| self.failed(message))?;
+        let selected = if granted && self.permissions.credential {
+            self.credential.clone()
+        } else {
+            None
+        };
+        let state = host::state(
+            permissions,
+            locator,
+            self.memory_bytes,
+            self.timeout,
+            grant,
+            selected,
+            self.selected_env.as_deref(),
+        )
+        .map_err(|message| self.failed(message))?;
         let mut store = Store::new(self.engine, state);
         store.limiter(|state| &mut state.limits);
         // At least one tick, plus one because the current tick may be nearly over.

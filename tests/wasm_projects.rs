@@ -17,7 +17,7 @@ use assert_cmd::cargo::cargo_bin;
 use common::TestDaemon;
 use common::wasm::{seed_lockfile, share_target, share_target_of, shared_target};
 use memcastle::config::MiningConfig;
-use memcastle::domain::{Candidate, Cursor, RawDocument, SourceKind, SourceRef};
+use memcastle::domain::{Candidate, Cursor, RawDocument, Secret, SourceKind, SourceRef};
 use memcastle::error::Error;
 use memcastle::mining::adapter::SourceAdapter;
 use memcastle::mining::wasm::WasmAdapter;
@@ -72,6 +72,402 @@ fn candidate(handle: &str) -> Candidate {
         cursor_after: Cursor::Null,
         handle: handle.to_string(),
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_consented_acquisition_calls_receive_the_selected_credential() {
+    let built = scaffold(
+        "selected-credential",
+        Template::Rust,
+        |lib| {
+            lib
+            .replace(
+                "if !Path::new(&locator).is_dir() {",
+                "let value = memcastle::source::host::source_credential().map_err(SourceError::Failed)?;\n        if value != \"account-one\" { return Err(SourceError::Failed(\"wrong account\".into())); }\n        if !Path::new(&locator).is_dir() {",
+            )
+            .replace(
+                "let after = parse_cursor(&cursor)?;",
+                "memcastle::source::host::source_credential().map_err(SourceError::Failed)?;\n        let after = parse_cursor(&cursor)?;",
+            )
+            .replace(
+                "let path: PathBuf = Path::new(&source.locator).join(&candidate.handle);",
+                "memcastle::source::host::source_credential().map_err(SourceError::Failed)?;\n        let path: PathBuf = Path::new(&source.locator).join(&candidate.handle);",
+            )
+            .replace(
+                "let metadata: Value = serde_json::from_str(&raw.metadata).unwrap_or(Value::Null);",
+                "if memcastle::source::host::source_credential().is_ok() { return Err(SourceError::Failed(\"normalize received a credential\".into())); }\n        let metadata: Value = serde_json::from_str(&raw.metadata).unwrap_or(Value::Null);",
+            )
+        },
+        |manifest| {
+            manifest
+                .replace("needs_credentials = false", "needs_credentials = true")
+                .replace(
+                    "[permissions.filesystem]",
+                    "[permissions]\ncredential = true\n\n[permissions.filesystem]",
+                )
+        },
+    );
+    let bytes = std::fs::read(built.project.component_path()).unwrap();
+    let adapter = WasmAdapter::load_with_credential(
+        &built.project.manifest,
+        &bytes,
+        &MiningConfig::default(),
+        None,
+        Some("account-one".into()),
+        Some(Secret::new("account-one")),
+        None,
+    )
+    .unwrap();
+    let tree = tempfile::tempdir().unwrap();
+    std::fs::write(tree.path().join("a.txt"), "alpha").unwrap();
+    let identified = source(&adapter, tree.path());
+    let found = adapter
+        .discover(&identified, &Cursor::Null, 10)
+        .await
+        .unwrap();
+    let raw = adapter
+        .read(&identified, &found.candidates[0])
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(adapter.normalize(&raw).unwrap().segments[0].text, "alpha");
+
+    let without =
+        WasmAdapter::load(&built.project.manifest, &bytes, &MiningConfig::default()).unwrap();
+    assert!(matches!(
+        without.identify(tree.path().to_str(), &Default::default()),
+        Err(Error::SourcePermissionDenied { .. })
+    ));
+    let mut ungranted = built.project.manifest.clone();
+    ungranted.permissions.credential = false;
+    let ungranted = WasmAdapter::load_with_credential(
+        &ungranted,
+        &bytes,
+        &MiningConfig::default(),
+        None,
+        None,
+        Some(Secret::new("account-one")),
+        None,
+    )
+    .unwrap();
+    assert!(matches!(
+        ungranted.identify(tree.path().to_str(), &Default::default()),
+        Err(Error::SourcePermissionDenied { .. })
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_component_built_against_the_original_zero_four_host_interface_still_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let (root, _) = init(dir.path(), "original-zero-four", Template::Rust).unwrap();
+    let wit = root.join("wit/memcastle-source.wit");
+    let original = std::fs::read_to_string(&wit).unwrap();
+    std::fs::write(
+        &wit,
+        original.replace("source-credential: func() -> result<string, string>;", ""),
+    )
+    .unwrap();
+    let manifest = root.join("memcastle-source.toml");
+    std::fs::write(
+        &manifest,
+        share_target(
+            &std::fs::read_to_string(&manifest).unwrap(),
+            "original-zero-four",
+        ),
+    )
+    .unwrap();
+    seed_lockfile(&root);
+    let project = Project::open(&root).unwrap();
+    project.build().unwrap();
+    let adapter = load(&Built { _dir: dir, project });
+    let tree = tempfile::tempdir().unwrap();
+    assert_eq!(source(&adapter, tree.path()).source, "original-zero-four");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_named_configurations_use_distinct_files_and_miners_share_their_selected_account() {
+    let built = scaffold(
+        "credential-config-demo",
+        Template::Rust,
+        |lib| {
+            lib
+            .replace("if !Path::new(&locator).is_dir() {",
+                "memcastle::source::host::source_credential().map_err(SourceError::Failed)?;\n        if !Path::new(&locator).is_dir() {")
+            .replace("let after = parse_cursor(&cursor)?;",
+                "memcastle::source::host::source_credential().map_err(SourceError::Failed)?;\n        let after = parse_cursor(&cursor)?;")
+            .replace("let Ok(body) = std::fs::read_to_string(&path) else {\n            return Ok(None);\n        };",
+                "let Ok(_) = std::fs::read_to_string(&path) else { return Ok(None); };\n        let token = memcastle::source::host::source_credential().map_err(SourceError::Failed)?;\n        let body = if token == \"account-one\" { \"work account\" } else if token == \"account-two\" { \"personal account\" } else { \"environment account\" }.to_string();")
+        },
+        |manifest| {
+            manifest
+                .replace("needs_credentials = false", "needs_credentials = true")
+                .replace(
+                    "[permissions.filesystem]",
+                    "[permissions]\ncredential = true\n\n[permissions.filesystem]",
+                )
+        },
+    );
+    let name = &built.project.manifest.source.name;
+    let manifest =
+        std::fs::read_to_string(built.project.dir.join("memcastle-source.toml")).unwrap();
+    let bytes = std::fs::read(built.project.component_path()).unwrap();
+    let archive = memcastle::source::package::pack(&manifest, &bytes, &[]).unwrap();
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let base = &daemon.base_url;
+    let consent = built.project.manifest.permissions.consent_digest(name);
+    let preview: serde_json::Value = client
+        .post(format!("{base}/api/source-packages"))
+        .body(archive.clone())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["code"], "memcastle::source::consent_required");
+    assert!(
+        preview["error"]
+            .as_str()
+            .unwrap()
+            .contains("selected job's env or file credential")
+    );
+    let installed = client
+        .post(format!("{base}/api/source-packages"))
+        .query(&[("consent", consent.as_str()), ("enable", "true")])
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        installed.status().is_success(),
+        "{}",
+        installed.text().await.unwrap()
+    );
+    let secrets = tempfile::tempdir().unwrap();
+    let work = secrets.path().join("work");
+    let personal = secrets.path().join("personal");
+    std::fs::write(&work, "account-one\n").unwrap();
+    std::fs::write(&personal, "account-two\n").unwrap();
+    let tree = tempfile::tempdir().unwrap();
+    std::fs::write(tree.path().join("a.txt"), "source input").unwrap();
+    for (id, path) in [("work", &work), ("personal", &personal)] {
+        let response = client
+            .put(format!("{base}/api/source-configs/{id}"))
+            .json(
+                &serde_json::json!({"source": name, "credential": {"type": "file", "path": path}}),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_success(),
+            "{}",
+            response.text().await.unwrap()
+        );
+    }
+    let mut ids = Vec::new();
+    for (miner, configuration, wing) in [
+        ("work-one", "work", "work"),
+        ("work-two", "work", "work"),
+        ("personal-one", "personal", "personal"),
+    ] {
+        let response = client
+            .put(format!("{base}/api/miners/{miner}"))
+            .json(
+                &serde_json::json!({"source": name, "source_config": configuration,
+                "locator": tree.path(), "wing": wing}),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_success(),
+            "{}",
+            response.text().await.unwrap()
+        );
+        let submitted: serde_json::Value = client
+            .post(format!("{base}/api/miners/{miner}/run"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            !submitted
+                .to_string()
+                .contains(secrets.path().to_str().unwrap())
+        );
+        let id: memcastle::domain::JobId = submitted["id"].as_str().unwrap().parse().unwrap();
+        let done =
+            common::wait_for_job_status(&client, base, id, memcastle::domain::JobStatus::Completed)
+                .await;
+        assert!(
+            !serde_json::to_string(&done)
+                .unwrap()
+                .contains(secrets.path().to_str().unwrap())
+        );
+        ids.push(
+            done.result.unwrap()["source_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    assert_eq!(
+        ids[0], ids[1],
+        "miners sharing the same configuration share a cursor"
+    );
+    assert_ne!(
+        ids[0], ids[2],
+        "a different account and destination keep their own cursor"
+    );
+    // Legacy miner references select the same host function, even without a named configuration.
+    let legacy = client
+        .put(format!("{base}/api/miners/legacy-environment"))
+        .json(&serde_json::json!({"source": name, "locator": tree.path(),
+            "wing": "environment", "credential": {"type": "env", "name": "PATH"}}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        legacy.status().is_success(),
+        "{}",
+        legacy.text().await.unwrap()
+    );
+    let submitted: serde_json::Value = client
+        .post(format!("{base}/api/miners/legacy-environment/run"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let legacy_id: memcastle::domain::JobId = submitted["id"].as_str().unwrap().parse().unwrap();
+    let legacy_job = common::wait_for_job_status(
+        &client,
+        base,
+        legacy_id,
+        memcastle::domain::JobStatus::Completed,
+    )
+    .await;
+    assert_ne!(legacy_job.result.unwrap()["source_id"], ids[0]);
+    let legacy_hits: Vec<serde_json::Value> = client
+        .get(format!("{base}/api/search"))
+        .query(&[("q", "environment account"), ("wing", "environment")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!legacy_hits.is_empty());
+    // Hold the worker so a mine is queued while its configuration changes. The job must keep its
+    // selected file path, while reading a rotated value at that path when it finally executes.
+    let demo: serde_json::Value = client
+        .post(format!("{base}/api/jobs"))
+        .json(&serde_json::json!({"type": "demo", "steps": 120}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let demo_id = demo["id"].as_str().unwrap();
+    let mut running = false;
+    for _ in 0..100 {
+        let current: serde_json::Value = client
+            .get(format!("{base}/api/jobs/{demo_id}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if current["status"] == "running" {
+            running = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(running, "the demo job must occupy the only worker");
+    let queued: serde_json::Value = client
+        .post(format!("{base}/api/miners/work-one/run"))
+        .json(&serde_json::json!({"full": true}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(queued["status"], "queued", "{queued}");
+    std::fs::write(&work, "account-two\n").unwrap();
+    let missing = secrets.path().join("not-present");
+    let changed = client
+        .put(format!("{base}/api/source-configs/work"))
+        .json(&serde_json::json!({"credential": {"type": "file", "path": missing}}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        changed.status().is_success(),
+        "{}",
+        changed.text().await.unwrap()
+    );
+    let unavailable: serde_json::Value = client
+        .get(format!("{base}/api/miners/work-one"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unavailable["state"], "unavailable");
+    assert!(
+        unavailable["reason"]
+            .as_str()
+            .unwrap()
+            .contains("create a readable file")
+    );
+    client
+        .post(format!("{base}/api/jobs/{demo_id}/cancel"))
+        .send()
+        .await
+        .unwrap();
+    let queued_id: memcastle::domain::JobId = queued["id"].as_str().unwrap().parse().unwrap();
+    let done = common::wait_for_job_status(
+        &client,
+        base,
+        queued_id,
+        memcastle::domain::JobStatus::Completed,
+    )
+    .await;
+    assert_eq!(done.result.unwrap()["source_id"], ids[0]);
+    let hits: Vec<serde_json::Value> = client
+        .get(format!("{base}/api/search"))
+        .query(&[("q", "personal account"), ("wing", "work")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !hits.is_empty(),
+        "the pinned file's rotated value was used in the work wing"
+    );
+    let exposed = client
+        .get(format!("{base}/api/source-configs/work"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!exposed.contains(work.to_str().unwrap()));
+    assert!(!exposed.contains("account-one"));
+    daemon.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

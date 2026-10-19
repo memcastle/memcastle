@@ -93,6 +93,7 @@ read = ["locator"]           # "locator", an absolute directory, or "~/..."
 network = false              # all or nothing
 process = []                 # bare program names the source may run
 env = []                     # environment variables the source may read
+credential = false           # opt in to the selected env/file credential (needs_credentials = true)
 
 # Only for a source that signs in with OAuth; see "Signing in with OAuth". needs_credentials must then be true.
 # [permissions.oauth]
@@ -133,6 +134,7 @@ fixtures = "fixtures"
 | `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`, and optional `breadth` (`include`, `opt_in_include`, `exclude` or `since`). Options are not permissions: they ask for nothing and are no part of what a user consents to. |
 | `triggers.<kind>` | `webhook` or `watch` (a timetable and a poll are every source's, so they are not declared), with a one-line `description`. A capability, not a permission: nothing starts because it is declared, and it is no part of what a user consents to. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
+| `permissions.credential` | `true` requires `capabilities.needs_credentials = true`; consent grants access to the selected env/file reference, not to every daemon credential. |
 | `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. A declared `callback_path` replaces `/callback` on the same loopback listener; `on_demand = true` lets an offline mode proceed without a sign-in while the online mode must ask for its token at `identify`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
 
@@ -207,9 +209,13 @@ The manifest lists what it asks for and nothing else is granted.
 | `network` | Opens the network, all or nothing. The host cannot yet restrict by host name, and the consent prompt says so. |
 | `process` | Lets the source call `run-process` for exactly those programs: no shell, a minimal environment (`PATH`, `HOME`, and the variables in `env`), a time limit, a cap on output (16 MiB, enforced while the program runs; its output is captured through scratch files, so a program that drops output on a pipe still answers whole). Any other program is refused. |
 | `env` | Passes the listed variables, when set, into the sandbox. It sees no others. |
+| `credential` | Allows `host.source-credential()` to return the job's selected env/file credential during acquisition. Neither its variable name nor file path needs an `env`/`filesystem` grant. It is never inherited by `run-process` unless the variable is separately listed under `env`. |
 | `oauth` | Lets the source call `access-token` for the sign-in the manifest declares (see below). The consent prompt says "sign in with OAuth at *host*" with the scopes, and a credential is never used under terms other than the ones agreed to. |
 
 `normalize` runs with none of these, whatever the manifest says.
+`default-wing` and `default-room` also receive no credential.
+When a selected credential references `PATH`, `HOME` or `SystemRoot`, the host omits that variable from a child process's
+normally inherited environment unless the manifest separately lists it under `env`.
 
 Installing a package that asks for anything needs the user's consent to exactly those permissions.
 `memcastle source install` prints them and asks;
@@ -218,6 +224,29 @@ so consent for one source or one set of permissions is not consent for another.
 A script is never asked and never consents on its own behalf:
 pass `--yes`, or `--consent <digest>` after reviewing the permissions the refusal lists.
 A package that asks for nothing needs no consent.
+
+## Selected env and file credentials
+
+A source using operator-managed account tokens declares `needs_credentials = true` under `[capabilities]` and
+`credential = true` under `[permissions]`.
+Inside `identify`, `discover` or `read`, a Rust component generated from this WIT can call
+`memcastle::source::host::source_credential()` and handle its `Result<String, String>`.
+For example, `let token = memcastle::source::host::source_credential().map_err(SourceError::Failed)?;`.
+Do not put the token in a `source-ref`, option, cursor, candidate, document, metadata, or error message.
+Only the selected source for this job receives it; another installed source needs its own permission and selection.
+A source which received a secret is trusted with it: Core cannot stop that component from deliberately emitting it.
+
+The daemon pins the **reference**, not its value, when a mining job is queued.
+Each execution (also after a crash, retry, or resume) reads the current value from that same environment variable or
+the first line of the same file; an edited configuration cannot switch an already queued job to another account.
+The daemon needs a nonempty UTF-8 value, and the file's first line must be at most 64 KiB; failures name the reference
+and how to fix it, never its contents.
+Set an environment variable before starting the daemon and restart it after changing the variable;
+rotating a file's contents does not require a daemon restart.
+The job stores only the reference and public job responses omit its name/path and the value.
+The selected credential is separate from OAuth `access-token`: a source declaring both permissions can use either
+mechanism when its acquisition mode calls for it, but an OAuth selection does not supply an env/file credential.
+Older 0.4 components that do not import `source-credential` keep their existing behavior and consent digest.
 
 Each call runs in a fresh sandbox with a memory ceiling (`mining.source_memory_mib`) and a time limit
 (`mining.source_timeout_secs`), either of which the manifest can only lower.
