@@ -292,10 +292,20 @@ export interface MinerPatch {
   room?: string
   mapping?: { wing_from?: string; room_from?: string }
   max_documents?: number
+  embedding_profile?: string
   schedule?: MinerSchedule
   options?: Record<string, string | number | boolean | string[]>
+  unset_options?: string[]
   unset?: string[]
   allow_broaden?: boolean
+}
+
+export interface SourceConfigPatch {
+  source: string
+  options?: Record<string, string | number | boolean | string[]>
+  unset_options?: string[]
+  allow_broaden?: boolean
+  credential?: { type: "oauth" } | { type: "env"; name: string } | { type: "file"; path: string }
 }
 
 export interface ErrorBody {

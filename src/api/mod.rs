@@ -247,6 +247,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/drawers/{id}/duplicates",
             get(palace::drawer_duplicates),
         )
+        .route("/api/drawers/{id}", get(palace::drawer_location))
         // How one piece of knowledge evolved across superseded drawers (docs/adr/032): read-only.
         .route("/api/drawers/{id}/history", get(palace::drawer_history))
         // The knowledge graph: entities, what they relate to and which

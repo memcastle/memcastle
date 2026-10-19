@@ -221,9 +221,10 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/wings/{wing}/rooms` | Create a room (and its wing), or find it. | JSON body: `name`, `description?` |
 | `GET /api/wings/{wing}/rooms/{room}` | One room. | none |
 | `DELETE /api/wings/{wing}/rooms/{room}` | Delete the room and its drawers. | none |
-| `GET /api/wings/{wing}/rooms/{room}/drawers` | List the newest drawers, with a preview of each. | query string: `limit` (default 50, at most 200) |
+| `GET /api/wings/{wing}/rooms/{room}/drawers` | List drawers newest first, with a preview of each. To fetch the next page, pass both the `created_at` and `id` of the last returned drawer; equal timestamps are ordered by ID. The array response remains the same. | query string: `limit` (default 50, at most 200), optional `before_created_at` (RFC 3339) **and** `before_id` (drawer ID) |
 | `POST /api/wings/{wing}/rooms/{room}/drawers` | Write a drawer, creating its wing and room if needed: `201` when stored, `200` with `created: false` when an unnamed drawer with identical content was already in the room. | JSON body: `content`, `name?`, `requested_by?` |
 | `GET /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | One drawer in full. | none |
+| `GET /api/drawers/{id}` | Resolve an evidence drawer ID to `{wing, room, drawer}` so a client can link to its Palace location without reading its content. | none |
 | `DELETE /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | Delete one drawer. | none |
 | `POST /api/drawers/{id}/supersede` | End a drawer's validity now, with a replacement when `content` is given: `{superseded, replacement}`. | JSON body: `content?`, `tags?`, `requested_by?` |
 | `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer in a configured profile. | JSON body: `profile`, `embedding` (profile dimensions) |

@@ -8,6 +8,7 @@ import { createAppRouter } from "../src/router.ts"
 import { createSession, SESSION } from "../src/session.ts"
 import JobsView from "../src/views/JobsView.vue"
 import MinersView from "../src/views/MinersView.vue"
+import SourceConfigsView from "../src/views/SourceConfigsView.vue"
 import AppShell from "../src/layout/AppShell.vue"
 import GraphView from "../src/views/GraphView.vue"
 import OverviewView from "../src/views/OverviewView.vue"
@@ -637,26 +638,62 @@ describe("the miners page", () => {
     expect(requests.find((request) => request.method === "POST")?.url).toBe("/api/miners/docs/schedule/enable")
   })
 
-  it("cannot enable an unattended schedule from a read-only session", async () => {
-    const { wrapper, requests } = await show(MinersView, answer, "read_only")
-    const enable = wrapper.findAll("button").find((candidate) => candidate.text() === "Enable schedule")!
-    expect(enable.attributes("disabled")).toBeDefined()
-    await enable.trigger("click")
-    expect(requests.every((request) => request.method === "GET")).toBe(true)
+  it("changes miner readiness without silently enabling its independent schedule", async () => {
+    const { wrapper, requests } = await show(MinersView, answer)
+    await wrapper.findAll('button').find((button) => button.text() === 'Disable miner')!.trigger('click')
+    await flushPromises()
+    expect(requests.some((request) => request.method === 'POST' && path(request) === '/api/miners/docs/disable')).toBe(true)
+    expect(requests.some((request) => request.url.includes('/schedule/enable'))).toBe(false)
   })
 
-  it("saves reusable source defaults separately from a disabled miner schedule and its destination", async () => {
+  it("shows multiple independent triggers under their miner rather than treating them as sources", async () => {
+    const { wrapper, router } = await show(MinersView, (request) => path(request) === "/api/triggers"
+      ? { body: { triggers: [{ name: "nightly", miner: "docs", type: "schedule", status: "active" }, { name: "on-change", miner: "docs", type: "watch", status: "disabled" }, { name: "unrelated", miner: "other", type: "poll", status: "active" }] } }
+      : answer(request))
+    await router.push("/miners?miner=docs")
+    await flushPromises()
+    expect(wrapper.text()).toContain("2 triggers")
+    expect(wrapper.text()).toContain("nightly")
+    expect(wrapper.text()).toContain("on-change")
+    expect(wrapper.text()).not.toContain("unrelated")
+    expect(wrapper.findAll("a").some((link) => link.attributes("href")?.includes("source-configs"))).toBe(true)
+  })
+
+  it("preserves typed options and removes only options explicitly deleted", async () => {
+    const typed = { ...miner, options: { count: 3, enabled: true, roots: ["docs", "src"], obsolete: "old" }, embedding_profile: "local" }
+    const { wrapper, requests, router } = await show(MinersView, (request) => path(request) === "/api/miners" ? { body: { miners: [typed] } } : answer(request))
+    await router.push("/miners?miner=docs")
+    await flushPromises()
+    expect((wrapper.find("textarea#miner-options").element as HTMLTextAreaElement).value).toContain('roots=["docs","src"]')
+    await wrapper.find("textarea#miner-options").setValue('count=3\nenabled=true\nroots=["docs","src"]')
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Save miner")!.trigger("click")
+    await flushPromises()
+    const write = requests.find((request) => request.method === "PUT")!
+    expect(write.body).toMatchObject({ unset_options: ["obsolete"], options: {}, embedding_profile: "local" })
+  })
+
+  it("can manage a miner schedule in read-only memory mode because configuration is administrative", async () => {
+    const { wrapper, requests } = await show(MinersView, answer, "read_only")
+    const enable = wrapper.findAll("button").find((candidate) => candidate.text() === "Enable schedule")!
+    expect(enable.attributes("disabled")).toBeUndefined()
+    await enable.trigger("click")
+    expect(requests.some((request) => request.url === "/api/miners/docs/schedule/enable")).toBe(true)
+  })
+
+  it("saves a disabled miner schedule and its destination separately from source defaults", async () => {
     const { wrapper, requests } = await show(MinersView, answer)
 
-    await wrapper.find("input#config-id").setValue("directory-work")
-    await wrapper.find("input#config-source").setValue("directory")
-    await wrapper.find("textarea#config-options").setValue("include=docs/**\nexclude=target/**")
-    await wrapper.find("select#config-credential").setValue("env")
-    await wrapper.find("input#config-credential-location").setValue("WORK_TOKEN")
-    await wrapper.findAll("button").find((candidate) => candidate.text() === "Save configuration")!.trigger("click")
+    const config = await show(SourceConfigsView, answer)
+
+    await config.wrapper.find("input#config-id").setValue("directory-work")
+    await config.wrapper.find("input#config-source").setValue("directory")
+    await config.wrapper.find("textarea#config-options").setValue("include=docs/**\nexclude=target/**")
+    await config.wrapper.find("select#config-credential").setValue("env")
+    await config.wrapper.find("input#config-credential-location").setValue("WORK_TOKEN")
+    await config.wrapper.findAll("button").find((candidate) => candidate.text() === "Save configuration")!.trigger("click")
     await flushPromises()
 
-    const configWrite = requests.find((request) => request.method === "PUT" && path(request) === "/api/source-configs/directory-work")
+    const configWrite = config.requests.find((request) => request.method === "PUT" && path(request) === "/api/source-configs/directory-work")
     expect(configWrite?.body).toMatchObject({
       source: "directory", options: { include: "docs/**", exclude: "target/**" },
       credential: { type: "env", name: "WORK_TOKEN" },
@@ -683,15 +720,28 @@ describe("the miners page", () => {
   })
 
   it("refuses an invalid source option before sending a configuration write", async () => {
-    const { wrapper, requests } = await show(MinersView, answer)
+    const { wrapper, requests } = await show(SourceConfigsView, answer)
     await wrapper.find("input#config-id").setValue("work")
     await wrapper.find("input#config-source").setValue("directory")
     await wrapper.find("textarea#config-options").setValue("not-a-pair")
     await wrapper.findAll("button").find((candidate) => candidate.text() === "Save configuration")!.trigger("click")
     await flushPromises()
 
-    expect(wrapper.text()).toContain("Give KEY=VALUE")
+    expect(wrapper.text()).toContain("Use KEY=VALUE")
     expect(requests.some((request) => request.method === "PUT")).toBe(false)
+  })
+
+  it("preserves an existing credential reference and typed defaults when editing a source configuration", async () => {
+    const existing = { id: "directory", source: "directory", options: { enabled: true, folders: ["a", "b"], old: "remove" }, credential_kind: "env", credential_available: true }
+    const { wrapper, router, requests } = await show(SourceConfigsView, (request) => path(request) === "/api/source-configs" ? { body: [existing] } : answer(request))
+    await router.push("/source-configs?config=directory")
+    await flushPromises()
+    expect(wrapper.text()).toContain("available")
+    await wrapper.find("textarea#config-options").setValue('enabled=true\nfolders=["a","b"]')
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "Save configuration")!.trigger("click")
+    await flushPromises()
+    expect(requests.find((request) => request.method === "PUT")?.body).toMatchObject({ options: {}, unset_options: ["old"] })
+    expect(JSON.stringify(requests.find((request) => request.method === "PUT")?.body)).not.toContain("credential")
   })
 })
 
@@ -820,7 +870,37 @@ describe("the palace page", () => {
 
     await click(wrapper, "Load more")
 
-    expect(requests.at(-1)!.url).toContain("limit=100")
+    expect(requests.at(-1)!.url).toContain("limit=50&before_created_at=")
+    expect(requests.at(-1)!.url).toContain("before_id=drawer%3A49")
+  })
+
+  it("keeps more than 200 drawers reachable in bounded pages and retains a deep-linked selection", async () => {
+    const all = Array.from({ length: 205 }, (_, index) => ({ ...summary, id: `drawer:${String(index).padStart(4, '0')}`, name: `n${index}`, created_at: new Date(Date.parse(summary.created_at) - index * 1000).toISOString() }))
+    const { wrapper, router, requests } = await show(PalaceView, (request) => {
+      if (!path(request).endsWith("/drawers")) return answer(request)
+      const params = new URL(request.url, "http://daemon").searchParams
+      const start = params.get("before_id") ? all.findIndex((row) => row.id === params.get("before_id")) + 1 : 0
+      return { body: all.slice(start, start + 50) }
+    })
+    await router.push('/palace?wing=castle&room=design&drawer=drawer%3A0204')
+    await flushPromises()
+    expect(wrapper.findAll('.selectable-hit')).toHaveLength(50)
+    expect(wrapper.find('.detail-drawer').exists()).toBe(true)
+    for (let index = 0; index < 4; index++) await click(wrapper, "Load more")
+    expect(wrapper.findAll('.selectable-hit')).toHaveLength(205)
+    expect(requests.filter((request) => path(request).endsWith('/drawers'))).toHaveLength(5)
+    expect(wrapper.findAll('button').some((button) => button.text() === 'Load more')).toBe(false)
+  })
+
+  it("filters a large hierarchy without hiding the selected room", async () => {
+    const many = Array.from({ length: 250 }, (_, index) => ({ ...wing, id: `wing:${index}`, name: `wing-${index}` }))
+    const { wrapper, router } = await show(PalaceView, (request) => path(request) === '/api/wings' ? { body: [wing, ...many] } : answer(request))
+    await router.push('/palace?wing=castle&room=design')
+    await flushPromises()
+    await wrapper.find('#palace-filter').setValue('design')
+    expect(wrapper.findAll('.palace-tree button')).toHaveLength(2)
+    expect(wrapper.text()).toContain('design')
+    expect(wrapper.find('button[aria-current="location"]').exists()).toBe(true)
   })
 
   it("shows the failure of a drawer that cannot be opened", async () => {
@@ -864,7 +944,7 @@ describe("the graph page", () => {
     expect(empty.wrapper.text()).toContain("The knowledge graph is empty")
 
     const cut = await mountGraph(() => ({ body: { nodes, edges: [], truncated: true } }))
-    expect(cut.wrapper.text()).toContain("The graph was cut at 2 entities")
+    expect(cut.wrapper.text()).toContain("first 2 entities by name")
   })
 
   it("shows the facts and the drawers of a tapped entity", async () => {
@@ -876,6 +956,33 @@ describe("the graph page", () => {
     expect(wrapper.text()).toContain("also keep")
     expect(wrapper.text()).toContain("read by heuristic")
     expect(wrapper.text()).toContain("drawer:1".slice(0, 8))
+  })
+
+  it("allows keyboard-operable selection and opens evidence in the containing Palace room", async () => {
+    const { wrapper, router, requests } = await mountGraph((request) => path(request) === '/api/drawers/drawer%3A1'
+      ? { body: { wing: 'castle', room: 'design', drawer: 'drawer:1' } } : answer(request))
+    await wrapper.find('.graph-entities button').trigger('click')
+    await flushPromises()
+    await wrapper.find('.evidence-link').trigger('click')
+    await flushPromises()
+    expect(requests.some((request) => path(request) === '/api/drawers/drawer%3A1')).toBe(true)
+    expect(router.currentRoute.value.query).toMatchObject({ wing: 'castle', room: 'design', drawer: 'drawer:1' })
+  })
+
+  it("shows no matches and can refresh a failed graph read", async () => {
+    let reads = 0
+    const { wrapper } = await mountGraph((request) => {
+      if (path(request) === '/api/graph' && ++reads === 1) return { status: 500, body: { error: 'graph unavailable' } }
+      if (path(request) === '/api/entities') return { body: [] }
+      return answer(request)
+    })
+    expect(wrapper.text()).toContain('graph unavailable')
+    await wrapper.findAll('button').find((button) => button.text() === 'Refresh graph')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.graph-entities button')).toHaveLength(2)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No entities match')
   })
 
   it("ignores a tap on something that is not in the view", async () => {
@@ -928,6 +1035,8 @@ describe("the application shell", () => {
 
     expect(wrapper.findAll("a.nav-link").length).toBeGreaterThanOrEqual(8)
     expect(wrapper.text()).toContain("Overview")
+    expect(wrapper.findAll('.nav-group').map((group) => group.text())).toEqual(['Sources & mining'])
+    expect(wrapper.findAll('a.nav-nested').map((link) => link.text())).toEqual(['Source configurations', 'Miners', 'Triggers'])
   })
 
   it("signs out and returns to the login page", async () => {

@@ -24,6 +24,7 @@ import type {
   MinerPatch,
   MinersReport,
   SourceConfiguration,
+  SourceConfigPatch,
   Mention,
   Relationship,
   SearchHit,
@@ -216,13 +217,16 @@ export class MemCastleClient {
   scheduleMiner(id: string, enabled: boolean): Promise<{ miner: Miner }> {
     return this.request("POST", `/api/miners/${encodeURIComponent(id)}/schedule/${enabled ? "enable" : "disable"}`)
   }
+  enableMiner(id: string, enabled: boolean): Promise<{ miner: Miner }> {
+    return this.request("POST", `/api/miners/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`)
+  }
   runMiner(id: string, full: boolean): Promise<Job> {
     return this.request("POST", `/api/miners/${encodeURIComponent(id)}/run`, { body: { full, requested_by: "web" } })
   }
   sourceConfigs(): Promise<SourceConfiguration[]> {
     return this.request("GET", "/api/source-configs")
   }
-  setSourceConfig(id: string, patch: { source: string; options: Record<string, string>; allow_broaden?: boolean; credential?: { type: "oauth" } | { type: "env"; name: string } | { type: "file"; path: string } }): Promise<SourceConfiguration> {
+  setSourceConfig(id: string, patch: SourceConfigPatch): Promise<SourceConfiguration> {
     return this.request("PUT", `/api/source-configs/${encodeURIComponent(id)}`, { body: patch })
   }
 
@@ -232,8 +236,11 @@ export class MemCastleClient {
   wing(name: string): Promise<WingDetail> {
     return this.request("GET", `/api/wings/${encodeURIComponent(name)}`)
   }
-  drawers(wing: string, room: string, limit?: number): Promise<DrawerSummary[]> {
-    return this.request("GET", `/api/wings/${encodeURIComponent(wing)}/rooms/${encodeURIComponent(room)}/drawers`, { query: { limit } })
+  drawers(wing: string, room: string, limit?: number, before?: Pick<DrawerSummary, "id" | "created_at">): Promise<DrawerSummary[]> {
+    return this.request("GET", `/api/wings/${encodeURIComponent(wing)}/rooms/${encodeURIComponent(room)}/drawers`, { query: { limit, before_created_at: before?.created_at, before_id: before?.id } })
+  }
+  drawerLocation(id: string): Promise<{ wing: string; room: string; drawer: string }> {
+    return this.request("GET", `/api/drawers/${encodeURIComponent(id)}`)
   }
   drawer(wing: string, room: string, drawer: string): Promise<Drawer> {
     return this.request("GET", `/api/wings/${encodeURIComponent(wing)}/rooms/${encodeURIComponent(room)}/drawers/${drawerPath(drawer)}`)

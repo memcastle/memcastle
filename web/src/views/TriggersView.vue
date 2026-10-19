@@ -2,6 +2,8 @@
 import Message from "openvue/message"
 import Column from "openvue/column"
 import DataTable from "openvue/datatable"
+import { computed } from "vue"
+import { RouterLink, useRoute } from "vue-router"
 import type { Trigger } from "../api/types.ts"
 import EmptyState from "../components/EmptyState.vue"
 import ErrorNotice from "../components/ErrorNotice.vue"
@@ -13,9 +15,11 @@ import { ago, utc } from "../format.ts"
 import { useSession } from "../session.ts"
 
 const { client } = useSession()
+const route = useRoute()
 // What asks for mining runs on its own, read only: a trigger is defined, enabled and fired with `memcastle trigger`,
 // never from this page (docs/adr/043). A trigger fires or fails as a `trigger` event, so the page re-reads then.
 const triggers = useLoad(() => client.triggers(), { on: ["trigger"] })
+const visible = computed(() => route.query.miner ? triggers.data.value?.triggers.filter((trigger) => trigger.miner === route.query.miner) ?? [] : triggers.data.value?.triggers ?? [])
 
 /** A trigger's settings on one line: `every=1d at=03:30`. */
 function settings(trigger: Trigger): string {
@@ -50,9 +54,11 @@ function settings(trigger: Trigger): string {
     hint="`memcastle trigger set <name> --miner <miner> --type <schedule|poll|webhook|watch>` defines one; it starts disabled."
   />
   <div v-else-if="triggers.data.value" class="table-scroll">
-    <DataTable :value="triggers.data.value.triggers" data-key="name" size="small">
+    <p v-if="route.query.miner">Triggers for <RouterLink :to="{ name: 'miners', query: { miner: route.query.miner } }">{{ route.query.miner }}</RouterLink>. <RouterLink :to="{ name: 'triggers' }">Show all</RouterLink></p>
+    <p v-if="route.query.miner && !visible.length" class="muted">No independent triggers are configured for this miner.</p>
+    <DataTable :value="visible" data-key="name" size="small">
       <Column field="name" header="Name" />
-      <Column field="miner" header="Miner" />
+      <Column header="Miner"><template #body="{ data }"><RouterLink :to="{ name: 'miners', query: { miner: data.miner } }">{{ data.miner }}</RouterLink></template></Column>
       <Column field="type" header="Type" />
       <Column header="Status">
         <template #body="{ data }">

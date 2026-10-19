@@ -179,17 +179,32 @@ impl SurrealStore {
         room: RoomId,
         limit: u32,
     ) -> Result<Vec<DrawerSummary>> {
+        self.list_drawer_summaries_page(room, limit, None).await
+    }
+
+    /// Stable newest-first page. The id breaks ties between drawers written at the same instant.
+    pub async fn list_drawer_summaries_page(
+        &self,
+        room: RoomId,
+        limit: u32,
+        before: Option<(chrono::DateTime<chrono::Utc>, DrawerId)>,
+    ) -> Result<Vec<DrawerSummary>> {
         let mut response = self
             .db
             .query(
                 "SELECT record::id(id) AS id, room, name, string::len(content) AS chars, \
-                        string::slice(content, 0, $preview) AS preview, source, \
-                        <string>created_at AS created_at \
-                 FROM drawer WHERE room = $room ORDER BY created_at DESC LIMIT $limit",
+                         string::slice(content, 0, $preview) AS preview, source, \
+                         <string>created_at AS created_at \
+                 FROM drawer WHERE room = $room AND \
+                   ($before_time = NONE OR created_at < <datetime>$before_time OR \
+                    (created_at = <datetime>$before_time AND record::id(id) < $before_id)) \
+                 ORDER BY created_at DESC, id DESC LIMIT $limit",
             )
             .bind(("room", room.to_string()))
             .bind(("preview", PREVIEW_CHARS as u64))
             .bind(("limit", limit))
+            .bind(("before_time", before.map(|(time, _)| super::stored(time))))
+            .bind(("before_id", before.map(|(_, id)| id.to_string())))
             .await?;
         super::take_rows(&mut response, 0)
     }
@@ -384,6 +399,35 @@ mod tests {
         let rows = store.list_drawer_summaries(a.id, 10).await.unwrap();
         let big = rows.iter().find(|row| row.chars == 500).unwrap();
         assert_eq!(big.preview.chars().count(), PREVIEW_CHARS);
+    }
+
+    #[tokio::test]
+    async fn drawer_pages_reach_every_row_even_when_timestamps_tie_and_new_drawers_arrive() {
+        let (store, _, room, _) = seeded().await;
+        let timestamp = chrono::Utc::now();
+        for index in 0..205 {
+            let mut row = drawer(room.id, &format!("page {index}"), None);
+            row.created_at = timestamp;
+            store.create_drawer(&row).await.unwrap();
+        }
+        let first = store
+            .list_drawer_summaries_page(room.id, 200, None)
+            .await
+            .unwrap();
+        assert_eq!(first.len(), 200);
+        let mut newer = drawer(room.id, "new arrival", None);
+        newer.created_at = timestamp + chrono::Duration::seconds(1);
+        store.create_drawer(&newer).await.unwrap();
+        let last = first.last().unwrap();
+        let second = store
+            .list_drawer_summaries_page(room.id, 200, Some((last.created_at, last.id)))
+            .await
+            .unwrap();
+        let seen: std::collections::HashSet<_> =
+            first.iter().chain(&second).map(|row| row.id).collect();
+        assert_eq!(second.len(), 7);
+        assert_eq!(seen.len(), 207);
+        assert!(!seen.contains(&newer.id));
     }
 
     #[tokio::test]

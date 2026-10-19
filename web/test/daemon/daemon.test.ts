@@ -85,6 +85,7 @@ describe("the dashboard's client against a daemon that needs a token", () => {
     expect(wings.map((wing) => wing.name)).toContain("docs")
     expect(detail.rooms.map((room) => room.name)).toContain("plans")
     expect(drawer.content).toBe("Ship the dashboard")
+    expect(await api.drawerLocation(drawer.id)).toEqual({ wing: "docs", room: "plans", drawer: drawer.id })
     expect((await api.search({ q: "dashboard" })).length).toBe(1)
   })
 })
