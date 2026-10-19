@@ -109,4 +109,6 @@ jobs:
           if [[ -n "$EXTRA_SMOKE" ]]; then
             bash -e -o pipefail -c "$EXTRA_SMOKE"
           fi
-          echo 'Core ${{ steps.core.outputs.resolved_version }} (${{ steps.core.outputs.core_sha }}) passed conformance and installation' >> "$GITHUB_STEP_SUMMARY"
+          archive_digest="$(sha256sum "$ARCHIVE")"
+          archive_digest="${archive_digest%% *}"
+          echo "Provider $(git rev-parse HEAD), archive $ARCHIVE (SHA-256 $archive_digest), Core ${{ steps.core.outputs.resolved_version }} (${{ steps.core.outputs.core_sha }}) passed conformance and isolated lifecycle validation" >> "$GITHUB_STEP_SUMMARY"

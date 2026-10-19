@@ -9,8 +9,10 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+use crate::app::MinerPatch;
 use crate::domain::{PluginModule, PluginModuleKind, SourceState};
 use crate::error::{Error, Result};
+use crate::integration::Catalog;
 use crate::plugin::package;
 
 use super::DaemonClient;
@@ -152,7 +154,7 @@ pub async fn run(archive: &Path) -> Result<()> {
             .chain(&preview.embedding_consents)
             .map(|source| (source.source.clone(), source.digest.clone()))
             .collect::<BTreeMap<_, _>>();
-        let installed = client.install_plugin(bytes, &consents, &[]).await?;
+        let installed = client.install_plugin(bytes.clone(), &consents, &[]).await?;
         ensure(
             inventory(&installed.manifest.modules) == inventory(&package.manifest.modules),
             &id,
@@ -163,6 +165,24 @@ pub async fn run(archive: &Path) -> Result<()> {
             shown.digest == installed.digest,
             &id,
             "installed plugin digest changed after installation",
+        )?;
+        let integrations = package
+            .manifest
+            .modules
+            .iter()
+            .filter(|module| module.kind == PluginModuleKind::Integration)
+            .map(|module| module.id.as_str())
+            .collect::<HashSet<_>>();
+        // The agent-side catalogue reads installed generations, not the daemon's plugin inventory.
+        let catalogs = Catalog::plugin_catalogs(&scratch.path().join("data/memcastle/plugins"))?;
+        let discovered = catalogs
+            .iter()
+            .flat_map(|catalog| catalog.integrations().iter().map(|item| item.id()))
+            .collect::<HashSet<_>>();
+        ensure(
+            discovered == integrations,
+            &id,
+            "installed integrations differ from the archive's module inventory",
         )?;
         for module in &package.manifest.modules {
             if module.kind == PluginModuleKind::Source {
@@ -180,6 +200,106 @@ pub async fn run(archive: &Path) -> Result<()> {
                 )?;
             }
         }
+        // Replaying the exact release must not undo an explicitly enabled source.
+        let replayed = client.install_plugin(bytes.clone(), &consents, &[]).await?;
+        ensure(
+            replayed.digest == installed.digest,
+            &id,
+            "reinstalling identical bytes changed the installed plugin",
+        )?;
+
+        // A new parent release with identical real module bytes tests the upgrade path without inventing guest code.
+        let mut next = package.manifest.clone();
+        let mut version = semver::Version::parse(&next.plugin.version)
+            .map_err(|e| failed(&id, format!("invalid packaged version: {e}")))?;
+        version.patch += 1;
+        version.pre = semver::Prerelease::EMPTY;
+        version.build = semver::BuildMetadata::EMPTY;
+        next.plugin.version = version.to_string();
+        let mut next_files = package.files.clone();
+        next_files.insert(
+            "plugin.toml".into(),
+            toml::to_string(&next)
+                .map_err(|e| Error::serialization("plugin test upgrade descriptor", e))?
+                .into_bytes(),
+        );
+        next_files.remove("manifest.toml");
+        let upgraded_bytes = package::pack(&next_files)?;
+        let upgraded_preview = client.preview_plugin(&upgraded_bytes).await?;
+        ensure(
+            inventory(&upgraded_preview.modules) == inventory(&package.manifest.modules),
+            &id,
+            "upgrading changed the plugin's typed module inventory",
+        )?;
+        let upgraded = client
+            .install_plugin(upgraded_bytes.clone(), &consents, &[])
+            .await?;
+        ensure(
+            upgraded.manifest.plugin.version == next.plugin.version,
+            &id,
+            "upgrade did not install the new parent version",
+        )?;
+        for module in &package.manifest.modules {
+            if module.kind == PluginModuleKind::Source {
+                ensure(
+                    client.show_source(&module.id).await?.state == SourceState::Enabled,
+                    &id,
+                    format!("upgrading disabled source `{}`", module.id),
+                )?;
+            }
+        }
+
+        if let Some(source) = package
+            .manifest
+            .modules
+            .iter()
+            .find(|module| module.kind == PluginModuleKind::Source)
+        {
+            client
+                .set_miner(
+                    "plugin-test-miner",
+                    &MinerPatch {
+                        source: Some(source.id.clone()),
+                        enabled: Some(false),
+                        ..MinerPatch::default()
+                    },
+                )
+                .await?;
+            ensure(
+                client.uninstall_plugin(&id).await.is_err(),
+                &id,
+                "uninstall removed a plugin still referenced by a disabled miner",
+            )?;
+            ensure(
+                client.show_miner("plugin-test-miner").await?.source == source.id,
+                &id,
+                "a blocked uninstall changed the configured miner",
+            )?;
+            client.remove_miner("plugin-test-miner").await?;
+        }
+        for module in &package.manifest.modules {
+            if module.kind == PluginModuleKind::Source {
+                client.set_source_enabled(&module.id, false).await?;
+            }
+        }
+        client.uninstall_plugin(&id).await?;
+        ensure(
+            !client
+                .list_plugins()
+                .await?
+                .iter()
+                .any(|item| item.id == id),
+            &id,
+            "uninstall left the plugin installed",
+        )?;
+        let restored = client
+            .install_plugin(upgraded_bytes, &consents, &[])
+            .await?;
+        ensure(
+            inventory(&restored.manifest.modules) == inventory(&package.manifest.modules),
+            &id,
+            "reinstall after uninstall lost plugin modules",
+        )?;
         Ok(())
     }
     .await;

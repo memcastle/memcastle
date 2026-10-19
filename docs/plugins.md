@@ -153,42 +153,44 @@ Only after the commit does the daemon publish the new pointer and remove retired
 If cleanup is interrupted, startup reconciles current pointers from the ledger, drops orphan pointers and retries
 credential deletion for source IDs whose installation rows have gone.
 
-GitTPL authoring templates are maintained separately as `memcastle-plugin.tpl`, `memcastle-source.tpl` and
-`memcastle-integration.tpl`.
+GitTPL authoring templates are maintained separately as `memcastle-plugin.tpl`, `memcastle-source.tpl`,
+`memcastle-integration.tpl` and `memcastle-embedding-provider.tpl`.
 Plugin composition requires the released GitTPL 0.14 or newer; the Core checkout's older GitTPL tooling for its own
 Rust project template is not the provider-template toolchain.
-The parent composes source/integration templates for each selected module ID and records their resolved commits;
+The parent composes source/integration/embedding templates for each selected module ID and records their resolved commits;
 an empty initial plugin is valid, and another module can be added by changing the recorded answer and updating GitTPL.
 Call `git tpl init` on those repositories directly rather than asking MemCastle to scaffold code.
 GitTPL 0.14 currently refuses the same name in both composition lists; a provider with shared source/integration IDs
 composes one module, overlays the other from its pinned child template, and records that step in its repository.
 
-From a directory containing local clones of all three template repositories:
+From a directory containing local clones of all four template repositories:
 
 ```sh
 git tpl init "$PWD/memcastle-plugin.tpl" example --init \
   --answer plugin_id=example --answer 'sources=["files-one","files-two"]' \
-  --answer 'integrations=["assistant"]' \
+  --answer 'integrations=["assistant"]' --answer 'embeddings=["vector-one"]' \
   --answer "source_template=$PWD/memcastle-source.tpl" \
   --answer "integration_template=$PWD/memcastle-integration.tpl" \
+  --answer "embedding_template=$PWD/memcastle-embedding-provider.tpl" \
   --defaults --strict-answers --json
-# Build every selected source and integration first, then package their existing artifacts.
+# Build every selected source and embedding component and integration first, then package their existing artifacts.
 memcastle plugin package example/plugin.toml --version 0.1.0
 memcastle plugin install example/dist/example-0.1.0.tar.gz
 ```
 
 This offline example records the machine-specific child paths in the generated project's configuration.
-For a shared provider repository, use the published GitTPL and all three published template URLs from the start;
+For a shared provider repository, use the published GitTPL and all four published template URLs from the start;
 GitTPL records those URLs and the resolved child commits and does not rewrite local paths to remote URLs later.
 
 Build source components with the provider's reproducible Cargo flags before calling Core's packager;
 the packager only gathers validated, already-built artifacts.
 
-With the three published `https://github.com/memcastle/*.tpl` URLs, `git tpl init` needs `--trust`
+With the four published `https://github.com/memcastle/*.tpl` URLs, `git tpl init` needs `--trust`
 to allow the child-template clones.
 
-To scaffold only a module, invoke `memcastle-source.tpl` or `memcastle-integration.tpl` directly.
-For an existing provider project, edit its recorded `sources` or `integrations` array in
+To scaffold only a module, invoke `memcastle-source.tpl`, `memcastle-integration.tpl` or
+`memcastle-embedding-provider.tpl` directly.
+For an existing provider project, edit its recorded `sources`, `integrations` or `embeddings` array in
 `.config/git.tpl.toml`, then run `git tpl update --defaults --trust`, review `git tpl diff`, and run `git tpl merge`.
 The parent pins each child to a reviewed full commit in its `template.toml`; the corresponding template CI checks out
 those same commits, and `.config/git.tpl.toml` records the revisions used by each provider rendering.
@@ -231,11 +233,13 @@ from built modules, refusing unsafe or unlisted files. Both inspect and package 
 An exact `ID/vVERSION` tag yields that version; untagged Git revisions use an identifiable development version,
 and `--version` overrides Git when packaging without a repository;
 it does not build source components or agent bundles. `plugin test` uses a disposable palace and does not register
-agent integrations; provider-specific agent and adoption tests remain in the standalone repository.
-Provider-owned JavaScript adoption and agent-installation checks remain separate; generic `plugin test` checks source
-activation without changing the user's palace or agent configuration.
-The shared plugin validation workflow always tests source conformance and archive installation/activation against the
-tested Core `main` prerelease.
+agent integrations; it discovers installed integration modules in the local catalogue, checks independent source
+activation, replays installation, upgrades the parent version with unchanged module bytes, checks uninstall is blocked
+by a configured miner, then uninstalls and reinstalls the package.
+Provider-specific mining, checkpoint preservation, agent installation and legacy-adoption checks remain in the
+standalone repository; this generic lifecycle smoke does not claim to have mined provider data.
+The shared plugin validation workflow always tests source conformance and the isolated archive lifecycle against the
+tested Core `main` prerelease, reporting the provider revision, archive digest and exact Core revision.
 Callers may additionally name plugin-capable release trees such as `0.5` (the latest published patch), or an exact
 stable version; each gets the same required integration checks.
 Stable Core 0.4.1 does not support plugin installation, so it cannot be added to this matrix.
