@@ -18,10 +18,9 @@ on:
         required: false
         default: ""
       core-version:
-        description: One caller-selected Core release tree or exact version (empty uses the legacy matrix)
+        description: Caller-selected development release, stable release tree, or exact version
         type: string
-        required: false
-        default: ""
+        required: true
       smoke-command:
         description: Optional provider-owned installation check after the generic archive smoke test
         type: string
@@ -37,11 +36,6 @@ on:
         type: string
         required: false
         default: ""
-      core-versions:
-        description: JSON array of additional exact plugin-capable Core release tags
-        type: string
-        required: false
-        default: "[]"
     outputs:
       archive:
         description: The sole validated archive path relative to the repository root
@@ -51,42 +45,11 @@ permissions:
   contents: read
 
 jobs:
-  matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      cores: ${{ steps.list.outputs.cores }}
-    steps:
-      - id: list
-        env:
-          VERSIONS: ${{ inputs.core-versions }}
-          VERSION: ${{ inputs.core-version }}
-        run: |
-          if [[ -n "$VERSION" ]]; then
-            [[ "$VERSION" == main || "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || {
-              echo '::error::core-version must be main, a release tree or an exact stable version'; exit 1;
-            }
-            jq -cnr --arg version "$VERSION" '"cores=\([$version] | tojson)"' >> "$GITHUB_OUTPUT"
-          else
-            jq -cnr --arg raw "$VERSIONS" '
-              ($raw | fromjson) as $versions
-              | if ($versions | type) == "array"
-                   and ($versions | all(.[]; type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
-                   and ($versions | length) == ($versions | unique | length)
-                then "cores=\(["main"] + $versions | tojson)"
-                else error("core-versions must contain unique exact stable tags") end
-            ' >> "$GITHUB_OUTPUT"
-          fi
-
   compatibility:
-    needs: matrix
-    name: Core ${{ matrix.core }}
+    name: Core ${{ inputs.core-version }}
     runs-on: ubuntu-latest
     outputs:
       archive: ${{ steps.archive.outputs.path }}
-    strategy:
-      fail-fast: false
-      matrix:
-        core: ${{ fromJSON(needs.matrix.outputs.cores) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -116,7 +79,7 @@ jobs:
       - uses: memcastle/memcastle@main
         id: core
         with:
-          version: ${{ matrix.core }}
+          version: ${{ inputs.core-version }}
       - name: Check source conformance and isolated plugin installation
         env:
           ARCHIVE: ${{ steps.archive.outputs.path }}
@@ -146,4 +109,4 @@ jobs:
           if [[ -n "$EXTRA_SMOKE" ]]; then
             bash -e -o pipefail -c "$EXTRA_SMOKE"
           fi
-          echo 'Core ${{ matrix.core }} (${{ steps.core.outputs.core_sha }}) passed conformance and installation' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Core ${{ steps.core.outputs.resolved_version }} (${{ steps.core.outputs.core_sha }}) passed conformance and installation' >> "$GITHUB_STEP_SUMMARY"
