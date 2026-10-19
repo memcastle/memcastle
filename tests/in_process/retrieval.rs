@@ -150,6 +150,39 @@ async fn testing_named_profiles_uses_each_endpoint_without_creating_a_job() {
         assert!(result.get("text").is_none());
         assert!(result.get("embedding").is_none());
     }
+    // The CLI and every other client must use the daemon's same provider-selection path.
+    let selected = memcastle::client::DaemonClient::discover(
+        &daemon.palace_path,
+        "127.0.0.1:1".parse().unwrap(),
+    )
+    .test_embedding(Some("other".into()), "client sample")
+    .await
+    .unwrap();
+    assert_eq!(selected.profile, "other");
+    assert_eq!(selected.dimensions, DIMENSION);
+    let output = tokio::process::Command::new(assert_cmd::cargo::cargo_bin("memcastle"))
+        .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
+        .args([
+            "--json",
+            "embed",
+            "test",
+            "--profile",
+            "other",
+            "--text",
+            "CLI sample",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let answer: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer["profile"], "other");
+    assert_eq!(answer["dimensions"], DIMENSION);
+    assert!(answer.get("embedding").is_none());
     let jobs: Value = client()
         .get(format!("{base}/api/jobs"))
         .send()
