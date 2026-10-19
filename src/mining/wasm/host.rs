@@ -32,6 +32,12 @@ pub(super) struct TokenGrant {
     pub provider: Arc<dyn AccessTokens>,
 }
 
+/// The selection for one call, including whether its absence is an expected public-mode probe.
+pub(super) struct CredentialSelection {
+    pub value: Option<Secret>,
+    pub optional: bool,
+}
+
 /// The state of one call into a source.
 pub(super) struct HostState {
     wasi: WasiCtx,
@@ -47,6 +53,10 @@ pub(super) struct HostState {
     tokens: Option<TokenGrant>,
     /// Kept separate from WASI and the process environment.
     credential: Option<Secret>,
+    /// Distinguish an optional selection that is absent from a permission the manifest never granted.
+    credential_granted: bool,
+    /// Required credentials still explain failures when the source tries to run without its selection.
+    credential_optional: bool,
     /// Why the last token was not given, kept so that a failure the source makes of it is reported as what it is: a
     /// credential that needs signing in again, and not whatever message the source wrote.
     pub credential_failure: Option<crate::Error>,
@@ -107,9 +117,18 @@ impl memcastle::source::host::Host for HostState {
     }
 
     fn source_credential(&mut self) -> Result<String, String> {
-        let Some(value) = &self.credential else {
-            let message = "no selected source credential is available here: grant `[permissions] credential = true` and select an env or file reference for this job".to_string();
+        if !self.credential_granted {
+            let message = "source credentials are not permitted here: grant `[permissions] credential = true` for acquisition calls".to_string();
             self.denied.get_or_insert_with(|| message.clone());
+            return Err(message);
+        }
+        let Some(value) = &self.credential else {
+            // An optional source may probe for a selection before falling back to public access; a later failure
+            // must report its own cause rather than this expected absence.
+            let message = "no selected source credential is available here: select an env or file reference for this job".to_string();
+            if !self.credential_optional {
+                self.denied.get_or_insert_with(|| message.clone());
+            }
             return Err(message);
         };
         Ok(value.expose().to_owned())
@@ -165,7 +184,7 @@ pub(super) fn state(
     memory_bytes: usize,
     timeout: Duration,
     tokens: Option<TokenGrant>,
-    credential: Option<Secret>,
+    selection: CredentialSelection,
     selected_env: Option<&str>,
 ) -> Result<HostState, String> {
     let mut wasi = WasiCtxBuilder::new();
@@ -203,7 +222,9 @@ pub(super) fn state(
         },
         denied: None,
         tokens,
-        credential,
+        credential: selection.value,
+        credential_granted: permissions.credential,
+        credential_optional: selection.optional,
         credential_failure: None,
     })
 }
@@ -275,7 +296,10 @@ mod tests {
             16 * 1024 * 1024,
             Duration::from_secs(5),
             None,
-            None,
+            CredentialSelection {
+                value: None,
+                optional: permissions.credential,
+            },
             None,
         )
         .unwrap()
@@ -331,29 +355,71 @@ mod tests {
             1024 * 1024,
             Duration::from_secs(1),
             None,
-            Some(Secret::new("selected-value")),
+            CredentialSelection {
+                value: Some(Secret::new("selected-value")),
+                optional: true,
+            },
             None,
         )
         .unwrap();
         assert_eq!(granted.source_credential().unwrap(), "selected-value");
         assert!(granted.process.env.is_empty());
-        let state = state(
+        let isolated = state(
             &permissions,
             None,
             1024 * 1024,
             Duration::from_secs(1),
             None,
-            Some(Secret::new("selected-value")),
+            CredentialSelection {
+                value: Some(Secret::new("selected-value")),
+                optional: true,
+            },
             Some("PATH"),
         )
         .unwrap();
-        assert_eq!(state.process.excluded_env.as_deref(), Some("PATH"));
-        assert!(host_state(&permissions).source_credential().is_err());
+        assert_eq!(isolated.process.excluded_env.as_deref(), Some("PATH"));
+        let mut optional = host_state(&permissions);
+        assert!(optional.source_credential().is_err());
         assert!(
-            host_state(&Permissions::default())
-                .source_credential()
-                .is_err()
+            optional.denied.is_none(),
+            "no selection is not a refused permission"
         );
+
+        let mut required = state(
+            &permissions,
+            None,
+            1024 * 1024,
+            Duration::from_secs(1),
+            None,
+            CredentialSelection {
+                value: None,
+                optional: false,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(required.source_credential().is_err());
+        assert!(required.denied.is_some());
+
+        let mut ungranted = host_state(&Permissions::default());
+        let refusal = ungranted.source_credential().unwrap_err();
+        assert_eq!(ungranted.denied.as_deref(), Some(refusal.as_str()));
+
+        let mut ungranted = state(
+            &Permissions::default(),
+            None,
+            1024 * 1024,
+            Duration::from_secs(1),
+            None,
+            CredentialSelection {
+                value: Some(Secret::new("selected-value")),
+                optional: true,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(ungranted.source_credential().is_err());
+        assert!(ungranted.denied.is_some());
     }
 
     #[test]

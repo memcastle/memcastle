@@ -157,6 +157,47 @@ async fn only_consented_acquisition_calls_receive_the_selected_credential() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_absent_optional_credential_does_not_mask_a_later_source_failure() {
+    let built = scaffold(
+        "optional-credential-failure",
+        Template::Rust,
+        |lib| {
+            lib.replace(
+                "if !Path::new(&locator).is_dir() {",
+                "if memcastle::source::host::source_credential().is_err() { return Err(SourceError::Failed(\"HTTP 429: rate limit exceeded\".into())); }\n        if !Path::new(&locator).is_dir() {",
+            )
+        },
+        |manifest| {
+            manifest.replace(
+                "[permissions.filesystem]",
+                "[permissions]\ncredential = true\n\n[permissions.filesystem]",
+            )
+        },
+    );
+    assert!(!built.project.manifest.capabilities.needs_credentials);
+    let tree = tempfile::tempdir().unwrap();
+    let error = load(&built)
+        .identify(tree.path().to_str(), &Default::default())
+        .unwrap_err();
+    assert!(
+        matches!(&error, Error::SourceFailed { message, .. } if message.contains("HTTP 429: rate limit exceeded")),
+        "{error}"
+    );
+
+    let mut ungranted = built.project.manifest.clone();
+    ungranted.permissions.credential = false;
+    let bytes = std::fs::read(built.project.component_path()).unwrap();
+    let ungranted = WasmAdapter::load(&ungranted, &bytes, &MiningConfig::default()).unwrap();
+    let error = ungranted
+        .identify(tree.path().to_str(), &Default::default())
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::SourcePermissionDenied { .. }),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn optional_selected_credentials_allow_public_and_shared_account_miners() {
     let built = scaffold(
         "optional-credential-demo",
