@@ -161,7 +161,7 @@ The parent composes source/integration/embedding templates for each selected mod
 an empty initial plugin is valid, and another module can be added by changing the recorded answer and updating GitTPL.
 Call `git tpl init` on those repositories directly rather than asking MemCastle to scaffold code.
 GitTPL 0.14 currently refuses the same name in both composition lists; a provider with shared source/integration IDs
-composes one module, overlays the other from its pinned child template, and records that step in its repository.
+composes one module, overlays the other from its child template, and records that step in its repository.
 
 From a directory containing local clones of all four template repositories:
 
@@ -192,14 +192,14 @@ To scaffold only a module, invoke `memcastle-source.tpl`, `memcastle-integration
 `memcastle-embedding-provider.tpl` directly.
 For an existing provider project, edit its recorded `sources`, `integrations` or `embeddings` array in
 `.config/git.tpl.toml`, then run `git tpl update --defaults --trust`, review `git tpl diff`, and run `git tpl merge`.
-The parent pins each child to a reviewed full commit in its `template.toml`; the corresponding template CI checks out
-those same commits, and `.config/git.tpl.toml` records the revisions used by each provider rendering.
-Update the child template and its tests first, advance both pins together with the parent composition test, then have
-provider authors review `git tpl diff --json` before `git tpl merge --json` to adopt the new scaffold.
+The parent follows each child's `main` branch and template CI checks those current branches.
+Fresh projects resolve the current commits at creation; `.config/git.tpl.toml` records the revisions used by each
+provider rendering, so existing providers adopt later child changes only after reviewing `git tpl diff --json` and
+running `git tpl merge --json`.
 Changing a template does not change an existing plugin until its owner explicitly updates and merges its rendered ref.
 
 The checked-in `plugins/example` project is a packaging-tooling fixture run by Core CI;
-standalone providers use the workflows produced by the pinned parent template rather than copied example workflows.
+standalone providers use the workflows produced by their recorded parent-template revision rather than copied examples.
 A standalone provider publishes its own versioned artifact;
 its reviewed catalogue entry lists the artifact URL and digest explicitly.
 A direct GitHub repository URL is for a standalone repository whose releases publish exactly one plugin ID;
