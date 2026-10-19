@@ -10,6 +10,7 @@
 //! showing are **reads**, and creating and deleting are **writes**. There is no
 //! MCP tool for any of it: deleting a wing is a human decision.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
@@ -23,6 +24,17 @@ use super::{AppServices, effective_limit};
 
 /// How many drawers a listing returns when the caller does not say.
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
+
+/// The final row on the previous page; both fields are needed to avoid skipping timestamp ties.
+pub type DrawerPageCursor = (DateTime<Utc>, DrawerId);
+
+/// The address of graph evidence in the Palace hierarchy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrawerLocation {
+    pub wing: String,
+    pub room: String,
+    pub drawer: DrawerId,
+}
 
 /// The result of a `create`, which is idempotent for wings and rooms:
 /// `created` says whether this call made the record or found it already there.
@@ -372,11 +384,57 @@ impl AppServices {
         limit: Option<u32>,
         mode: MemoryMode,
     ) -> Result<Vec<DrawerSummary>> {
+        self.list_drawers_page(wing, room, limit, None, mode).await
+    }
+
+    /// List a bounded room page after the given row, with the same read gate as the original listing.
+    pub async fn list_drawers_page(
+        &self,
+        wing: &str,
+        room: &str,
+        limit: Option<u32>,
+        before: Option<DrawerPageCursor>,
+        mode: MemoryMode,
+    ) -> Result<Vec<DrawerSummary>> {
         Self::require_read(mode, "drawer_list")?;
         let wing = self.resolve_wing(wing).await?;
         let room = self.resolve_room(&wing, room).await?;
         let limit = effective_limit(limit, DEFAULT_LIST_LIMIT);
-        self.store.list_drawer_summaries(room.id, limit).await
+        self.store
+            .list_drawer_summaries_page(room.id, limit, before)
+            .await
+    }
+
+    /// Resolve graph evidence to its containing wing/room without exposing storage to a web client.
+    pub async fn drawer_location(&self, id: DrawerId, mode: MemoryMode) -> Result<DrawerLocation> {
+        Self::require_read(mode, "drawer_show")?;
+        let drawer = self
+            .store
+            .get_drawer(id)
+            .await?
+            .ok_or(Error::DrawerNotFound {
+                room: None,
+                drawer: id.to_string(),
+            })?;
+        let room = self
+            .store
+            .get_room_by_id(drawer.room)
+            .await?
+            .ok_or_else(|| Error::StoreMalformed {
+                message: format!("drawer {id} points to missing room {}", drawer.room),
+            })?;
+        let wing =
+            self.store
+                .get_wing_by_id(room.wing)
+                .await?
+                .ok_or_else(|| Error::StoreMalformed {
+                    message: format!("room {} points to missing wing {}", room.id, room.wing),
+                })?;
+        Ok(DrawerLocation {
+            wing: wing.name,
+            room: room.name,
+            drawer: id,
+        })
     }
 
     /// One drawer in full, by name or id.
@@ -890,6 +948,19 @@ mod tests {
             .unwrap();
         assert_eq!(by_name.id, made.id);
         assert_eq!(by_id.content, "hello");
+        let location = app.drawer_location(made.id, FULL).await.unwrap();
+        assert_eq!(
+            (
+                location.wing.as_str(),
+                location.room.as_str(),
+                location.drawer
+            ),
+            ("work", "x", made.id)
+        );
+        assert!(matches!(
+            app.drawer_location(DrawerId::new(), FULL).await,
+            Err(Error::DrawerNotFound { .. })
+        ));
     }
 
     #[tokio::test]

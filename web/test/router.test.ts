@@ -62,6 +62,17 @@ describe("the route guard", () => {
     expect(router.currentRoute.value.query.job).toBe("job:one")
   })
 
+  it("keeps source configurations, miners and their triggers separately addressable", async () => {
+    const { router } = app(false)
+    await router.push("/source-configs?config=directory-work")
+    expect(router.currentRoute.value.name).toBe("source-configs")
+    expect(router.currentRoute.value.query.config).toBe("directory-work")
+    await router.push("/miners?miner=docs")
+    expect(router.currentRoute.value.query.miner).toBe("docs")
+    await router.push("/triggers?miner=docs")
+    expect(router.currentRoute.value.name).toBe("triggers")
+  })
+
   it("returns to the login from wherever the user is when the token is refused", async () => {
     const { router, session } = app(true)
     await session.signIn(LOGIN_USER, TOKEN)

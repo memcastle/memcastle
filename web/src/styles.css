@@ -53,6 +53,8 @@ nav { display: flex; flex-direction: column; gap: 0.15rem; }
 }
 .nav-link:hover { background: var(--p-content-hover-background); }
 .nav-link.active { background: var(--p-highlight-background); color: var(--p-highlight-color); font-weight: 600; }
+.nav-group { padding: 0.8rem 0.65rem 0.2rem; font-size: 0.75rem; font-weight: 700; color: var(--p-text-muted-color); text-transform: uppercase; letter-spacing: 0.04em; }
+.nav-link.nav-nested { padding-left: 1.35rem; }
 .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 0.6rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.8rem; }
 .footer-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.85rem; }
 .live { display: inline-flex; align-items: center; gap: 0.4rem; }
@@ -127,6 +129,9 @@ nav { display: flex; flex-direction: column; gap: 0.15rem; }
 .list-item:hover { background: var(--p-content-hover-background); }
 .list-item.active { background: var(--p-highlight-background); color: var(--p-highlight-color); }
 .list-item small { color: var(--p-text-muted-color); margin-left: 0.4rem; }
+/* Bound the hierarchy and previews independently, so an extensive palace never becomes a long page. */
+.palace-tree { max-height: min(28rem, 55vh); overflow-y: auto; overscroll-behavior: contain; }
+.palace-drawers { max-height: min(38rem, 65vh); overflow-y: auto; overscroll-behavior: contain; }
 .hit { border-bottom: 1px solid var(--p-content-border-color); padding: 0.8rem 0; }
 .hit:last-child { border-bottom: 0; }
 .hit-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; color: var(--p-text-muted-color); font-size: 0.82rem; margin-bottom: 0.3rem; }
@@ -148,6 +153,8 @@ nav { display: flex; flex-direction: column; gap: 0.15rem; }
 .selectable-hit:focus-visible, .p-datatable-tbody > tr:focus-visible, .detail-close:focus-visible { outline: 2px solid var(--p-primary-color); outline-offset: -2px; }
 
 .graph-canvas { height: 32rem; border: 1px solid var(--p-content-border-color); border-radius: 0.75rem; background: var(--card-bg); }
+.graph-entities { max-height: 12rem; overflow-y: auto; margin-bottom: 1rem; }
+.evidence-link { border: 0; background: none; color: var(--p-primary-color); cursor: pointer; text-decoration: underline; font: inherit; }
 .login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
 .login-card { width: min(24rem, 100%); }
 .login-card h1 { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }

@@ -57,15 +57,17 @@ describe("a request", () => {
 
     await api.setMiner("my miner", { source: "directory", room: "imports", schedule: { every: "1d", enabled: false } })
     await api.scheduleMiner("my miner", true)
+    await api.enableMiner("my miner", false)
     await api.runMiner("my miner", false)
 
     expect(requests.map((request) => [request.method, request.url])).toEqual([
       ["PUT", "/api/miners/my%20miner"],
       ["POST", "/api/miners/my%20miner/schedule/enable"],
+      ["POST", "/api/miners/my%20miner/disable"],
       ["POST", "/api/miners/my%20miner/run"],
     ])
     expect(requests[0]?.body).toMatchObject({ room: "imports", schedule: { enabled: false } })
-    expect(requests[2]?.body).toMatchObject({ full: false, requested_by: "web" })
+    expect(requests[3]?.body).toMatchObject({ full: false, requested_by: "web" })
     expect(requests.every((request) => request.headers.Authorization === "Bearer t")).toBe(true)
   })
 
@@ -75,6 +77,15 @@ describe("a request", () => {
     await api.drawer("my wing", "room/1", "notes/2026 plan")
 
     expect(requests[0]?.url).toBe("/api/wings/my%20wing/rooms/room%2F1/drawers/notes/2026%20plan")
+  })
+
+  it("paginates drawer previews and resolves evidence through the authenticated REST client", async () => {
+    const { api, requests } = client({ body: [] }, { token: "t", mode: "read_only" })
+    await api.drawers("work", "notes", 50, { id: "drawer:one", created_at: "2026-10-01T00:00:00Z" })
+    await api.drawerLocation("drawer:one")
+    expect(requests[0]?.url).toContain("before_created_at=2026-10-01T00%3A00%3A00Z&before_id=drawer%3Aone")
+    expect(requests[1]?.url).toBe("/api/drawers/drawer%3Aone")
+    expect(requests.every((request) => request.headers.Authorization === "Bearer t" && request.headers["X-MemCastle-Mode"] === "read_only")).toBe(true)
   })
 })
 

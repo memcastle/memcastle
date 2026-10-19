@@ -141,6 +141,60 @@ async fn a_drawer_is_addressed_by_its_uuid_and_by_a_name_containing_slashes() {
 }
 
 #[tokio::test]
+async fn drawer_pages_and_evidence_locations_use_the_same_read_contract() {
+    let daemon = TestDaemon::start().await;
+    let base = "/api/wings/w/rooms/r/drawers";
+    for number in 0..3 {
+        post(
+            &daemon,
+            base,
+            json!({ "content": format!("page {number}") }),
+        )
+        .await;
+    }
+    let (status, first) = get(&daemon, &format!("{base}?limit=2")).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first.as_array().unwrap().len(), 2);
+    let last = &first[1];
+    let mut query = reqwest::Url::parse(&format!("{}{base}", daemon.base_url)).unwrap();
+    query
+        .query_pairs_mut()
+        .append_pair("limit", "2")
+        .append_pair("before_created_at", last["created_at"].as_str().unwrap())
+        .append_pair("before_id", last["id"].as_str().unwrap());
+    let response = reqwest::get(query).await.unwrap();
+    let status = response.status();
+    let older: Value = response.json().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{older}");
+    assert_eq!(older.as_array().unwrap().len(), 1);
+    let id = older[0]["id"].as_str().unwrap();
+    let (status, location) = get(&daemon, &format!("/api/drawers/{id}")).await;
+    assert_eq!(status, StatusCode::OK, "{location}");
+    assert_eq!(location, json!({ "wing": "w", "room": "r", "drawer": id }));
+
+    let (status, bad) = get(&daemon, &format!("{base}?before_id={id}")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(bad["code"], "memcastle::input::invalid");
+    let (status, bad) = get(
+        &daemon,
+        &format!("{base}?before_created_at=no&before_id={id}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(bad["code"], "memcastle::input::invalid");
+    let (status, _) = call(
+        &daemon,
+        Method::GET,
+        &format!("/api/drawers/{id}"),
+        None,
+        Some("disabled"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_drawer_name_holding_other_content_is_a_409_and_the_same_content_is_a_no_op() {
     let daemon = TestDaemon::start().await;
     let path = "/api/wings/w/rooms/r/drawers";

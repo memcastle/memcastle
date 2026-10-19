@@ -17,7 +17,7 @@ const navigation = computed(() =>
   router
     .getRoutes()
     .filter((entry) => entry.meta.icon && !entry.meta.public)
-    .map((entry) => ({ name: entry.name as string, path: entry.path, title: entry.meta.title as string, icon: entry.meta.icon as string })),
+    .map((entry) => ({ name: entry.name as string, path: entry.path, title: entry.meta.title as string, icon: entry.meta.icon as string, group: entry.meta.group as string | undefined })),
 )
 
 const modes: { value: MemoryMode; label: string }[] = [
@@ -55,9 +55,12 @@ async function signOut(): Promise<void> {
     <aside class="sidebar">
       <div class="brand"><img :src="brand" alt="" width="28" height="28" /><span>MemCastle</span></div>
       <nav aria-label="Main">
-        <RouterLink v-for="item in navigation" :key="item.name" :to="item.path" class="nav-link" :class="{ active: route.name === item.name }">
+        <template v-for="item in navigation" :key="item.name">
+        <div v-if="item.group && navigation.find((entry) => entry.group === item.group)?.name === item.name" class="nav-group">{{ item.group }}</div>
+        <RouterLink :to="item.path" class="nav-link" :class="{ active: route.name === item.name, 'nav-nested': !!item.group }">
           <Icon :name="item.icon" /> <span>{{ item.title }}</span>
         </RouterLink>
+        </template>
       </nav>
       <div class="sidebar-footer">
         <label class="footer-row">

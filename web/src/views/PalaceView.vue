@@ -2,15 +2,16 @@
 import Button from "openvue/button"
 import Skeleton from "openvue/skeleton"
 import Tag from "openvue/tag"
-import { computed, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import type { Drawer, DrawerHistory, SimilarDrawer } from "../api/types.ts"
+import type { Drawer, DrawerHistory, DrawerSummary, SimilarDrawer } from "../api/types.ts"
 import EmptyState from "../components/EmptyState.vue"
 import DetailDrawer from "../components/DetailDrawer.vue"
 import ErrorNotice from "../components/ErrorNotice.vue"
 import RefreshButton from "../components/RefreshButton.vue"
 import PageHeader from "../components/PageHeader.vue"
 import { asApiError, useLoad } from "../composables/useLoad.ts"
+import { useEvents } from "../events.ts"
 import { ago, shortId, utc } from "../format.ts"
 import { useSession } from "../session.ts"
 
@@ -18,27 +19,55 @@ import { useSession } from "../session.ts"
 const { client } = useSession()
 const route = useRoute()
 const router = useRouter()
+const events = useEvents()
+let unsubscribe: (() => void) | undefined
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
 
 const wing = ref<string>()
 const room = ref<string>()
-const limit = ref(50)
+const PAGE_SIZE = 50
+const page = ref<DrawerSummary[]>([])
+const pageError = ref<ReturnType<typeof asApiError> | null>(null)
+const pageLoading = ref(false)
+const hasMore = ref(false)
+const navigationFilter = ref("")
+let pageRequest = 0
 
 // A new wing, room or drawer changes the counts as well as the lists, so all three listen to all three.
 const changes = { on: ["wing", "room", "drawer"] } as const
 const wings = useLoad(() => client.wings(), changes)
 const detail = useLoad(async () => (wing.value ? await client.wing(wing.value) : undefined), changes)
-const drawers = useLoad(async () => (wing.value && room.value ? await client.drawers(wing.value, room.value, limit.value) : undefined), changes)
+const filteredWings = computed(() => (wings.data.value ?? []).filter((entry) => entry.name === wing.value || entry.name.toLowerCase().includes(navigationFilter.value.toLowerCase())))
+const filteredRooms = computed(() => (detail.data.value?.rooms ?? []).filter((entry) => entry.name === room.value || wing.value?.toLowerCase().includes(navigationFilter.value.toLowerCase()) || entry.name.toLowerCase().includes(navigationFilter.value.toLowerCase())))
+
+async function loadPage(reset = false): Promise<void> {
+  const selectedWing = wing.value
+  const selectedRoom = room.value
+  if (reset) { ++pageRequest; page.value = []; hasMore.value = false; pageError.value = null }
+  if (!selectedWing || !selectedRoom || pageLoading.value && !reset) return
+  const request = ++pageRequest
+  pageLoading.value = true
+  try {
+    const next = await client.drawers(selectedWing, selectedRoom, PAGE_SIZE, reset ? undefined : page.value.at(-1))
+    if (request !== pageRequest) return
+    page.value = reset ? next : [...page.value, ...next]
+    hasMore.value = next.length === PAGE_SIZE
+    pageError.value = null
+  } catch (caught) {
+    if (request === pageRequest) pageError.value = asApiError(caught)
+  } finally {
+    if (request === pageRequest) pageLoading.value = false
+  }
+}
 
 watch(wing, () => {
-  limit.value = 50
   void detail.refresh()
-  void drawers.refresh()
 })
-watch([room, limit], () => void drawers.refresh())
+watch([wing, room], () => void loadPage(true))
 
 /** Everything the page shows, since a new drawer changes the wing's counts as well as the room's list. */
 async function refreshAll(): Promise<void> {
-  await Promise.all([wings.refresh(), detail.refresh(), drawers.refresh()])
+  await Promise.all([wings.refresh(), detail.refresh(), loadPage(true)])
 }
 
 const opened = ref<{ drawer: Drawer; history?: DrawerHistory; similar?: SimilarDrawer[] }>()
@@ -81,46 +110,64 @@ async function open(id: string, selectedWing: string, selectedRoom: string): Pro
   }
 }
 
-const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.value && limit.value < 200)
+// The sidebar stays short even when a wing holds hundreds of rooms.
+onMounted(() => {
+  unsubscribe = events?.subscribe(["wing", "room", "drawer"], () => {
+    clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(() => void loadPage(true), 250)
+  })
+})
+onBeforeUnmount(() => { ++pageRequest; clearTimeout(refreshTimer); unsubscribe?.() })
 </script>
 
 <template>
   <PageHeader title="Palace" subtitle="Wings hold rooms, rooms hold drawers: verbatim memory, as it was written.">
     <RefreshButton :loading="wings.loading.value" :updated-at="wings.updatedAt.value" @refresh="refreshAll()" />
   </PageHeader>
-  <ErrorNotice :error="wings.error.value ?? detail.error.value ?? drawers.error.value ?? openError" @retry="wings.refresh()" />
+  <ErrorNotice :error="wings.error.value ?? detail.error.value ?? pageError ?? openError" @retry="refreshAll()" />
 
   <div class="resource-layout" :class="{ 'has-detail': !!selectedId }">
   <div class="resource-list split">
     <section class="panel">
       <h2>Wings</h2>
+      <label class="field" for="palace-filter">Filter wings and rooms</label>
+      <input id="palace-filter" v-model="navigationFilter" type="search" placeholder="Find a wing or room" />
       <Skeleton v-if="!wings.data.value && !wings.error.value" height="6rem" />
       <EmptyState v-else-if="!wings.data.value?.length" title="No wings yet" hint="Mine a directory or write a diary entry to create one." />
-      <template v-for="entry in wings.data.value" :key="entry.id">
-        <button type="button" class="list-item" :class="{ active: wing === entry.name }" @click="choose({ wing: entry.name, room: undefined, drawer: undefined })">
+      <div class="palace-tree" role="group" aria-label="Wings and rooms">
+      <template v-for="entry in filteredWings" :key="entry.id">
+        <button type="button" class="list-item" :aria-current="wing === entry.name ? 'location' : undefined" :class="{ active: wing === entry.name }" @click="choose({ wing: entry.name, room: undefined, drawer: undefined })">
           {{ entry.name }} <small>{{ entry.rooms }} rooms · {{ entry.drawers }} drawers</small>
         </button>
-        <template v-if="wing === entry.name">
+        <template v-if="wing === entry.name && !navigationFilter">
           <button
-            v-for="child in detail.data.value?.rooms"
+            v-for="child in filteredRooms"
             :key="child.id"
             type="button"
             class="list-item"
             style="padding-left: 1.6rem"
             :class="{ active: room === child.name }"
+            :aria-current="room === child.name ? 'location' : undefined"
             @click="choose({ room: child.name, drawer: undefined })"
           >
             {{ child.name }} <small>{{ child.drawers }}</small>
           </button>
         </template>
       </template>
+      </div>
+      <div v-if="wing && navigationFilter" class="palace-tree" role="group" :aria-label="`Rooms in ${wing}`">
+        <h3>Rooms in {{ wing }}</h3>
+        <button v-for="child in filteredRooms" :key="child.id" type="button" class="list-item" :class="{ active: room === child.name }" :aria-current="room === child.name ? 'location' : undefined" @click="choose({ room: child.name, drawer: undefined })">{{ child.name }} <small>{{ child.drawers }} drawers</small></button>
+      </div>
     </section>
 
     <section class="panel">
       <h2>Drawers <span v-if="wing" class="muted" style="text-transform: none">{{ wing }}<template v-if="room"> / {{ room }}</template></span></h2>
       <EmptyState v-if="!room" title="Choose a room" hint="Pick a wing, then one of its rooms." />
-      <EmptyState v-else-if="drawers.data.value && !drawers.data.value.length" title="This room is empty" />
-      <div v-for="entry in drawers.data.value" :key="entry.id" class="hit selectable-hit" role="button" tabindex="0" :aria-pressed="selectedId === entry.id" :aria-label="`Read drawer ${entry.name ?? shortId(entry.id)}`" @click="choose({ drawer: entry.id })" @keydown.enter.prevent="choose({ drawer: entry.id })" @keydown.space.prevent="choose({ drawer: entry.id })">
+      <p v-else-if="pageLoading && !page.length" role="status">Loading drawers…</p>
+      <EmptyState v-else-if="!page.length && !pageError" title="This room is empty" />
+      <div class="palace-drawers">
+      <div v-for="entry in page" :key="entry.id" class="hit selectable-hit" role="button" tabindex="0" :aria-pressed="selectedId === entry.id" :aria-label="`Read drawer ${entry.name ?? shortId(entry.id)}`" @click="choose({ drawer: entry.id })" @keydown.enter.prevent="choose({ drawer: entry.id })" @keydown.space.prevent="choose({ drawer: entry.id })">
         <div class="hit-meta">
           <strong style="color: var(--p-text-color)">{{ entry.name ?? shortId(entry.id) }}</strong>
           <Tag :value="entry.source.kind" severity="secondary" />
@@ -129,7 +176,8 @@ const canLoadMore = computed(() => (drawers.data.value?.length ?? 0) >= limit.va
         </div>
         <div>{{ entry.preview }}</div>
       </div>
-      <Button v-if="canLoadMore" label="Load more" size="small" severity="secondary" outlined @click="limit = Math.min(200, limit + 50)" />
+      </div>
+      <Button v-if="hasMore" label="Load more" size="small" severity="secondary" outlined :loading="pageLoading" @click="loadPage()" />
     </section>
   </div>
   <DetailDrawer v-if="selectedId" :title="opened?.drawer.name ?? shortId(selectedId)" :selection-key="selectedId" @close="choose({ drawer: undefined })">

@@ -115,6 +115,8 @@ pub(super) async fn delete_room(
 #[derive(Debug, Deserialize)]
 pub(super) struct ListDrawersParams {
     limit: Option<u32>,
+    before_created_at: Option<String>,
+    before_id: Option<String>,
 }
 
 pub(super) async fn list_drawers(
@@ -123,10 +125,43 @@ pub(super) async fn list_drawers(
     Path((wing, room)): Path<(String, String)>,
     ApiQuery(params): ApiQuery<ListDrawersParams>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let before = match (params.before_created_at, params.before_id) {
+        (None, None) => None,
+        (Some(time), Some(id)) => Some((
+            chrono::DateTime::parse_from_rfc3339(&time)
+                .map_err(|_| {
+                    crate::Error::invalid_input(
+                        "before_created_at",
+                        "use an RFC 3339 timestamp from the previous page",
+                    )
+                })?
+                .with_timezone(&chrono::Utc),
+            crate::Error::parse_drawer_id("before_id", &id)?,
+        )),
+        _ => return Err(crate::Error::invalid_input(
+            "cursor",
+            "pass both before_created_at and before_id from the last drawer of the previous page",
+        )
+        .into()),
+    };
     Ok(Json(
         state
             .app
-            .list_drawers(&wing, &room, params.limit, mode)
+            .list_drawers_page(&wing, &room, params.limit, before, mode)
+            .await?,
+    ))
+}
+
+/// Resolve an evidence id to a Palace deep link without transferring drawer content.
+pub(super) async fn drawer_location(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .app
+            .drawer_location(parse_drawer_id(&id)?, mode)
             .await?,
     ))
 }
