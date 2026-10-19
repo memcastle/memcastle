@@ -155,11 +155,6 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
             )));
         }
     }
-    if manifest.permissions.credential && !manifest.capabilities.needs_credentials {
-        return Err(invalid(
-            "permissions.credential is set, so capabilities.needs_credentials must be true",
-        ));
-    }
     if let Some(oauth) = &manifest.permissions.oauth {
         oauth.validate().map_err(invalid)?;
         // The flag is what `source list` and a miner's activation check read, so a source that signs in must say so.
@@ -366,14 +361,21 @@ read = ["locator"]
     const OAUTH: &str = "\n[capabilities]\nneeds_credentials = true\n\n[permissions.oauth]\nclient_id = \"abc\"\nscopes = [\"read\"]\ntoken_url = \"https://auth.example.com/token\"\ndevice_authorization_url = \"https://auth.example.com/device\"\n";
 
     #[test]
-    fn selected_credential_permission_requires_a_credential_capability() {
-        let unflagged = format!("{GOOD}\n[permissions]\ncredential = true\n");
-        let error = parse(&unflagged, &[]).unwrap_err().to_string();
-        assert!(error.contains("needs_credentials"), "{error}");
-        let flagged = format!(
+    fn selected_credential_permission_allows_a_source_to_mine_without_a_selection() {
+        let optional = format!("{GOOD}\n[permissions]\ncredential = true\n");
+        let manifest = parse(&optional, &[]).unwrap();
+        assert!(manifest.permissions.credential);
+        assert!(!manifest.capabilities.needs_credentials);
+    }
+
+    #[test]
+    fn a_required_selected_credential_is_declared_separately_from_its_permission() {
+        let required = format!(
             "{GOOD}\n[capabilities]\nneeds_credentials = true\n\n[permissions]\ncredential = true\n"
         );
-        assert!(parse(&flagged, &[]).unwrap().permissions.credential);
+        let manifest = parse(&required, &[]).unwrap();
+        assert!(manifest.permissions.credential);
+        assert!(manifest.capabilities.needs_credentials);
     }
 
     #[test]

@@ -157,6 +157,174 @@ async fn only_consented_acquisition_calls_receive_the_selected_credential() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn optional_selected_credentials_allow_public_and_shared_account_miners() {
+    let built = scaffold(
+        "optional-credential-demo",
+        Template::Rust,
+        |lib| {
+            lib.replace(
+                "Ok(SourceRef { source: NAME.to_string(), account: None, locator, options: Vec::new() })",
+                "let account = match memcastle::source::host::source_credential() { Ok(token) if token == \"shared-account\" => \"shared\", Err(_) => \"public\", _ => return Err(SourceError::Failed(\"wrong selection\".into())) };\n        Ok(SourceRef { source: NAME.to_string(), account: Some(account.into()), locator, options: Vec::new() })",
+            )
+            .replace(
+                "body,\n            metadata: json!",
+                "body: format!(\"{} {body}\", match memcastle::source::host::source_credential() { Ok(token) if token == \"shared-account\" => \"private-content\", Err(_) => \"public-content\", _ => return Err(SourceError::Failed(\"wrong selection\".into())) }),\n            metadata: json!",
+            )
+        },
+        |manifest| {
+            manifest.replace(
+                "[permissions.filesystem]",
+                "[permissions]\ncredential = true\n\n[permissions.filesystem]",
+            )
+        },
+    );
+    assert!(!built.project.manifest.capabilities.needs_credentials);
+    let name = &built.project.manifest.source.name;
+    let manifest =
+        std::fs::read_to_string(built.project.dir.join("memcastle-source.toml")).unwrap();
+    let bytes = std::fs::read(built.project.component_path()).unwrap();
+    let archive = memcastle::source::package::pack(&manifest, &bytes, &[]).unwrap();
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let base = &daemon.base_url;
+    let consent = built.project.manifest.permissions.consent_digest(name);
+    let installed = client
+        .post(format!("{base}/api/source-packages"))
+        .query(&[("consent", consent.as_str()), ("enable", "true")])
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        installed.status().is_success(),
+        "{}",
+        installed.text().await.unwrap()
+    );
+
+    let tree = tempfile::tempdir().unwrap();
+    std::fs::write(tree.path().join("a.txt"), "source input").unwrap();
+    let secret = tempfile::tempdir().unwrap();
+    let credential = secret.path().join("shared-token");
+    std::fs::write(&credential, "shared-account\n").unwrap();
+    let configured = client
+        .put(format!("{base}/api/source-configs/shared"))
+        .json(&serde_json::json!({"source": name, "credential": {"type": "file", "path": credential}}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        configured.status().is_success(),
+        "{}",
+        configured.text().await.unwrap()
+    );
+
+    let mut ids = Vec::new();
+    for (miner, config, wing) in [
+        ("public", None, "public"),
+        ("shared-one", Some("shared"), "shared"),
+        ("shared-two", Some("shared"), "shared"),
+    ] {
+        let created = client
+            .put(format!("{base}/api/miners/{miner}"))
+            .json(&serde_json::json!({"source": name, "source_config": config, "locator": tree.path(), "wing": wing}))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            created.status().is_success(),
+            "{}",
+            created.text().await.unwrap()
+        );
+        let view: Value = client
+            .get(format!("{base}/api/miners/{miner}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(view["state"], "ready", "{view}");
+        let submitted: Value = client
+            .post(format!("{base}/api/miners/{miner}/run"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(!submitted.to_string().contains(credential.to_str().unwrap()));
+        assert!(!submitted.to_string().contains("shared-account"));
+        let id = submitted["id"].as_str().unwrap().parse().unwrap();
+        let done =
+            common::wait_for_job_status(&client, base, id, memcastle::domain::JobStatus::Completed)
+                .await;
+        assert!(
+            !serde_json::to_string(&done)
+                .unwrap()
+                .contains(credential.to_str().unwrap())
+        );
+        assert!(
+            !serde_json::to_string(&done)
+                .unwrap()
+                .contains("shared-account")
+        );
+        ids.push(
+            done.result.unwrap()["source_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    assert_ne!(ids[0], ids[1], "public mining must keep its own cursor");
+    assert_eq!(ids[1], ids[2], "the named configuration shares its cursor");
+    for (wing, expected, excluded) in [
+        ("public", "public-content", "private-content"),
+        ("shared", "private-content", "public-content"),
+    ] {
+        let hits: Vec<Value> = client
+            .get(format!("{base}/api/search"))
+            .query(&[("q", expected), ("wing", wing)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(!hits.is_empty(), "{wing} should contain {expected}");
+        let wrong: Vec<Value> = client
+            .get(format!("{base}/api/search"))
+            .query(&[("q", excluded), ("wing", wing)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            wrong.is_empty(),
+            "{wing} must not contain {excluded}: {wrong:?}"
+        );
+    }
+
+    let rejected = client
+        .put(format!("{base}/api/miners/missing-credential"))
+        .json(&serde_json::json!({"source": name, "locator": tree.path(),
+            "credential": {"type": "file", "path": secret.path().join("missing")}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), reqwest::StatusCode::BAD_REQUEST);
+    let reason: Value = rejected.json().await.unwrap();
+    assert!(
+        reason["error"]
+            .as_str()
+            .unwrap()
+            .contains("create a readable file")
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_component_built_against_the_original_zero_four_host_interface_still_links() {
     let dir = tempfile::tempdir().unwrap();
     let (root, _) = init(dir.path(), "original-zero-four", Template::Rust).unwrap();
@@ -243,6 +411,20 @@ async fn two_named_configurations_use_distinct_files_and_miners_share_their_sele
         installed.status().is_success(),
         "{}",
         installed.text().await.unwrap()
+    );
+    let missing = client
+        .put(format!("{base}/api/miners/unselected"))
+        .json(&serde_json::json!({"source": name, "locator": "/tmp"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), reqwest::StatusCode::BAD_REQUEST);
+    let reason: Value = missing.json().await.unwrap();
+    assert!(
+        reason["error"]
+            .as_str()
+            .unwrap()
+            .contains("needs a selected env or file credential")
     );
     let secrets = tempfile::tempdir().unwrap();
     let work = secrets.path().join("work");

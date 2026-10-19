@@ -1035,8 +1035,8 @@ impl AppServices {
         Ok(())
     }
 
-    /// A source that signs in with OAuth needs that done whatever the miner says, and a miner that says `oauth` for a
-    /// source that does not is mistaken: both are said here, with the command that fixes it.
+    /// Required selected credentials and OAuth sign-ins must be ready before enabling or running a miner; optional
+    /// selected credentials are resolved only when the miner or source configuration chooses one.
     pub(super) async fn check_credential(
         &self,
         miner: &MinerDefinition,
@@ -1074,6 +1074,7 @@ impl AppServices {
                 .map_err(|error| error.to_string())?
                 .is_some_and(|record| {
                     record.manifest.permissions.credential
+                        && record.manifest.capabilities.needs_credentials
                         && record.manifest.permissions.oauth.is_none()
                 })
         {

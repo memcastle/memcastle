@@ -84,7 +84,7 @@ memcastle = ">=0.4.0, <0.5.0"  # this release line; change it when targeting ano
 [capabilities]               # the same three as a built-in adapter; all default to false
 incremental = true
 retains_raw = false
-needs_credentials = false
+needs_credentials = false   # true when credentials are required; see the OAuth rule below
 
 [permissions.filesystem]
 read = ["locator"]           # "locator", an absolute directory, or "~/..."
@@ -93,7 +93,7 @@ read = ["locator"]           # "locator", an absolute directory, or "~/..."
 network = false              # all or nothing
 process = []                 # bare program names the source may run
 env = []                     # environment variables the source may read
-credential = false           # opt in to the selected env/file credential (needs_credentials = true)
+credential = false           # opt in to the selected env/file credential, required or optional
 
 # Only for a source that signs in with OAuth; see "Signing in with OAuth". needs_credentials must then be true.
 # [permissions.oauth]
@@ -134,7 +134,7 @@ fixtures = "fixtures"
 | `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`, and optional `breadth` (`include`, `opt_in_include`, `exclude` or `since`). Options are not permissions: they ask for nothing and are no part of what a user consents to. |
 | `triggers.<kind>` | `webhook` or `watch` (a timetable and a poll are every source's, so they are not declared), with a one-line `description`. A capability, not a permission: nothing starts because it is declared, and it is no part of what a user consents to. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
-| `permissions.credential` | `true` requires `capabilities.needs_credentials = true`; consent grants access to the selected env/file reference, not to every daemon credential. |
+| `permissions.credential` | `true` grants access to a selected env/file reference, not every daemon credential. With `capabilities.needs_credentials = false`, mining without a selection is allowed; with `true`, a selected env/file credential is required. |
 | `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. A declared `callback_path` replaces `/callback` on the same loopback listener; `on_demand = true` lets an offline mode proceed without a sign-in while the online mode must ask for its token at `identify`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
 
@@ -227,8 +227,15 @@ A package that asks for nothing needs no consent.
 
 ## Selected env and file credentials
 
-A source using operator-managed account tokens declares `needs_credentials = true` under `[capabilities]` and
-`credential = true` under `[permissions]`.
+A source using operator-managed account tokens declares `credential = true` under `[permissions]`.
+Set `needs_credentials = true` under `[capabilities]` when every miner needs a selected env/file reference;
+leave it `false` for a source that can also mine public material without one.
+An enabled miner without a reference can run the optional source, but `source-credential` returns an error when called
+without a selection, so the source must handle that result and use its public mode or a separately consented fallback.
+When a miner or its source configuration does select a reference, the daemon still requires it to resolve before the
+miner can run.
+For example, a source may separately grant `GH_TOKEN` under `permissions.env`; that grant is independent of a job's
+selected credential, and the source must handle an unset variable if it supports public mining.
 Inside `identify`, `discover` or `read`, a Rust component generated from this WIT can call
 `memcastle::source::host::source_credential()` and handle its `Result<String, String>`.
 For example, `let token = memcastle::source::host::source_credential().map_err(SourceError::Failed)?;`.
