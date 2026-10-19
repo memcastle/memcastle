@@ -70,7 +70,7 @@ jobs:
           fi
           mkdir -p dist
           cp 'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' \
-            'dist/memcastle_${{ inputs.sha }}_${{ matrix.asset }}${{ matrix.ext }}'
+            'dist/memcastle_${{ matrix.asset }}${{ matrix.ext }}'
       - uses: actions/upload-artifact@v7
         with:
           name: development-${{ matrix.asset }}
@@ -109,13 +109,13 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          test -s "dist/memcastle_${SHA}_linux-amd64"
+          test -s dist/memcastle_linux-amd64
           git fetch origin main
           if [[ "$(git rev-parse origin/main)" != "$SHA" ]]; then
             echo '::notice::Newer main commit exists; keep the last completed prerelease.'
             exit 0
           fi
-          (cd dist && sha256sum -- memcastle_* > "SHA256SUMS_${SHA}")
+          (cd dist && sha256sum -- memcastle_linux-amd64 > SHA256SUMS)
           if gh release view development --json isDraft,isPrerelease >/dev/null 2>&1; then
             test "$(gh release view development --json isPrerelease --jq .isPrerelease)" = true || {
               echo '::error::development tag belongs to a non-prerelease release'
@@ -125,12 +125,19 @@ jobs:
             gh release create development --target "$SHA" --title 'Development (main)' \
               --notes 'Pending development binaries' --draft --prerelease
           fi
-          gh release upload development dist/* --clobber
-          git fetch origin main
-          if [[ "$(git rev-parse origin/main)" != "$SHA" ]]; then
-            echo '::notice::Newer main commit arrived during upload; keep the last advertised revision.'
-            exit 0
-          fi
-          # A release body is the single authoritative pointer; SHA-qualified assets remain immutable.
+          # Label the binary before replacing either asset so clients reject a partially updated pair.
+          gh release upload development "dist/memcastle_linux-amd64#${SHA}" dist/SHA256SUMS --clobber
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/development" --jq .id)"
+          assets="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" --slurp)"
+          jq -e --arg sha "$SHA" '
+            [ .[][] | select(.name == "memcastle_linux-amd64" and .label == $sha and .size > 0) ] | length == 1
+          ' <<< "$assets" >/dev/null
+          jq -e '[ .[][] | select(.name == "SHA256SUMS" and .size > 0) ] | length == 1' <<< "$assets" >/dev/null
+          # Once both uploaded assets exist, the body can advertise the completed build.
           gh release edit development --title 'Development (main)' \
             --notes "Core main SHA: ${SHA}" --prerelease --draft=false
+          # GitHub's --clobber only replaces equal names; old SHAs and platforms need explicit removal.
+          jq -r '.[][] | select(.name != "memcastle_linux-amd64" and .name != "SHA256SUMS") | .id' \
+            <<< "$assets" | while IFS= read -r asset_id; do
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" --silent
+            done

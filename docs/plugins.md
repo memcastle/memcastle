@@ -248,11 +248,12 @@ standalone provider CI and its release workflow build neither unrelated provider
 Every successful Core CI run on `main` that passes the basic, slow, WebAssembly and other required Core jobs
 publishes a Linux amd64 development binary to the fixed
 [`development` prerelease](https://github.com/memcastle/memcastle/releases/tag/development).
-The release body contains `Core main SHA: <40-character SHA>`; the binary is named
-`memcastle_<SHA>_linux-amd64`, with `SHA256SUMS_<SHA>` covering it.
-Only after the binary and checksum are uploaded does the publisher change the body to the new SHA.
-If CI, a build, or an upload fails, the previously advertised SHA stays in place;
-a superseded commit is not published.
+The release contains exactly `memcastle_linux-amd64` and `SHA256SUMS`, whose sole entry covers that binary.
+The release body contains `Core main SHA: <40-character SHA>`, and the binary asset's label records the same SHA.
+The publisher updates the body only after both assets are uploaded, then removes all older assets.
+If CI or a build fails, the previous release stays available; a failed upload or an in-progress replacement
+may briefly prevent downloads until a complete pair with the advertised SHA is restored.
+A superseded commit is not published when the publisher starts.
 The `development` tag is a fixed discovery address, **not** a pointer to the newest source commit:
 read the release body.
 Stable tags, versioning, Homebrew and AUR publication remain independent of this prerelease.
@@ -276,7 +277,7 @@ jobs:
     needs: package
     strategy:
       matrix:
-        core: [main]
+        core: [development]
     uses: memcastle/memcastle/.github/workflows/plugin-validation.yaml@main
     with:
       artifact-name: plugin-package
@@ -284,8 +285,8 @@ jobs:
       extra-smoke-command: node scripts/smoke_adoption.mjs
 ```
 
-The legacy `core-versions` JSON array still accepts exact tags and defaults to `[]`, yielding `[main]` for old callers.
-New callers supply one `core-version` per static matrix leg, including `main` or a published stable release tree.
+Callers supply one required `core-version` per matrix leg, including `development` or a published stable release tree.
+The shared workflow validates exactly that one version; the caller owns its compatibility matrix.
 Add `0.5` only after a plugin-capable Core release exists; there is no conditional integration-test skip.
 The required `artifact-name` identifies the already-built plugin; `archive-path` remains an optional legacy input.
 Without it Core demands exactly one archive below `dist/` and reports that path to the caller;
@@ -297,9 +298,9 @@ the generic `plugin test` always runs on the supplied archive before them.
 The provider's release workflow decides when to validate, requires its own reviewed version tag,
 and publishes the archive only after the shared validation succeeds.
 The root `memcastle/memcastle@main` action places the verified binary on PATH and returns `binary`, `core_sha` and
-`resolved_version`. `main` is verified against SHA-qualified development checksums, while `0.5`/`1` choose the latest
-published patch in that minor/major tree before checking its exact stable release checksum.
-The nested `core-binary` action still supports exact versions and exports `MEMCASTLE_BIN` for older callers.
+`resolved_version`. `development` is checked against the release body, asset label and fixed-name checksum;
+`0.5`/`1` choose the latest published patch in that minor/major tree before checking its exact stable release checksum.
+An exact stable tag is downloaded directly; a missing release or asset fails at download time.
 Each compatibility matrix leg reports its exact Core revision in the job summary.
 To add another provider, supply its own package/check and archive install scripts,
 select compatible stable tags explicitly, and keep provider-specific fixture setup or legacy migration smokes

@@ -2,32 +2,32 @@ name: Setup MemCastle Core
 description: Download a verified Core release and put memcastle on PATH for plugin CI
 inputs:
   version:
-    description: main, an exact stable version, or the latest patch in a major/minor release tree
-    default: main
+    description: development, an exact stable version, or the latest patch in a major/minor release tree
+    default: development
 outputs:
   binary:
     description: Absolute path to the verified memcastle executable
     value: ${{ steps.path.outputs.binary }}
   core_sha:
-    description: Core source SHA for main, or the resolved exact stable version
+    description: Core source SHA for development, or the resolved exact stable version
     value: ${{ steps.download.outputs.core_sha }}
   resolved_version:
-    description: Exact stable release selected for a version tree, or main
-    value: ${{ steps.resolve.outputs.version }}
+    description: Exact stable release selected for a version tree, or development
+    value: ${{ steps.download.outputs.version }}
 runs:
   using: composite
   steps:
-    - name: Resolve Core release tree
-      id: resolve
+    - name: Download and verify Core
+      id: download
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        if [[ "$VERSION" == main || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          selected="$VERSION"
-        elif [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        selected="$VERSION"
+        if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+          # Only release trees require discovery; exact tags fail naturally on download.
           selected="$(gh api --paginate 'repos/memcastle/memcastle/releases?per_page=100' \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             | awk -v tree="$VERSION" '
@@ -36,15 +36,36 @@ runs:
                   if (version[1] == requested[1] && (index(tree, ".") == 0 || version[2] == requested[2])) print
                 }' | sort -V | tail -n 1)"
           [[ -n "$selected" ]] || { echo "::error::no published Core release matches $VERSION"; exit 1; }
-        else
-          echo "::error::Core version must be main, a release tree (0.5 or 1), or an exact stable tag"
-          exit 1
         fi
+        if [[ "$selected" == development ]]; then
+          metadata="$(gh api repos/memcastle/memcastle/releases/tags/development)"
+          [[ "$(jq -r '.draft == false and .prerelease == true' <<< "$metadata")" == true ]] || exit 1
+          sha="$(jq -r '.body | capture("Core main SHA: (?<sha>[0-9a-f]{40})").sha' <<< "$metadata")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$(jq -r '.assets[] | select(.name == "memcastle_linux-amd64") | .label' <<< "$metadata")" == "$sha" ]] || {
+            echo '::error::development binary does not match the advertised Core SHA'; exit 1;
+          }
+          name=memcastle_linux-amd64
+        else
+          sha="$selected"
+          name="memcastle_${selected}_linux-amd64"
+        fi
+        dest="$(mktemp -d "$RUNNER_TEMP/memcastle-XXXXXXXX")"
+        gh release download "$selected" --repo memcastle/memcastle --pattern "$name" --dir "$dest"
+        gh release download "$selected" --repo memcastle/memcastle --pattern SHA256SUMS --dir "$dest"
+        # A release may have other checksums; only the selected binary is trusted.
+        (cd "$dest" && awk -v name="$name" '$2 == name { print }' SHA256SUMS | sha256sum --check --status)
+        if [[ "$selected" == development ]]; then
+          current="$(gh api repos/memcastle/memcastle/releases/tags/development)"
+          [[ "$(jq -r '.body | capture("Core main SHA: (?<sha>[0-9a-f]{40})").sha' <<< "$current")" == "$sha" \
+             && "$(jq -r '.assets[] | select(.name == "memcastle_linux-amd64") | .label' <<< "$current")" == "$sha" ]] || {
+            echo '::error::development release changed during download'; exit 1;
+          }
+        fi
+        chmod +x "$dest/$name"
+        echo "binary=$dest/$name" >> "$GITHUB_OUTPUT"
+        echo "core_sha=$sha" >> "$GITHUB_OUTPUT"
         echo "version=$selected" >> "$GITHUB_OUTPUT"
-    - uses: memcastle/memcastle/.github/actions/core-binary@main
-      id: download
-      with:
-        version: ${{ steps.resolve.outputs.version }}
     - name: Put verified binary on PATH
       id: path
       shell: bash
