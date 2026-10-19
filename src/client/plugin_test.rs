@@ -12,7 +12,6 @@ use tokio::process::Command;
 use crate::app::MinerPatch;
 use crate::domain::{PluginModule, PluginModuleKind, SourceState};
 use crate::error::{Error, Result};
-use crate::integration::Catalog;
 use crate::plugin::package;
 
 use super::DaemonClient;
@@ -58,7 +57,7 @@ pub async fn run(archive: &Path) -> Result<()> {
     drop(listener);
 
     let binary = std::env::current_exe().map_err(|e| Error::io("memcastle executable", e))?;
-    let mut command = Command::new(binary);
+    let mut command = Command::new(&binary);
     command
         .arg("--palace")
         .arg(&palace)
@@ -173,17 +172,65 @@ pub async fn run(archive: &Path) -> Result<()> {
             .filter(|module| module.kind == PluginModuleKind::Integration)
             .map(|module| module.id.as_str())
             .collect::<HashSet<_>>();
-        // The agent-side catalogue reads installed generations, not the daemon's plugin inventory.
-        let catalogs = Catalog::plugin_catalogs(&scratch.path().join("data/memcastle/plugins"))?;
-        let discovered = catalogs
-            .iter()
-            .flat_map(|catalog| catalog.integrations().iter().map(|item| item.id()))
-            .collect::<HashSet<_>>();
-        ensure(
-            discovered == integrations,
-            &id,
-            "installed integrations differ from the archive's module inventory",
-        )?;
+        if !integrations.is_empty() {
+            // Ask the same local CLI that an agent installer uses; the library must never call its installer.
+            let assets = scratch.path().join("assets");
+            std::fs::create_dir(&assets)
+                .map_err(|e| Error::io("plugin test empty assets directory", e))?;
+            let mut listing_command = Command::new(&binary);
+            listing_command
+                .args(["--json", "integration", "list", "--assets-dir"])
+                .arg(&assets)
+                .current_dir(scratch.path())
+                .env_clear()
+                .env("HOME", scratch.path())
+                .env("XDG_CONFIG_HOME", scratch.path().join("config"))
+                .env("XDG_DATA_HOME", scratch.path().join("data"))
+                .env("XDG_STATE_HOME", scratch.path().join("state"))
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+            #[cfg(windows)]
+            {
+                // Windows needs system locations even when all user state belongs to the scratch palace.
+                for key in ["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"] {
+                    if let Some(value) = std::env::var_os(key) {
+                        listing_command.env(key, value);
+                    }
+                }
+                listing_command.env("USERPROFILE", scratch.path());
+                listing_command.env("TEMP", scratch.path());
+                listing_command.env("TMP", scratch.path());
+            }
+            let listing = listing_command
+                .output()
+                .await
+                .map_err(|e| Error::io("list disposable plugin integrations", e))?;
+            ensure(
+                listing.status.success(),
+                &id,
+                format!(
+                    "installed integration discovery failed: {}",
+                    String::from_utf8_lossy(&listing.stderr)
+                ),
+            )?;
+            let report: serde_json::Value = serde_json::from_slice(&listing.stdout)
+                .map_err(|e| Error::serialization("disposable integration listing", e))?;
+            let discovered = report["integrations"]
+                .as_array()
+                .ok_or_else(|| failed(&id, "integration listing returned no inventory"))?;
+            let ids = discovered
+                .iter()
+                .filter_map(|item| item["id"].as_str())
+                .collect::<HashSet<_>>();
+            // An absent agent may report "incompatible" rather than "not_installed"; no receipt is the invariant.
+            ensure(
+                ids == integrations
+                    && discovered
+                        .iter()
+                        .all(|item| item["installed_version"].is_null()),
+                &id,
+                "installed integrations differ from the archive or were registered in an agent",
+            )?;
+        }
         for module in &package.manifest.modules {
             if module.kind == PluginModuleKind::Source {
                 let source = client.show_source(&module.id).await?;
