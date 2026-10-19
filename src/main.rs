@@ -94,12 +94,11 @@ async fn async_main() -> ExitCode {
     }
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
-    // Also before the configuration: developing and publishing a source (`init`, `build`, `test`, `package`, `index`,
+    // Also before the configuration: developing and publishing a source (`build`, `test`, `package`, `index`,
     // `keygen`) works on a project directory and its archives, needs no daemon and no palace, and a broken config must
     // not get in its way.
     if let Command::Source(
-        command @ (SourceCommand::Init(_)
-        | SourceCommand::Build(_)
+        command @ (SourceCommand::Build(_)
         | SourceCommand::Test(_)
         | SourceCommand::Package(_)
         | SourceCommand::Index(_)
@@ -1147,40 +1146,13 @@ async fn cmd_plugin(
     }
 }
 
-/// `memcastle source init|build|test|package`: working on a source project, entirely on this machine.
+/// `memcastle source build|test|package`: working on a source project, entirely on this machine.
 ///
 /// No daemon and no configuration: these operate on a project directory and touch neither the store nor the jobs,
 /// which is what lets someone build a source before they have a palace (AGENTS.md, invariant 1).
 async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
     use memcastle::source::build::Project;
     match command {
-        SourceCommand::Init(args) => {
-            eprintln!(
-                "{} `source init` creates a legacy single-source project; use the memcastle-source.tpl GitTPL repository for new modules",
-                Painter::for_stderr().warn("Deprecated:")
-            );
-            let parent = match &args.parent {
-                Some(parent) => parent.clone(),
-                None => std::env::current_dir().map_err(|source| Error::io(".", source))?,
-            };
-            let (dir, files) =
-                memcastle::source::scaffold::init(&parent, &args.name, args.template)?;
-            let paint = Painter::for_stdout();
-            println!(
-                "{} {} ({} template)",
-                paint.ok("Created"),
-                dir.display(),
-                args.template.name()
-            );
-            for file in files {
-                println!("  {file}");
-            }
-            println!(
-                "\nNext: cd {} && memcastle source build && memcastle source test",
-                dir.display()
-            );
-            Ok(ExitCode::SUCCESS)
-        }
         SourceCommand::Build(args) => {
             let project = Project::open(&args.path)?;
             let component = project.build()?;
@@ -1440,8 +1412,7 @@ async fn cmd_source(
             )
         }
         // Handled before the configuration is loaded (see `async_main`), or by `run` for its exit code.
-        SourceCommand::Init(_)
-        | SourceCommand::Build(_)
+        SourceCommand::Build(_)
         | SourceCommand::Test(_)
         | SourceCommand::Package(_)
         | SourceCommand::Index(_)

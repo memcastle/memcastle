@@ -79,7 +79,7 @@ The dotted line is the important one: the CLI is an HTTP client of the daemon, e
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
 Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, offline `doctor`, local `completions`,
-local `source init`/`build`/`test`/`package`/`index`/`keygen`, local `plugin inspect`/`package`/`sign`/`test`, and
+local `source build`/`test`/`package`/`index`/`keygen`, local `plugin inspect`/`package`/`sign`/`test`, and
 local `integration list`/`install`/`update`/`remove` is a thin `client::DaemonClient` call
 (`note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon) —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
@@ -725,7 +725,7 @@ named programs without a shell, named environment variables, the network all or 
 limit.
 The source never sees the store, and the core compiles no source-specific SDK.
 Installing, enabling and removing are administrative (REST and CLI, no MCP tool),
-and the `source init`, `build`, `test`, `package`, `index` and `keygen` commands work without a daemon.
+and the `source build`, `test`, `package`, `index` and `keygen` commands work without a daemon.
 See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md).
 
 **Sources arrive from four places and share one lifecycle.**

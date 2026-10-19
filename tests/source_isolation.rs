@@ -300,7 +300,7 @@ fn only_the_webassembly_host_names_the_runtime() {
 
 #[test]
 fn source_tooling_never_reaches_storage_or_the_job_machinery() {
-    // `memcastle source init|build|test|package` run without a daemon (AGENTS.md invariant 1): the module behind
+    // `memcastle source build|test|package` run without a daemon (AGENTS.md invariant 1): the module behind
     // them must not be able to open a palace.
     for file in rust_files_recursive("src/source") {
         let source = shipped_code(&file);
@@ -412,7 +412,7 @@ fn only_the_application_layer_and_configuration_call_into_distribution() {
 
 #[test]
 fn local_source_tooling_and_adapters_never_open_the_network_themselves() {
-    // `memcastle source init|build|test|package|index|keygen` run offline on a developer's machine, and an adapter
+    // `memcastle source build|test|package|index|keygen` run offline on a developer's machine, and an adapter
     // reaches the outside world only through the sandbox its manifest declares (invariant 10). A second HTTP client in
     // either would be an unreviewed network path.
     for dir in ["src/source", "src/mining"] {

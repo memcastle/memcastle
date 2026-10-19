@@ -566,7 +566,7 @@ There are two ways to add a source.
   This is the extension model: the core compiles no source-specific code, and a source can be written, shipped and
   updated without a MemCastle release.
   [Writing a mining source](writing-sources.md) is the guide (the contract, the manifest, permissions, lifecycle,
-  conformance, packaging), and `memcastle source init` scaffolds one.
+  conformance, packaging), and `memcastle-source.tpl` scaffolds one through GitTPL.
 - **A built-in adapter** is Rust compiled into MemCastle, for the few sources that are simpler or faster native.
 
 Both implement the same contract, and a source cannot tell which kind it is.

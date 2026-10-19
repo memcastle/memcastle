@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+use crate::app::MinerPatch;
 use crate::domain::{PluginModule, PluginModuleKind, SourceState};
 use crate::error::{Error, Result};
 use crate::plugin::package;
@@ -56,7 +57,7 @@ pub async fn run(archive: &Path) -> Result<()> {
     drop(listener);
 
     let binary = std::env::current_exe().map_err(|e| Error::io("memcastle executable", e))?;
-    let mut command = Command::new(binary);
+    let mut command = Command::new(&binary);
     command
         .arg("--palace")
         .arg(&palace)
@@ -152,7 +153,7 @@ pub async fn run(archive: &Path) -> Result<()> {
             .chain(&preview.embedding_consents)
             .map(|source| (source.source.clone(), source.digest.clone()))
             .collect::<BTreeMap<_, _>>();
-        let installed = client.install_plugin(bytes, &consents, &[]).await?;
+        let installed = client.install_plugin(bytes.clone(), &consents, &[]).await?;
         ensure(
             inventory(&installed.manifest.modules) == inventory(&package.manifest.modules),
             &id,
@@ -164,6 +165,72 @@ pub async fn run(archive: &Path) -> Result<()> {
             &id,
             "installed plugin digest changed after installation",
         )?;
+        let integrations = package
+            .manifest
+            .modules
+            .iter()
+            .filter(|module| module.kind == PluginModuleKind::Integration)
+            .map(|module| module.id.as_str())
+            .collect::<HashSet<_>>();
+        if !integrations.is_empty() {
+            // Ask the same local CLI that an agent installer uses; the library must never call its installer.
+            let assets = scratch.path().join("assets");
+            std::fs::create_dir(&assets)
+                .map_err(|e| Error::io("plugin test empty assets directory", e))?;
+            let mut listing_command = Command::new(&binary);
+            listing_command
+                .args(["--json", "integration", "list", "--assets-dir"])
+                .arg(&assets)
+                .current_dir(scratch.path())
+                .env_clear()
+                .env("HOME", scratch.path())
+                .env("XDG_CONFIG_HOME", scratch.path().join("config"))
+                .env("XDG_DATA_HOME", scratch.path().join("data"))
+                .env("XDG_STATE_HOME", scratch.path().join("state"))
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+            #[cfg(windows)]
+            {
+                // Windows needs system locations even when all user state belongs to the scratch palace.
+                for key in ["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"] {
+                    if let Some(value) = std::env::var_os(key) {
+                        listing_command.env(key, value);
+                    }
+                }
+                listing_command.env("USERPROFILE", scratch.path());
+                listing_command.env("TEMP", scratch.path());
+                listing_command.env("TMP", scratch.path());
+            }
+            let listing = listing_command
+                .output()
+                .await
+                .map_err(|e| Error::io("list disposable plugin integrations", e))?;
+            ensure(
+                listing.status.success(),
+                &id,
+                format!(
+                    "installed integration discovery failed: {}",
+                    String::from_utf8_lossy(&listing.stderr)
+                ),
+            )?;
+            let report: serde_json::Value = serde_json::from_slice(&listing.stdout)
+                .map_err(|e| Error::serialization("disposable integration listing", e))?;
+            let discovered = report["integrations"]
+                .as_array()
+                .ok_or_else(|| failed(&id, "integration listing returned no inventory"))?;
+            let ids = discovered
+                .iter()
+                .filter_map(|item| item["id"].as_str())
+                .collect::<HashSet<_>>();
+            // An absent agent may report "incompatible" rather than "not_installed"; no receipt is the invariant.
+            ensure(
+                ids == integrations
+                    && discovered
+                        .iter()
+                        .all(|item| item["installed_version"].is_null()),
+                &id,
+                "installed integrations differ from the archive or were registered in an agent",
+            )?;
+        }
         for module in &package.manifest.modules {
             if module.kind == PluginModuleKind::Source {
                 let source = client.show_source(&module.id).await?;
@@ -180,6 +247,106 @@ pub async fn run(archive: &Path) -> Result<()> {
                 )?;
             }
         }
+        // Replaying the exact release must not undo an explicitly enabled source.
+        let replayed = client.install_plugin(bytes.clone(), &consents, &[]).await?;
+        ensure(
+            replayed.digest == installed.digest,
+            &id,
+            "reinstalling identical bytes changed the installed plugin",
+        )?;
+
+        // A new parent release with identical real module bytes tests the upgrade path without inventing guest code.
+        let mut next = package.manifest.clone();
+        let mut version = semver::Version::parse(&next.plugin.version)
+            .map_err(|e| failed(&id, format!("invalid packaged version: {e}")))?;
+        version.patch += 1;
+        version.pre = semver::Prerelease::EMPTY;
+        version.build = semver::BuildMetadata::EMPTY;
+        next.plugin.version = version.to_string();
+        let mut next_files = package.files.clone();
+        next_files.insert(
+            "plugin.toml".into(),
+            toml::to_string(&next)
+                .map_err(|e| Error::serialization("plugin test upgrade descriptor", e))?
+                .into_bytes(),
+        );
+        next_files.remove("manifest.toml");
+        let upgraded_bytes = package::pack(&next_files)?;
+        let upgraded_preview = client.preview_plugin(&upgraded_bytes).await?;
+        ensure(
+            inventory(&upgraded_preview.modules) == inventory(&package.manifest.modules),
+            &id,
+            "upgrading changed the plugin's typed module inventory",
+        )?;
+        let upgraded = client
+            .install_plugin(upgraded_bytes.clone(), &consents, &[])
+            .await?;
+        ensure(
+            upgraded.manifest.plugin.version == next.plugin.version,
+            &id,
+            "upgrade did not install the new parent version",
+        )?;
+        for module in &package.manifest.modules {
+            if module.kind == PluginModuleKind::Source {
+                ensure(
+                    client.show_source(&module.id).await?.state == SourceState::Enabled,
+                    &id,
+                    format!("upgrading disabled source `{}`", module.id),
+                )?;
+            }
+        }
+
+        if let Some(source) = package
+            .manifest
+            .modules
+            .iter()
+            .find(|module| module.kind == PluginModuleKind::Source)
+        {
+            client
+                .set_miner(
+                    "plugin-test-miner",
+                    &MinerPatch {
+                        source: Some(source.id.clone()),
+                        enabled: Some(false),
+                        ..MinerPatch::default()
+                    },
+                )
+                .await?;
+            ensure(
+                client.uninstall_plugin(&id).await.is_err(),
+                &id,
+                "uninstall removed a plugin still referenced by a disabled miner",
+            )?;
+            ensure(
+                client.show_miner("plugin-test-miner").await?.source == source.id,
+                &id,
+                "a blocked uninstall changed the configured miner",
+            )?;
+            client.remove_miner("plugin-test-miner").await?;
+        }
+        for module in &package.manifest.modules {
+            if module.kind == PluginModuleKind::Source {
+                client.set_source_enabled(&module.id, false).await?;
+            }
+        }
+        client.uninstall_plugin(&id).await?;
+        ensure(
+            !client
+                .list_plugins()
+                .await?
+                .iter()
+                .any(|item| item.id == id),
+            &id,
+            "uninstall left the plugin installed",
+        )?;
+        let restored = client
+            .install_plugin(upgraded_bytes, &consents, &[])
+            .await?;
+        ensure(
+            inventory(&restored.manifest.modules) == inventory(&package.manifest.modules),
+            &id,
+            "reinstall after uninstall lost plugin modules",
+        )?;
         Ok(())
     }
     .await;

@@ -41,7 +41,7 @@ impl Project {
             if source.kind() == std::io::ErrorKind::NotFound {
                 Error::SourceManifestInvalid {
                     message: format!(
-                        "{} has no `{MANIFEST_FILE}`; run this in a source project, or create one with `memcastle source init`",
+                        "{} has no `{MANIFEST_FILE}`; run this in a source project, or create one with memcastle-source.tpl and GitTPL",
                         dir.display()
                     ),
                 }
@@ -245,7 +245,7 @@ mod tests {
     fn opening_a_directory_without_a_manifest_says_what_to_do() {
         let dir = tempfile::tempdir().unwrap();
         let error = Project::open(dir.path()).err().unwrap().to_string();
-        assert!(error.contains("source init"), "{error}");
+        assert!(error.contains("memcastle-source.tpl"), "{error}");
     }
 
     #[test]

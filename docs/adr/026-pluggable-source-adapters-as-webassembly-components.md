@@ -115,6 +115,8 @@ a source whoever wrote it.
   enforced by `tests/source_isolation.rs`.
   The `cli` template is a component that wraps a command-line program through `run-process`, which is how a source
   written as a script is packaged behind the same contract.
+  Later plugin-template work removed the `source init` CLI scaffold; new projects use `memcastle-source.tpl` through
+  GitTPL, while `source build`, `test` and `package` remain local commands.
 - **One conformance suite, run against both kinds.**
   `tests/fixtures/sources/conformance/` holds language-neutral cases (a tree, the page size, the documents and canonical
   fields expected).

@@ -253,7 +253,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/wasm_runtime.rs`, `tests/wasm_plugin.rs` — installable mock sources against a real daemon: consent, independent
     module lifecycles, mining through the shared pipeline, retained data, and refusing a component altered on disk
     (in-process, WebAssembly suite).
-  - `tests/wasm_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
+  - `tests/wasm_projects.rs` — local source fixtures and `memcastle source build`, `test` and `package` for real, the sandbox
     (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
     unlisted program) and installing through the CLI.
     It builds components with Cargo for `wasm32-wasip2` (subprocess, WebAssembly suite);
@@ -328,7 +328,7 @@ The helpers in `tests/common/wasm.rs` keep that to one small crate per build:
   Cargo's package-cache lock, which every other build then waited for.
 - The mock source is built in place, in debug, into that shared directory, so generic tests never need a provider build
   or wait for the release build with LTO that source-owned CI legs make.
-- A test that drives `memcastle source init` must call `share_target_of` afterwards.
+- A test that builds a local source fixture through the CLI must call `share_target_of` after creating it.
   Without it the project builds in release into a `target/` of its own and recompiles every dependency, which used to be
   the two slowest tests in the suite.
 

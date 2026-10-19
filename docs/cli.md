@@ -508,8 +508,7 @@ installed integrations and dependent plugins,
 and preserves everything already mined.
 The existing `source install/search/update/remove` remain for format-1 source packages; they do not install a
 module out of a plugin package.
-`source init` remains as a deprecated compatibility scaffold for single-source v0.4 projects;
-use the GitTPL source and plugin repositories directly for new provider projects.
+Use the GitTPL source and plugin repositories directly to scaffold projects; `source init` is no longer a CLI command.
 `plugin sign` is local authoring tooling with no daemon or registry request.
 It reads a validated plugin archive and a private key generated with `memcastle source keygen`, then prints the
 archive SHA-256 and an ed25519 `signature` entry for a static `plugins.json` version entry.
@@ -528,12 +527,12 @@ The archive does not contain `plugin.toml`; an `ID-VERSION.sha256sum` beside it 
 It never builds a module or writes `manifest.toml` beside the project; commit source locks before publishing.
 `plugin test` validates the exact archive and starts a disposable loopback daemon in an isolated temporary palace.
 It previews and installs with per-module consents, verifies integrations remain discoverable but uninstalled in agents,
-then enables each newly installed source. Neither the configured palace nor any agent installation is touched.
+then enables each newly installed source. It also checks identical reinstall, parent-version upgrade, miner-blocked
+uninstall and reinstall after removal. Neither the configured palace nor any agent installation is touched.
 
 ### `source`
 
 ```sh
-memcastle source init <NAME> [--template rust|typescript|python|cli] [--parent <DIR>]
 memcastle source build [<PATH>]
 memcastle source test [<PATH>] [--no-build]
 memcastle source package [<PATH>] [--no-build] [--output <FILE>]

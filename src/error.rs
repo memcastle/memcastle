@@ -973,7 +973,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::source::incompatible),
         help(
-            "rebuild the source against this MemCastle's contract (`memcastle source init` scaffolds the current one), or install a MemCastle version it supports"
+            "rebuild the source against this MemCastle's contract (use the memcastle-source.tpl GitTPL template for new modules), or install a MemCastle version it supports"
         )
     )]
     SourceIncompatible {

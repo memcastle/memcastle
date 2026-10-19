@@ -2,7 +2,7 @@
 
 For a new provider plugin, invoke [`memcastle-source.tpl`](plugins.md) directly through GitTPL and compose the module
 into the provider's parent template.
-`memcastle source init` continues to scaffold the legacy single-source package format for v0.4 compatibility.
+The same source template can render a standalone module for the legacy source-package workflow.
 
 A mining source finds documents in some origin (a chat export, an issue tracker, an agent's session files),
 reads them, and puts them in MemCastle's terms.
@@ -17,14 +17,15 @@ so the pipeline cannot tell them apart ([ADR-026](adr/026-pluggable-source-adapt
 
 ```mermaid
 flowchart LR
-    I["memcastle source init"] --> B["source build"] --> T["source test"] --> P["source package"] --> N["source install"]
+    I["memcastle-source.tpl via GitTPL"] --> B["source build"] --> T["source test"] --> P["source package"] --> N["source install"]
     N --> E["source enable"] --> M["memcastle mine name"]
 ```
 
 ## Quick start
 
 ```sh
-memcastle source init my-notes --template rust
+git tpl init https://github.com/memcastle/memcastle-source.tpl my-notes --init \
+  --answer module_name=my-notes --defaults --strict-answers --trust
 cd my-notes
 memcastle source build        # dist/source.wasm
 memcastle source test         # the conformance cases, in the daemon's own sandbox
@@ -34,7 +35,7 @@ memcastle source install dist/my-notes-0.1.0.tar.gz --enable
 memcastle mine my-notes ~/notes
 ```
 
-`init`, `build`, `test`, `package`, `index` and `keygen` are local: they need no daemon and no palace.
+GitTPL and `build`, `test`, `package`, `index` and `keygen` are local: they need no daemon and no palace.
 `install` and the commands after it talk to the daemon.
 
 ## What a source implements
@@ -337,9 +338,13 @@ against.
 A patch version is documentation only.
 A new contract version makes every installed source of the old one `unavailable` with a reason that says to rebuild,
 rather than failing at the first mine.
-`memcastle source init` scaffolds against the contract of the MemCastle that ran it.
+Use a revision of `memcastle-source.tpl` whose contract matches the MemCastle release you target.
 
 ## Templates and their toolchains
+
+The maintained GitTPL source template is Rust/Wasm.
+The other implementations below describe existing legacy source projects and their toolchains; GitTPL does not generate
+those variants.
 
 | Template | Written in | Toolchain | Notes |
 |---|---|---|---|

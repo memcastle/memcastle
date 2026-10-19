@@ -5,7 +5,7 @@
 //! unpacking the distributable archive, scaffolding a new source, building it, and the conformance cases it is
 //! tested against. Running a component is `crate::mining::wasm`; deciding what is installed is `crate::app`.
 //!
-//! Nothing here touches the store or the jobs: `memcastle source init`, `build`, `test` and `package` work without
+//! Nothing here touches the store or the jobs: `memcastle source build`, `test` and `package` work without
 //! a daemon, which is the whole point of a development workflow (AGENTS.md, invariant 1).
 
 pub mod build;

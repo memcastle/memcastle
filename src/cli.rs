@@ -327,7 +327,7 @@ pub struct IntegrationRemoveArgs {
     pub agent: String,
 }
 
-/// `memcastle source` subcommands: the lifecycle of a mining source, from a new project to an installed package.
+/// `memcastle source` subcommands: local package tooling and the installed source lifecycle.
 #[derive(Debug, Subcommand)]
 pub enum SourceCommand {
     /// Inspect and edit reusable source settings, independently of miners.
@@ -335,9 +335,6 @@ pub enum SourceCommand {
         #[command(subcommand)]
         command: SourceConfigCommand,
     },
-    /// Create a new source project that builds, passes the conformance cases
-    /// and can be packaged straight away. Local: needs no daemon.
-    Init(SourceInitArgs),
     /// Build the project in the current directory (or `PATH`) into a
     /// WebAssembly component, with the command its `memcastle-source.toml`
     /// names under `[build]`. Local: needs no daemon.
@@ -511,20 +508,6 @@ pub struct PluginUninstallArgs {
     /// Confirm this administrative change in a script.
     #[arg(long)]
     pub yes: bool,
-}
-
-/// Arguments for `memcastle source init`.
-#[derive(Debug, Args)]
-pub struct SourceInitArgs {
-    /// The source's name: lowercase letters, digits and `-`. It becomes the
-    /// directory created, and the name given to `memcastle mine` when mining.
-    pub name: String,
-    /// The language and toolchain to start from.
-    #[arg(long, value_enum, default_value = "rust")]
-    pub template: memcastle::source::scaffold::Template,
-    /// Create the project here instead of in the current directory.
-    #[arg(long, value_name = "DIR")]
-    pub parent: Option<PathBuf>,
 }
 
 /// Arguments for `memcastle source build`.
