@@ -2105,6 +2105,24 @@ async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -
 }
 
 async fn cmd_embed(config: &Config, mode: Option<MemoryMode>, args: EmbedArgs) -> Result<()> {
+    if let Some(cli::EmbedAction::Test { profile, text }) = args.action {
+        if args.wing.is_some() || args.profile.is_some() || args.refresh != "missing" {
+            return Err(Error::invalid_input(
+                "embed test",
+                "put --profile after `test`; --wing and --refresh apply only to embedding jobs",
+            ));
+        }
+        let result = client(config, mode).test_embedding(profile, &text).await?;
+        return print_for_terminal_or_json(
+            |_, _| {
+                format!(
+                    "Embedding profile `{}` is ready ({} dimensions).",
+                    result.profile, result.dimensions
+                )
+            },
+            &result,
+        );
+    }
     let refresh = match args.refresh.as_str() {
         "stale" => memcastle::domain::EmbeddingRefresh::Stale,
         "all" => memcastle::domain::EmbeddingRefresh::All,

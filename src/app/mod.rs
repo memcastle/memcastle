@@ -136,6 +136,15 @@ pub struct StatusReport {
     pub auth_enabled: bool,
 }
 
+/// Safe metadata from an explicitly requested embedding-provider probe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingTestResult {
+    /// The selected profile, including the legacy `default` profile.
+    pub profile: String,
+    /// The validated length of the vector returned by the provider.
+    pub dimensions: usize,
+}
+
 /// The datastore section of a [`StatusReport`]: can the daemon reach its
 /// database right now, and is the database at the version this binary expects.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1363,6 +1372,37 @@ impl AppServices {
                 requested_by,
             )
             .await
+    }
+
+    /// Probe a selected provider only at the operator's request, without touching the palace.
+    pub async fn test_embedding(
+        &self,
+        profile: Option<&str>,
+        text: &str,
+    ) -> Result<EmbeddingTestResult> {
+        if text.trim().is_empty() || text.chars().count() > crate::domain::MAX_EMBED_CHARS {
+            return Err(Error::invalid_input(
+                "text",
+                "provide nonempty sample text of at most 8000 characters",
+            ));
+        }
+        let selected = self.embeddings.select(profile)?;
+        let space = selected.space().ok_or(Error::EmbeddingsNotConfigured)?;
+        if space.provider_type == "external" || space.provider_type == "none" {
+            return Err(Error::invalid_input(
+                "profile",
+                "this profile accepts caller-supplied vectors only; choose a command, openai or installed plugin embedding profile",
+            ));
+        }
+        if !selected.is_configured() {
+            return Err(Error::EmbeddingsNotConfigured);
+        }
+        // The shared embed path checks the count, finite coordinates and configured dimensions.
+        selected.embed_one(text).await?;
+        Ok(EmbeddingTestResult {
+            profile: space.profile.clone(),
+            dimensions: space.dimensions,
+        })
     }
 
     /// Submit a job that reads mined drawers and adds the entities and

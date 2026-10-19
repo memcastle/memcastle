@@ -131,6 +131,9 @@ A stopped daemon is a warning: offline checks can succeed without starting one.
 The command never initializes a palace, opens the database, executes a provider, contacts a provider/model or source registry,
 or writes to the filesystem; actual write access and provider/model availability remain unverified.
 It prints no credential values or raw sensitive settings.
+Named embedding profiles are checked individually without contacting the service; missing local credentials are hints,
+since the daemon may have a different environment.
+Run `memcastle embed test --profile NAME --text 'sample'` with a running daemon to confirm actual provider readiness.
 
 Example terminal output (a new palace with no daemon):
 
@@ -149,6 +152,7 @@ Paths
 
 Providers
   [OK] embeddings: No external provider is selected.
+        Fix: Configure a named `openai` (OpenAI-compatible) or `command` connection and a model profile in [embeddings]; see docs/configuration.md.
   [OK] extraction: No external provider is selected.
 
 Daemon and storage
@@ -930,9 +934,14 @@ Looking is gated as a read and changing as a write, see [Memory modes](memory-mo
 
 ```sh
 memcastle embed [--wing <WING>] [--profile <NAME>] [--refresh missing|stale|all]
+memcastle embed test [--profile <NAME>] --text <SAMPLE>
 ```
 
 Submits a job that computes vectors missing from the selected profile (the configured default unless `--profile` is set).
+The `test` action instead makes one explicit provider call, checks that the result has the profile's dimensions and
+returns only its profile name and vector length; it stores no text/vector and submits no job.
+When piped or with `--json`, it prints `{ "profile": "NAME", "dimensions": 768 }` instead of a human-readable summary.
+It is available regardless of memory mode and requires an authenticated daemon when authentication is enabled.
 `--refresh stale` also recomputes vectors whose input or canonical content changed; `--refresh all` recomputes the entire
 selected scope, including vectors that were already up to date.
 It needs an [`[embeddings]` provider](configuration.md#embeddings) and is refused with `memcastle::embed::not_configured`

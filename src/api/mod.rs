@@ -59,6 +59,10 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/status", get(status))
         .route("/api/events", get(events::events))
         .route("/api/config", get(config))
+        .route(
+            "/api/embeddings/test",
+            post(test_embedding).layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
+        )
         .route("/api/search", get(search).post(search_json))
         .route("/api/recall", get(recall).post(recall_json))
         .route("/api/wake-up", get(wake_up))
@@ -618,6 +622,26 @@ async fn submit_job(
         }
     };
     Ok(Json(job))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TestEmbeddingBody {
+    profile: Option<String>,
+    text: String,
+}
+
+/// A user-requested readiness check; no job or vector is persisted.
+async fn test_embedding(
+    State(state): State<ApiState>,
+    ApiJson(body): ApiJson<TestEmbeddingBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .app
+            .test_embedding(body.profile.as_deref(), &body.text)
+            .await?,
+    ))
 }
 
 /// The sources this daemon can mine and the ones it has mined (`memcastle sources`).
