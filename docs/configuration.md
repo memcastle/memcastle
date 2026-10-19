@@ -901,6 +901,12 @@ retain the existing source-keyed credential so upgrades do not lose them.
 ChatGPT's current web authorization can select only the default account: an additional named ChatGPT web configuration
 cannot authenticate yet; export-import miners remain usable without an account.
 Legacy miner `credential` references still load, but put new reusable credentials on the source configuration.
+When a source declares `[permissions] credential = true` and `capabilities.needs_credentials = false`, a miner can
+run without any credential reference, while another miner can use a named source configuration with a shared env/file
+reference.
+If `needs_credentials = true`, an enabled miner must select a resolvable reference through its miner definition or
+source configuration.
+Any selected env/file reference must resolve for either kind of source; the daemon pins that reference to each job.
 
 For a source named `team-feed` whose manifest declares `needs_credentials = true`,
 `[permissions] credential = true` and the network permission it needs to fetch its feed,

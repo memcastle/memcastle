@@ -252,7 +252,8 @@ pub struct SourceCapabilities {
     /// itself durable and local (a file on disk), on where the origin may be rotated away or is expensive to
     /// re-acquire.
     pub retains_raw: bool,
-    /// Whether the adapter needs a [`CredentialRef`] to acquire anything.
+    /// Whether credentials are required: with a selected env/file grant, a miner must choose a reference;
+    /// OAuth sign-in still follows its own on-demand rule.
     pub needs_credentials: bool,
     /// Its OAuth provider can sign in only one default web account (other named configurations may still be offline).
     pub single_account_auth: bool,
