@@ -36,13 +36,13 @@ default-filter = "binary(/^wasm_/)"
 [profile.ci-wasm.junit]
 path = "junit.xml"
 
-# The process-boundary tests and committed retrieval baseline run once, on Linux, with coverage.
+# The process-boundary tests, committed retrieval baseline and real-time miner schedule run once, on Linux, with coverage.
 [profile.slow]
-default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and test(retrieval_eval::suite::))"
+default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and (test(retrieval_eval::suite::) or test(miners::a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_disabled)))"
 
 [profile.ci-slow]
 inherits = "ci"
-default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and test(retrieval_eval::suite::))"
+default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and (test(retrieval_eval::suite::) or test(miners::a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_disabled)))"
 
 [profile.ci-slow.junit]
 path = "junit.xml"
