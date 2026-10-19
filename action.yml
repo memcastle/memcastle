@@ -81,4 +81,6 @@ runs:
         mkdir -p "$directory"
         ln -sfn "$BINARY" "$directory/memcastle"
         echo "$directory" >> "$GITHUB_PATH"
+        # Pi's integration tests require an explicit executable path, even when memcastle is on PATH.
+        echo "MEMCASTLE_BIN=$BINARY" >> "$GITHUB_ENV"
         echo "binary=$directory/memcastle" >> "$GITHUB_OUTPUT"
