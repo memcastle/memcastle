@@ -302,7 +302,6 @@ The root `memcastle/memcastle@main` action places the verified binary on PATH an
 `0.5`/`1` choose the latest published patch in that minor/major tree before checking its exact stable release checksum.
 An exact stable tag is downloaded directly; a missing release or asset fails at download time.
 The action also exports `MEMCASTLE_BIN` for integration tests that require an explicit executable path.
-During the plugin workflow migration, `main` remains a temporary input alias for `development`.
 Each compatibility matrix leg reports its exact Core revision in the job summary.
 To add another provider, supply its own package/check and archive install scripts,
 select compatible stable tags explicitly, and keep provider-specific fixture setup or legacy migration smokes
