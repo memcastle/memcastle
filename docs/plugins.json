@@ -46,6 +46,14 @@
       "modules": [
         { "id": "github", "type": "source" }
       ]
+    },
+    {
+      "id": "slack",
+      "description": "Scoped Slack channels, messages, and threads history",
+      "repository": "memcastle/memcastle-slack",
+      "modules": [
+        { "id": "slack", "type": "source" }
+      ]
     }
   ]
 }
