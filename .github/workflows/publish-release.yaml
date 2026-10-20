@@ -227,10 +227,18 @@ jobs:
       url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
 
     steps:
+      # The publishing App sees both the original Actions run and its draft;
+      # a read-only workflow token cannot see unpublished releases.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Verify the recovery matches the draft and original build
         if: inputs.recover
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ inputs.tag }}
           RUN_ID: ${{ inputs.run_id }}
         run: |
@@ -252,15 +260,6 @@ jobs:
           for asset in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
             test "$(jq --arg name "asset-$asset" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<< "$artifacts")" -eq 1
           done
-
-      # An installation token, revoked when this job ends. It cannot live in
-      # the job's `env:` — a step output is not resolvable there — so the one
-      # `gh` step below sets it itself.
-      - uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          client-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@v7
         with:
@@ -284,7 +283,7 @@ jobs:
           merge-multiple: true
           path: dist
           run-id: ${{ inputs.recover && inputs.run_id || github.run_id }}
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       # The sources that ship with MemCastle (docs/adr/033, docs/adr/040):
       # independently packaged WebAssembly components, not linked into the
