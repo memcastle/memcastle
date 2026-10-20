@@ -227,10 +227,19 @@ jobs:
       url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
 
     steps:
+      # Draft releases are visible to the App that owns publishing; the
+      # read-only workflow token can enumerate builds but not unpublished drafts.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Verify the recovery matches the draft and original build
         if: inputs.recover
         env:
           GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ inputs.tag }}
           RUN_ID: ${{ inputs.run_id }}
         run: |
@@ -244,7 +253,7 @@ jobs:
           test "$(jq -r '.head_branch' <<< "$run")" = "$TAG"
           test "$(jq -r '.event' <<< "$run")" = workflow_dispatch
           test "$(jq -r '.conclusion' <<< "$run")" = failure
-          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | .draft")"
+          release="$(GH_TOKEN="$APP_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | .draft")"
           test "$release" = true
           jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")"
           test "$(jq '[.jobs[] | select(.name | startswith("🏗️")) | select(.conclusion == "success")] | length' <<< "$jobs")" -eq 5
@@ -252,15 +261,6 @@ jobs:
           for asset in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
             test "$(jq --arg name "asset-$asset" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<< "$artifacts")" -eq 1
           done
-
-      # An installation token, revoked when this job ends. It cannot live in
-      # the job's `env:` — a step output is not resolvable there — so the one
-      # `gh` step below sets it itself.
-      - uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          client-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@v7
         with:
