@@ -144,11 +144,10 @@ jobs:
           set -euo pipefail
           pacman -U --noconfirm ./*.pkg.tar.zst
           memcastle --version
-          # The bundled sources must land where the daemon looks for them, unpacked, one directory each.
-          test -f /usr/share/memcastle/sources/codex/source.wasm
-          test -f /usr/share/memcastle/sources/codex/memcastle-source.toml
-          # The integrations must land there too, and be found from the binary's own prefix with no flag.
-          test -f /usr/share/memcastle/integrations/codex/memcastle-integration.toml
+          # Core currently ships no sources or agent integrations; their install roots must still exist.
+          test -d /usr/share/memcastle/sources
+          test -d /usr/share/memcastle/integrations
+          # Shared skills must be found from the binary's own prefix with no flag.
           test -f /usr/share/memcastle/skills/wake-up/SKILL.md
           # And the dashboard, at the path a checkout has too.
           test -f /usr/share/memcastle/web/dist/index.html
