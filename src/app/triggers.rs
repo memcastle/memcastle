@@ -1042,7 +1042,7 @@ pub struct TriggerHost {
 }
 
 impl trigger::Host for TriggerHost {
-    async fn desired(&self) -> Desired {
+    async fn desired(&self) -> Option<Desired> {
         let app = &self.app;
         let mut enabled: Vec<TriggerDefinition> = {
             let mut state = app.triggers.state.lock().await;
@@ -1055,9 +1055,8 @@ impl trigger::Host for TriggerHost {
                 .collect()
         };
         let Ok((miners, adapters)) = app.activation_context().await else {
-            // The store could not be read: keep what is running rather than stop everything on a hiccup. An empty
-            // answer would stop it, so retry on the next tick through the caller's loop.
-            return Desired::default();
+            // The store could not be read: the supervisor must preserve its tasks until the next tick.
+            return None;
         };
         enabled.extend(
             miners
@@ -1066,7 +1065,7 @@ impl trigger::Host for TriggerHost {
                 .filter(|t| t.enabled),
         );
         if enabled.is_empty() {
-            return Desired::default();
+            return Some(Desired::default());
         }
         let mut triggers = Vec::new();
         for trigger in enabled {
@@ -1078,10 +1077,10 @@ impl trigger::Host for TriggerHost {
                 }
             }
         }
-        Desired {
+        Some(Desired {
             triggers,
             listener: app.listener_settings().ok(),
-        }
+        })
     }
 
     async fn fire(&self, request: FireRequest) -> std::result::Result<FireOutcome, String> {
@@ -2120,7 +2119,11 @@ mod tests {
         let (app, _dir) = app_with_a_miner().await;
         let host = app.trigger_host();
         assert!(
-            host.desired().await.triggers.is_empty(),
+            host.desired()
+                .await
+                .expect("context available")
+                .triggers
+                .is_empty(),
             "no trigger is defined"
         );
 
@@ -2130,7 +2133,7 @@ mod tests {
         app.set_trigger("on", poll_patch(true))
             .await
             .expect("enabled");
-        let desired = host.desired().await;
+        let desired = host.desired().await.expect("context available");
         assert_eq!(
             desired
                 .triggers
@@ -2146,7 +2149,13 @@ mod tests {
 
         // The miner is switched off by hand: the trigger is enabled and no longer runnable, so it is not started.
         app.set_miner_enabled("docs", false).await.expect("off");
-        assert!(host.desired().await.triggers.is_empty());
+        assert!(
+            host.desired()
+                .await
+                .expect("context available")
+                .triggers
+                .is_empty()
+        );
         assert_eq!(
             app.show_trigger("on", MemoryMode::Full)
                 .await

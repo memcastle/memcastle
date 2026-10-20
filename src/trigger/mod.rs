@@ -88,8 +88,8 @@ pub struct Desired {
 
 /// What the supervisor needs from the daemon.
 pub trait Host: Clone + Send + Sync + 'static {
-    /// What should be running now, read from the configuration as it is at this moment.
-    fn desired(&self) -> impl Future<Output = Desired> + Send;
+    /// What should be running now, or `None` when a transient read failure prevents a decision.
+    fn desired(&self) -> impl Future<Output = Option<Desired>> + Send;
     /// Ask for a run. Records the outcome (or the failure) on the trigger.
     fn fire(
         &self,
@@ -193,15 +193,17 @@ impl<H: Host> Supervisor<H> {
                 self.host.maintain().await;
                 last_maintenance = Some(tokio::time::Instant::now());
             }
-            let desired = self.host.desired().await;
-            self.reconcile(
-                &desired,
-                &mut tasks,
-                &mut listener,
-                &mut bind_error,
-                &routes,
-            )
-            .await;
+            if let Some(desired) = self.host.desired().await {
+                // A failed read cannot mean "disable everything": keep tasks and their progress until a later tick.
+                self.reconcile(
+                    &desired,
+                    &mut tasks,
+                    &mut listener,
+                    &mut bind_error,
+                    &routes,
+                )
+                .await;
+            }
 
             tokio::select! {
                 () = cancel.cancelled() => break,
@@ -533,6 +535,53 @@ mod tests {
             host.noted("p", |n| matches!(n, Note::NextDue(None)))
         })
         .await;
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_desired_state_keeps_running_tasks_and_listener_until_a_real_change() {
+        let host = FakeHost::default();
+        host.set_secret("hook", b"s3cret");
+        host.set_desired(Desired {
+            triggers: vec![poll("1h"), webhook()],
+            listener: listener(0),
+        });
+        let (runtime, cancel, handle) = supervise(&host);
+        eventually("the poll and webhook to start", || {
+            runtime.is_running("p") && runtime.webhook_addr().is_some()
+        })
+        .await;
+        eventually("the poll's due time", || {
+            host.noted("p", |n| matches!(n, Note::NextDue(Some(_))))
+        })
+        .await;
+        let addr = runtime.webhook_addr().expect("listening");
+
+        host.set_unavailable(true);
+        let reads = host.desired_reads();
+        runtime.wake();
+        eventually("a failed desired-state read", || {
+            host.desired_reads() > reads
+        })
+        .await;
+        // Give reconciliation time to run too: a failed read must not stop the poll or close the listener.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(runtime.is_running("p") && runtime.is_running("hook"));
+        assert_eq!(runtime.webhook_addr(), Some(addr));
+        assert!(!host.noted("p", |n| matches!(n, Note::NextDue(None))));
+        assert_eq!(
+            deliver(addr, b"s3cret", "after-failure").await,
+            reqwest::StatusCode::ACCEPTED
+        );
+
+        host.set_desired(Desired::default());
+        host.set_unavailable(false);
+        runtime.wake();
+        eventually("both triggers to stop", || {
+            !runtime.is_running("p") && runtime.webhook_addr().is_none()
+        })
+        .await;
+        assert!(host.noted("p", |n| matches!(n, Note::NextDue(None))));
         stop(cancel, handle).await;
     }
 
