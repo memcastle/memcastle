@@ -88,8 +88,10 @@ An invariant nothing checks is a comment, and it will be violated.
    a token (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
    The one other exception is the web UI's static files: `GET`/`HEAD` of `/ui` and below, only when `web.enable`
    is set, named in `api::auth::is_public` and nowhere else (see `docs/adr/035-web-ui.md`).
-   A token or secret is never logged, serialised or persisted in plaintext (`config::Secret` redacts it;
-   the store holds only a digest) — see `docs/adr/014-optional-token-authentication.md`.
+   A daemon-auth token or secret is never logged or serialised in an answer (`config::Secret` redacts it),
+   and generated tokens are stored only as digests in the palace; a user may supply `auth.token` in their own config file.
+   Source OAuth tokens are kept only in the credential backend, which may be an owner-only file, never in the palace or logs
+   (see `docs/adr/014-optional-token-authentication.md` and `docs/configuration.md#credentials`).
    Enforced by `tests/in_process/auth.rs`
    (every route and an unknown path refused without a token, `/ui` refused while the dashboard is off, no
    credential-named MCP tool), `tests/credential_isolation.rs` (the OAuth credential module reaches neither the palace nor
