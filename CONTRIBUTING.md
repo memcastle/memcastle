@@ -102,8 +102,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, the bundled integrations with their skills,
   `memcastle_<tag>_integrations.tar.gz`, and the web UI, `memcastle_<tag>_web.tar.gz`, which one asset each serves
   to the AUR package and the Homebrew formula;
-- the source packages as archives, `<name>-<version>.tar.gz` with their `.sha256`, which the official source registry
-  resolves to (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
+- source packages as archives, `<name>-<version>.tar.gz` with their `.sha256`, when Core bundles sources;
+  an empty Core bundle has no source archive assets (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
   from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation, bundled sources,
   integrations, skills and the web UI)
@@ -144,6 +144,22 @@ Run a trial before changing `lto` or `codegen-units` in `[profile.release]`, and
 
 The pinned release workflow is template-owned (see below), so a change that belongs to every project generated
 from the template should be made in rust.tpl.
+
+### Recovering a failed draft
+
+If 📦 Publish Release fails after its five platform builds, leave the tag and draft release intact.
+Fix the publishing step on `main` through a reviewed pull request, then dispatch 🛠️ Recover Release on `main` with
+the existing tag and failed publish run ID:
+
+```sh
+gh workflow run recover-release.yaml --ref main -f tag=0.5.0 -f run_id=<failed-publish-run-id>
+```
+
+The recovery verifies that the saved binaries came from the tag, packages the tagged source with the fixed publish
+workflow, runs the package smoke tests and attestations, and uploads the assets to the existing draft.
+It never publishes the draft automatically: check that every expected asset, `SHA256SUMS`, and the attestations are
+present and valid, then make the existing release public with `gh release edit <tag> --draft=false`.
+If a platform build failed or its artifact expired, repair the build and use the normal release process instead.
 
 ### Repository requirements
 

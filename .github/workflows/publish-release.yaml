@@ -31,6 +31,12 @@ on:
       tag:
         required: true
         type: string
+      recover:
+        type: boolean
+        default: false
+      run_id:
+        type: string
+        default: ""
 
 # The upload authenticates as a GitHub App and carries its own permissions.
 # These cover `actions/checkout` alone, which only reads.
@@ -60,6 +66,7 @@ env:
 jobs:
   build:
     name: 🏗️ ${{ matrix.target }}
+    if: ${{ !inputs.recover }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -195,8 +202,10 @@ jobs:
   publish:
     name: 🚀 Publish
     needs: build
-    # Only a run on a tag releases: see the header. A trial stops after `build`.
-    if: github.ref_type == 'tag'
+    # A recovery on main reuses the binaries from the failed tagged run; branch trials never publish.
+    if: >-
+      always() && (needs.build.result == 'success' || inputs.recover)
+      && (github.ref_type == 'tag' || (inputs.recover && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
 
     # `id-token` lets the job ask GitHub to sign an attestation as this
@@ -205,6 +214,7 @@ jobs:
     # token instead, so none of these can publish a release.
     permissions:
       contents: read
+      actions: read
       id-token: write
       attestations: write
 
@@ -217,6 +227,32 @@ jobs:
       url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
 
     steps:
+      - name: Verify the recovery matches the draft and original build
+        if: inputs.recover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          test -n "$RUN_ID"
+          [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.type')" = commit
+          run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+          test "$(jq -r '.head_sha' <<< "$run")" = "$ref"
+          test "$(jq -r '.head_branch' <<< "$run")" = "$TAG"
+          test "$(jq -r '.event' <<< "$run")" = workflow_dispatch
+          test "$(jq -r '.conclusion' <<< "$run")" = failure
+          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | .draft")"
+          test "$release" = true
+          jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")"
+          test "$(jq '[.jobs[] | select(.name | startswith("🏗️")) | select(.conclusion == "success")] | length' <<< "$jobs")" -eq 5
+          artifacts="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100")"
+          for asset in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
+            test "$(jq --arg name "asset-$asset" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<< "$artifacts")" -eq 1
+          done
+
       # An installation token, revoked when this job ends. It cannot live in
       # the job's `env:` — a step output is not resolvable there — so the one
       # `gh` step below sets it itself.
@@ -233,11 +269,22 @@ jobs:
           # persisted checkout credential.
           persist-credentials: false
 
+      # The tag predates this fix; checkout the reviewed staging helper from
+      # the dispatch commit without changing any of the tagged package inputs.
+      - uses: actions/checkout@v7
+        if: inputs.recover
+        with:
+          ref: ${{ github.sha }}
+          path: .release-workflow
+          persist-credentials: false
+
       - uses: actions/download-artifact@v8
         with:
           pattern: asset-*
           merge-multiple: true
           path: dist
+          run-id: ${{ inputs.recover && inputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       # The sources that ship with MemCastle (docs/adr/033, docs/adr/040):
       # independently packaged WebAssembly components, not linked into the
@@ -263,8 +310,12 @@ jobs:
           set -euo pipefail
           chmod +x "dist/memcastle_${TAG}_linux-amd64"
           packaging/sources/build.sh "dist/memcastle_${TAG}_linux-amd64" stage-sources
-          # The release assets the official registry resolves to: `<name>-<version>.tar.gz`, and its checksum.
-          cp stage-sources/archives/* dist/
+          # Core can bundle zero sources; only stage archives that actually exist.
+          if [ "${{ inputs.recover }}" = true ]; then
+            bash .release-workflow/packaging/sources/stage-archives.sh stage-sources dist
+          else
+            bash packaging/sources/stage-archives.sh stage-sources dist
+          fi
 
       # The declarative agent integrations (docs/adr/034), with the shared skills they read.
       # Nothing is published to npm: the bundles are release assets and package content, and
