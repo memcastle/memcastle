@@ -949,7 +949,7 @@ You rarely run it: the daemon queues the same job after anything that writes dra
 backfilling after you configure a provider and for forcing a sweep.
 It only changes derived vector records and never changes canonical content, graph links or temporal history.
 The default missing-only job is safe to repeat and also recovers provenance-free legacy vectors into the chosen space.
-It is a write, so it is refused in `read_only` and `disabled` modes.
+The `embed` job is a write, so it is refused in `read_only` and `disabled` modes; `embed test` is not.
 
 ### `extract`
 
