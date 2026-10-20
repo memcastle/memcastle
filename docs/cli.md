@@ -711,12 +711,14 @@ memcastle source config list
 memcastle source config get <ID>
 memcastle source config auth <ID>
 memcastle source config set <ID> --source <SOURCE> [--option KEY=VALUE]...
+                                 [--credential-env <NAME> | --credential-file <PATH> | --credential-oauth]
                                  [--allow-broaden]
 memcastle source config remove <ID>
 ```
 
 Stores reusable source-native defaults and credential references in `[[source_configs]]`, independently of miner
 destination and schedule settings.
+The three credential flags are mutually exclusive: choose an environment variable, a file or this source's OAuth sign-in.
 The source ID is always an implicit default configuration ID.
 `source show <SOURCE>` lists that source's configuration IDs and, when it signs in, its default sign-in status.
 Changes are administrative REST calls; MCP can inspect configurations but cannot change or sign them in.
