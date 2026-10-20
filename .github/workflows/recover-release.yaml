@@ -1,0 +1,28 @@
+name: 🛠️ Recover Release
+
+# The tag keeps its original source and binaries; the fixed publish workflow on main
+# packages the saved artifacts and leaves the release as a draft for verification.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag
+        required: true
+        type: string
+      run_id:
+        description: Failed tagged publish run whose five builds succeeded
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/publish-release.yaml
+    with:
+      tag: ${{ inputs.tag }}
+      recover: true
+      run_id: ${{ inputs.run_id }}
+    secrets: inherit

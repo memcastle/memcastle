@@ -41,4 +41,49 @@ fn the_release_script_removes_stale_bundled_sources_and_archives() {
         archives.read_dir().unwrap().next().is_none(),
         "an old release archive must not survive packaging"
     );
+
+    let dist = out.path().join("dist");
+    std::fs::create_dir(&dist).unwrap();
+    let stage = std::process::Command::new("bash")
+        .arg(root.join("packaging/sources/stage-archives.sh"))
+        .arg(out.path())
+        .arg(&dist)
+        .output()
+        .unwrap();
+    assert!(
+        stage.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&stage.stdout),
+        String::from_utf8_lossy(&stage.stderr)
+    );
+    assert!(dist.read_dir().unwrap().next().is_none());
+}
+
+#[test]
+fn a_bundled_source_stages_its_archive_and_checksum() {
+    let out = tempfile::tempdir().unwrap();
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let archives = out.path().join("archives");
+    let dist = out.path().join("dist");
+    std::fs::create_dir(&archives).unwrap();
+    std::fs::create_dir(&dist).unwrap();
+    for name in ["example-1.0.0.tar.gz", "example-1.0.0.tar.gz.sha256"] {
+        std::fs::write(archives.join(name), name).unwrap();
+    }
+
+    let stage = std::process::Command::new("bash")
+        .arg(root.join("packaging/sources/stage-archives.sh"))
+        .arg(out.path())
+        .arg(&dist)
+        .output()
+        .unwrap();
+    assert!(
+        stage.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&stage.stdout),
+        String::from_utf8_lossy(&stage.stderr)
+    );
+    for name in ["example-1.0.0.tar.gz", "example-1.0.0.tar.gz.sha256"] {
+        assert_eq!(std::fs::read_to_string(dist.join(name)).unwrap(), name);
+    }
 }
