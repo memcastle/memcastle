@@ -227,8 +227,8 @@ jobs:
       url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
 
     steps:
-      # Draft releases are visible to the App that owns publishing; the
-      # read-only workflow token can enumerate builds but not unpublished drafts.
+      # The publishing App sees both the original Actions run and its draft;
+      # a read-only workflow token cannot see unpublished releases.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
@@ -238,8 +238,7 @@ jobs:
       - name: Verify the recovery matches the draft and original build
         if: inputs.recover
         env:
-          GH_TOKEN: ${{ github.token }}
-          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ inputs.tag }}
           RUN_ID: ${{ inputs.run_id }}
         run: |
@@ -253,7 +252,7 @@ jobs:
           test "$(jq -r '.head_branch' <<< "$run")" = "$TAG"
           test "$(jq -r '.event' <<< "$run")" = workflow_dispatch
           test "$(jq -r '.conclusion' <<< "$run")" = failure
-          release="$(GH_TOKEN="$APP_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | .draft")"
+          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | .draft")"
           test "$release" = true
           jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")"
           test "$(jq '[.jobs[] | select(.name | startswith("🏗️")) | select(.conclusion == "success")] | length' <<< "$jobs")" -eq 5
@@ -284,7 +283,7 @@ jobs:
           merge-multiple: true
           path: dist
           run-id: ${{ inputs.recover && inputs.run_id || github.run_id }}
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       # The sources that ship with MemCastle (docs/adr/033, docs/adr/040):
       # independently packaged WebAssembly components, not linked into the
