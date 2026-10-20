@@ -4,6 +4,115 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/memcastle/memcastle/compare/0.4.1..0.5.0) - 2026-10-20
+
+### 💫 Features
+
+- **auth** Share provider accounts across embedding connections ([#333](https://github.com/memcastle/memcastle/issues/333)) - ([f77338a](https://github.com/memcastle/memcastle/commit/f77338a674688dbc5c1cabef8d4b871bb8b2b814))
+- **embed** Make embedding providers discoverable and testable ([#337](https://github.com/memcastle/memcastle/issues/337)) - ([27ac1c1](https://github.com/memcastle/memcastle/commit/27ac1c10c10e98b6a49ff55e31f37dce2e8e9363))
+- **embed** Run embedding providers as plugin modules ([#331](https://github.com/memcastle/memcastle/issues/331)) - ([93ce489](https://github.com/memcastle/memcastle/commit/93ce489fe2ceead867a618960c089ae87d6d1f1e))
+- **embed** Track embedding spaces and support safe re-embedding - ([23d0b37](https://github.com/memcastle/memcastle/commit/23d0b37f114d84aa45d2d4210a2a8d3f86ae2aec))
+- **mining** Add reusable miner presets and source configurations ([#329](https://github.com/memcastle/memcastle/issues/329)) - ([3cc7a72](https://github.com/memcastle/memcastle/commit/3cc7a721957913dd3603f2815ea81d40c8dbffc6))
+- **plugin** Validate standalone lifecycle and retire source init ([#347](https://github.com/memcastle/memcastle/issues/347)) - ([88b3564](https://github.com/memcastle/memcastle/commit/88b35645e676412d6154a2d0e58e9c4259ea7e2d))
+- **plugin** Accept separate source and integration roots ([#320](https://github.com/memcastle/memcastle/issues/320)) - ([1becd31](https://github.com/memcastle/memcastle/commit/1becd31a8d986c4cdc48434579c6663f04540349))
+- **plugin** Derive release archives from the descriptor and Git ([#319](https://github.com/memcastle/memcastle/issues/319)) - ([65ecc3e](https://github.com/memcastle/memcastle/commit/65ecc3e55eba657a63d4e4b9e9256dd8320e796a))
+- **plugin** Package and smoke-test plugins locally ([#315](https://github.com/memcastle/memcastle/issues/315)) - ([9dc404a](https://github.com/memcastle/memcastle/commit/9dc404acdf1e326d49c2262bfde81a31222038f3))
+- **plugins** Register Slack source ([#336](https://github.com/memcastle/memcastle/issues/336)) - ([76da91d](https://github.com/memcastle/memcastle/commit/76da91d613d8b3bc237161d0c85e494289360ff0))
+- **plugins** Publish development Core and share plugin workflows ([#304](https://github.com/memcastle/memcastle/issues/304)) - ([219e7a2](https://github.com/memcastle/memcastle/commit/219e7a20f14242dc5b02eaf42be60b5ea6cea9ff))
+- **plugins** Validate standalone plugin workflow against current Core ([#294](https://github.com/memcastle/memcastle/issues/294)) - ([4d1161a](https://github.com/memcastle/memcastle/commit/4d1161af833332ca0b90e82765f03351297fad73))
+- **plugins** Distribute independently versioned provider modules ([#285](https://github.com/memcastle/memcastle/issues/285)) - ([ca32ca5](https://github.com/memcastle/memcastle/commit/ca32ca596fc13c7f21ae3bca66cc46e5a3ebb1e7))
+- **sources** Grant selected credentials to WASM adapters ([#335](https://github.com/memcastle/memcastle/issues/335)) - ([412542e](https://github.com/memcastle/memcastle/commit/412542e8f589123ff198e5ecc09ebb4d6b98ce54))
+- **web** Rework exploration and mining navigation ([#339](https://github.com/memcastle/memcastle/issues/339)) - ([703e1b0](https://github.com/memcastle/memcastle/commit/703e1b0f7036428d98a945f3fa8b1d04646374c2))
+- **web** Add resource detail drawers and unified job launcher ([#334](https://github.com/memcastle/memcastle/issues/334)) - ([bbc732b](https://github.com/memcastle/memcastle/commit/bbc732bcb915be8e7aade933ac820b5ca58208f3))
+- **web** Make layout fluid and show accessible job progress ([#325](https://github.com/memcastle/memcastle/issues/325)) - ([2158427](https://github.com/memcastle/memcastle/commit/21584272e59bd499af2690bc22ad95de2ac65e57))
+
+### 🐛 Bug Fixes
+
+- **audit** Bound memory while scanning drawers ([#286](https://github.com/memcastle/memcastle/issues/286)) - ([4bafdc4](https://github.com/memcastle/memcastle/commit/4bafdc43f83eab4f097f694e834f3d4fbebd5854))
+- **ci** Expose Core binary path to integrations - ([f6ad794](https://github.com/memcastle/memcastle/commit/f6ad794580d84002b7c567d4786cf805a5e732ec))
+- **ci** Keep main selector during plugin migration - ([16c76d6](https://github.com/memcastle/memcastle/commit/16c76d6121b47c07e5c1d6f20048de1b99515c35))
+- **ci** Retain only the current development Core assets - ([1ee044b](https://github.com/memcastle/memcastle/commit/1ee044b23f16ed91d228e59dfbfbd1053a51d2f9))
+- **client** Allow registry timeout for plugin fetches - ([f1be816](https://github.com/memcastle/memcastle/commit/f1be816f178c6579a2aff3b9fe623ee0c4840b28))
+- **plugins** Report explicit catalogue search failures - ([35704aa](https://github.com/memcastle/memcastle/commit/35704aaf9b6b0ebde4688b41e4422168cdad8e44))
+- **source** Preserve failures after optional credential lookups ([#346](https://github.com/memcastle/memcastle/issues/346)) - ([3ebb400](https://github.com/memcastle/memcastle/commit/3ebb4006cc5b68430c0b9cb5126669d9dbeba404))
+- **source** Allow optional selected credentials ([#343](https://github.com/memcastle/memcastle/issues/343)) - ([2da21f2](https://github.com/memcastle/memcastle/commit/2da21f26c8b4352c505127b33079cbb6f27db4e0))
+- **source** Pin registry install to previewed archive - ([e59ca6d](https://github.com/memcastle/memcastle/commit/e59ca6d9b7425a6491c444a4aebfcc9811a2f0b0))
+- **trigger** Keep running triggers on transient context failure - ([4b70991](https://github.com/memcastle/memcastle/commit/4b70991d98a14ca5871cad140d85c690b42ee44b))
+- **trigger** Recover deliveries missed by fast restarts - ([6ac7171](https://github.com/memcastle/memcastle/commit/6ac7171f0f94f4aedbce5de7679278218291b1e6))
+- **triggers** Reset due time when a timer plan changes - ([b0a5882](https://github.com/memcastle/memcastle/commit/b0a58826cc35c5cda6d015ca66991b49a8946244))
+- **triggers** Wait a fresh interval after re-enabling - ([7c7489b](https://github.com/memcastle/memcastle/commit/7c7489b43716d4ae439929261f2569fb7f7617fe))
+
+### ⚡ Performance
+
+- **ci** Reduce test cache churn and move timed miner check to slow suite ([#338](https://github.com/memcastle/memcastle/issues/338)) - ([43c5308](https://github.com/memcastle/memcastle/commit/43c5308dacb7219c7bd0ea39bf9b23d98a15097c))
+- **tasks** Skip unchanged web and integration builds ([#310](https://github.com/memcastle/memcastle/issues/310)) - ([5e534ab](https://github.com/memcastle/memcastle/commit/5e534abd3edcfeb48ab136248613f70b1aeaa3a3))
+
+### 🔨 Refactor
+
+- **ci** Remove migrated main Core selector - ([082aa87](https://github.com/memcastle/memcastle/commit/082aa87c4219fc56dace583b7df1cbb8ebe415f2))
+- **claude** Distribute Claude modules through Anthropic plugin ([#311](https://github.com/memcastle/memcastle/issues/311)) - ([29ea211](https://github.com/memcastle/memcastle/commit/29ea2118c5383cb1cd84a59a2b105d381a7da539))
+- **github** Extract mining source into standalone plugin ([#313](https://github.com/memcastle/memcastle/issues/313)) - ([0fca75f](https://github.com/memcastle/memcastle/commit/0fca75fa9d6ab36111e52898255374f4fafe584c))
+- **openai** Extract Codex and ChatGPT product modules ([#312](https://github.com/memcastle/memcastle/issues/312)) - ([2cd5414](https://github.com/memcastle/memcastle/commit/2cd541449a0a7e46dfb24aef293d4c18ec2cedb3))
+- **opencode** Extract source and integration into standalone plugin ([#296](https://github.com/memcastle/memcastle/issues/296)) - ([89bf9fd](https://github.com/memcastle/memcastle/commit/89bf9fde466fe81f2d8d22afee542c37af032120))
+- **pi** Extract Pi modules into standalone plugin ([#295](https://github.com/memcastle/memcastle/issues/295)) - ([6ed689c](https://github.com/memcastle/memcastle/commit/6ed689cfb595eaa8d23ec3a0245626f452559624))
+- **tests** Separate slow checks and reduce source test setup ([#303](https://github.com/memcastle/memcastle/issues/303)) - ([a030e30](https://github.com/memcastle/memcastle/commit/a030e308bfafb2590711a6ef6af3d3849e1a6488))
+
+### 📚 Documentation
+
+- **api** Describe dashboard authentication exception - ([f3884e3](https://github.com/memcastle/memcastle/commit/f3884e3dbbe86c731cab0e381a7c259f6f1e0b19))
+- **api** Explain source config breadth approval - ([a4e6b0c](https://github.com/memcastle/memcastle/commit/a4e6b0c7ad15a70288cb1d2f77991befe2e6c95d))
+- **api** List all miner update fields - ([3b5bf0a](https://github.com/memcastle/memcastle/commit/3b5bf0a7773c3992c3e4a59d017f1e90d65c17bc))
+- **api** List profile for GET search and recall - ([3af2601](https://github.com/memcastle/memcastle/commit/3af26019dba72c4352788fc8629c48868d59536a))
+- **api** Document all source origins - ([c790779](https://github.com/memcastle/memcastle/commit/c790779192913d7cf991b16de3f50f23c7e2e93e))
+- **assets** Separate Core and provider assets - ([28d54fd](https://github.com/memcastle/memcastle/commit/28d54fd90aa8b726e31b0d9eed4c54d240efa056))
+- **auth** Wrap credential backend invariant - ([bb41c8a](https://github.com/memcastle/memcastle/commit/bb41c8a3bdc64d377d20f2cc6d3fdcd477cd715e))
+- **auth** Clarify where credentials are persisted - ([c45484d](https://github.com/memcastle/memcastle/commit/c45484d32f908e567abbfc7996f934a19ed76d4b))
+- **auth** Describe public dashboard assets accurately - ([a1250aa](https://github.com/memcastle/memcastle/commit/a1250aaf84cd6b97f9e726a41a8f5f64df0f0c87))
+- **cli** Distinguish embed job from provider test - ([6da0ca2](https://github.com/memcastle/memcastle/commit/6da0ca2d3b512eea976a5e9149c4b26d3f5fb74e))
+- **cli** Show source config credential flags - ([00a02ac](https://github.com/memcastle/memcastle/commit/00a02acfd3ebb06bad44cd8891bda83b2f94dc24))
+- **cli** Remove retired source init instructions - ([70d600d](https://github.com/memcastle/memcastle/commit/70d600d2bc0a45161aed9084ebb7da73e70410ae))
+- **cli** List local tooling exceptions - ([9c27eac](https://github.com/memcastle/memcastle/commit/9c27eacf6ca0908ba5a364ce6170778bd190a842))
+- **install** Describe current Core package contents - ([3f3def0](https://github.com/memcastle/memcastle/commit/3f3def0347f40a62c0fd418a0d2d48590b835d28))
+- **integration** Describe offline version check - ([8432d72](https://github.com/memcastle/memcastle/commit/8432d726fc4b4ffd74ba0dad9dd0edf6be4c60ba))
+- **integration** Keep install command readable - ([41cf9ce](https://github.com/memcastle/memcastle/commit/41cf9cec51fac8efc63d813b5cda52ea47e7dc08))
+- **integration** Distinguish plugin-capable Core releases - ([18dd1b9](https://github.com/memcastle/memcastle/commit/18dd1b9e324283a68afde71f92ef3f2a735d9379))
+- **integrations** Describe shared-skills-only Core tasks - ([6e441e8](https://github.com/memcastle/memcastle/commit/6e441e835f86c731738618670949a4747017b6e9))
+- **integrations** Distinguish full and limited lifecycle clients - ([73f57da](https://github.com/memcastle/memcastle/commit/73f57da233feda34ed2f7043b4ce5d50c135c26b))
+- **mcp** Avoid stale tool count - ([a3553cc](https://github.com/memcastle/memcastle/commit/a3553ccbc9a51faca3f80d4eef8801a914a501c8))
+- **quickstart** Describe directory chunking - ([23fc9d9](https://github.com/memcastle/memcastle/commit/23fc9d9b5ab959bf0dda1e4ab64bfaeaff7ddc6e))
+- **skills** Clone the installed release tag - ([4a0360f](https://github.com/memcastle/memcastle/commit/4a0360fa7bb16099bc71c5fac25ed855f44bf12e))
+- **skills** Attribute skills to provider integrations - ([933c7c2](https://github.com/memcastle/memcastle/commit/933c7c2e845ab5c3240f0313e01e4ed1f35c584c))
+- **source** Require consent for every permission-set change - ([e53e704](https://github.com/memcastle/memcastle/commit/e53e704ffb2fd32fa2e7be6a6a9b257f8994ec1e))
+- **source** Correct bundled update example - ([e089c21](https://github.com/memcastle/memcastle/commit/e089c21a91dfb284025e097a00c1a6c309232530))
+- **source** Identify ChatGPT provider plugin - ([056def9](https://github.com/memcastle/memcastle/commit/056def9935d2cba560f6c84fca92028a9c37b869))
+- **sources** Correct legacy registry and Codex examples - ([73fb0dc](https://github.com/memcastle/memcastle/commit/73fb0dcf74a5df58462dad2eeb38d06df44fa8c3))
+- **sources** Use current release line in manifest example - ([f756b23](https://github.com/memcastle/memcastle/commit/f756b23d181eed05173da17cc6aed5a0fa15830a))
+- **storage** Scope memory read limits - ([672aa7c](https://github.com/memcastle/memcastle/commit/672aa7cbb965403097afe148779bd5e3c985c0c8))
+- **triggers** Use a daemon-readable webhook secret - ([0bad6a8](https://github.com/memcastle/memcastle/commit/0bad6a8df9d7b66bc50b73dd17cdd4559ad001b9))
+
+### 🧪 Tests
+
+- **sources** Use mock component for generic Core tests ([#306](https://github.com/memcastle/memcastle/issues/306)) - ([dcdee0f](https://github.com/memcastle/memcastle/commit/dcdee0fb442ecfcdaf58651673f510464281cefe))
+- **web** Allow lazy navigation under CI load ([#308](https://github.com/memcastle/memcastle/issues/308)) - ([12ad575](https://github.com/memcastle/memcastle/commit/12ad5757734a4a27e3c6509c41d401d7dd77d5fe))
+
+### 🏗️ Build
+
+- **deps** Bump the web-dependencies group across 1 directory with 6 updates ([#316](https://github.com/memcastle/memcastle/issues/316)) - ([a7bee51](https://github.com/memcastle/memcastle/commit/a7bee51c6219486f0dc56a4ee8db5bf70aa80d07))
+- **deps** Bump the rust-dependencies group across 1 directory with 6 updates ([#318](https://github.com/memcastle/memcastle/issues/318)) - ([c8fe1e1](https://github.com/memcastle/memcastle/commit/c8fe1e14539d93db1d0757b6ea0abbc3950225da))
+- **deps** Bump surrealdb-core from 3.3.0 to 3.3.2 in the rust-dependencies group ([#302](https://github.com/memcastle/memcastle/issues/302)) - ([0e15482](https://github.com/memcastle/memcastle/commit/0e15482ad1f2f7fd3c2b041cb13c7cf1c6231a89))
+- **deps** Bump the web-dependencies group in /web with 4 updates ([#299](https://github.com/memcastle/memcastle/issues/299)) - ([6aab88c](https://github.com/memcastle/memcastle/commit/6aab88c5f11792c6c13e3e7d4f59d907de113aa4))
+- **deps** Bump the rust-dependencies group with 2 updates ([#301](https://github.com/memcastle/memcastle/issues/301)) - ([c01b986](https://github.com/memcastle/memcastle/commit/c01b98665363e2365ac52d9f9b6b8626b8dd3e9e))
+- **deps** Bump actions/checkout from 4 to 7 in the actions group ([#300](https://github.com/memcastle/memcastle/issues/300)) - ([15cf4bf](https://github.com/memcastle/memcastle/commit/15cf4bf9af6e23af23fb5868c1c051b75c5bdb68))
+- **deps-dev** Bump happy-dom from 20.14.6 to 21.0.1 in /web ([#317](https://github.com/memcastle/memcastle/issues/317)) - ([6f690cd](https://github.com/memcastle/memcastle/commit/6f690cd387c60b6e0b93795d6df4bc9c3a102c24))
+
+### 🔧 CI
+
+- **plugins** Publish only Linux amd64 development Core ([#307](https://github.com/memcastle/memcastle/issues/307)) - ([51b6ba7](https://github.com/memcastle/memcastle/commit/51b6ba7958dd4aa537a4a17419f0f468f27ea613))
+- Migrate architecture guards to ast-grep ([#323](https://github.com/memcastle/memcastle/issues/323)) - ([e582210](https://github.com/memcastle/memcastle/commit/e582210bada8b30114b064d2a2be3736658cc9b1))
+- Move Clippy from pre-commit to CI ([#322](https://github.com/memcastle/memcastle/issues/322)) - ([8c34b3c](https://github.com/memcastle/memcastle/commit/8c34b3c976b8ad127e6c936ecd70115825cdf8b5))
+- Test in-tree fixtures without provider discovery ([#321](https://github.com/memcastle/memcastle/issues/321)) - ([9b54aef](https://github.com/memcastle/memcastle/commit/9b54aef22ab8eef1ea2882bf213ca2586b3c9a0b))
+- Restore Codecov PR reports and run all workflow checks ([#309](https://github.com/memcastle/memcastle/issues/309)) - ([4c212b2](https://github.com/memcastle/memcastle/commit/4c212b2ec587ba1450e4a1e13d8dca688a499f81))
+
 ## [0.4.1](https://github.com/memcastle/memcastle/compare/0.4.0..0.4.1) - 2026-10-10
 
 ### 🐛 Bug Fixes
