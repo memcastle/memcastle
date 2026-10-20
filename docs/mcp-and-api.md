@@ -504,8 +504,10 @@ The decision is recorded in [ADR-018](adr/018-palace-hierarchy-management.md).
 ### Authentication
 
 Authentication is optional and off by default.
-When the daemon has it enabled, every request, REST and `/mcp` alike, must carry `Authorization: Bearer <token>`.
-The one exception is `GET /api/health`, which stays open for liveness probes.
+When the daemon has it enabled, REST and `/mcp` requests must carry `Authorization: Bearer <token>`.
+`GET /api/health` stays open for liveness probes.
+When `web.enable` is set, `GET` and `HEAD` under `/ui` are also open so a browser can load the sign-in page;
+every `/api` request the page makes still requires a token.
 
 ```sh
 curl -s -H "Authorization: Bearer $MEMCASTLE_AUTH_TOKEN" http://127.0.0.1:8420/api/status
