@@ -10,7 +10,7 @@ Other commands differ:
 `status` reports a stopped daemon instead of failing, `doctor` reports offline checks without failing,
 `daemon restart` starts a daemon when none is running,
 `completions` prints a script locally and needs neither a daemon nor a configuration file,
-the local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
+the local `source` commands (`build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
 archives with no daemon at all,
 the `integration` commands (`list`, `install`, `update` and `remove`) work on files and the agent's own commands with no
 daemon at all,
@@ -555,12 +555,8 @@ documents to file.
 [Writing a mining source](writing-sources.md) is the guide to making one,
 [Publishing and installing sources](publishing-sources.md) the guide to distributing one; this is the reference.
 
-The first six are **local**: they work on a project directory or on archives, need no daemon, no palace and no
+The first five are **local**: they work on a project directory or on archives, need no daemon, no palace and no
 configuration file, and never touch the network.
-`init` creates `<NAME>` (in the current directory, or in `--parent`) from a template and refuses to write into a
-directory that is not empty.
-The default template is `rust`; `cli` wraps a command-line program, and `typescript` and `python` need their own
-toolchains (see the guide).
 `build` runs the command in the manifest's `[build]` section and checks that the result is a component;
 the component is placed in `dist/source.wasm`.
 `test` builds, then runs the manifest's conformance cases against the component in the same sandbox the daemon uses,
@@ -715,12 +711,14 @@ memcastle source config list
 memcastle source config get <ID>
 memcastle source config auth <ID>
 memcastle source config set <ID> --source <SOURCE> [--option KEY=VALUE]...
+                                 [--credential-env <NAME> | --credential-file <PATH> | --credential-oauth]
                                  [--allow-broaden]
 memcastle source config remove <ID>
 ```
 
 Stores reusable source-native defaults and credential references in `[[source_configs]]`, independently of miner
 destination and schedule settings.
+The three credential flags are mutually exclusive: choose an environment variable, a file or this source's OAuth sign-in.
 The source ID is always an implicit default configuration ID.
 `source show <SOURCE>` lists that source's configuration IDs and, when it signs in, its default sign-in status.
 Changes are administrative REST calls; MCP can inspect configurations but cannot change or sign them in.
@@ -951,7 +949,7 @@ You rarely run it: the daemon queues the same job after anything that writes dra
 backfilling after you configure a provider and for forcing a sweep.
 It only changes derived vector records and never changes canonical content, graph links or temporal history.
 The default missing-only job is safe to repeat and also recovers provenance-free legacy vectors into the chosen space.
-It is a write, so it is refused in `read_only` and `disabled` modes.
+The `embed` job is a write, so it is refused in `read_only` and `disabled` modes; `embed test` is not.
 
 ### `extract`
 

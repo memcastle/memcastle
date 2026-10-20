@@ -45,9 +45,9 @@ mise run sources:test -- directory   # the same for one source, which is what ea
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard, including its rule fixtures, described below
-mise run integrations:check # test the Core-shipped integration and install its bundle
-mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
-mise run integrations:package # lay out what a release ships in target/bundled-integrations
+mise run integrations:check # package shared skills and test the checkout and release asset layouts
+mise run integrations:build # prepare any Core-shipped declarative integrations (currently none)
+mise run integrations:package # package shared skills in target/bundled-integrations
 mise run web:check  # typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node)
 mise run web:build  # build web/ into web/dist, for `--assets-dir "$PWD"` with `web.enable`
 mise run web:dev    # the dashboard's dev server, proxying /api to the running daemon
@@ -91,10 +91,10 @@ In this repository `mise.toml` sets development defaults in its `[env]` table:
 `MEMCASTLE_ASSETS_DIR` is the checkout and `MEMCASTLE_WEB_ENABLE` is `true`.
 They apply to `mise run`, to `mise cli` and to any shell with [mise activated](https://mise.jdx.dev/dev-tools/shims.html)
 once you are in the project directory, so `mise cli serve` already serves the dashboard from `web/dist` (after
-`mise run web:build`) and finds the integrations and sources of the checkout, with no flag.
+`mise run web:build`) and finds the checkout's shared skills and sources, with no flag.
 Because the variables follow the shell, **any `memcastle` you run from the project directory uses them, including an
-installed one**: `memcastle integration install codex` there installs the assets prepared in the checkout
-(`mise run integrations:build`) and not the package's.
+installed one**: the checkout supplies shared skills, but no agent-specific integration assets.
+Install provider integrations through their plugins rather than expecting integration bundles in this checkout.
 Run it from another directory, or `env -u MEMCASTLE_ASSETS_DIR memcastle ...`, to use the installed assets.
 A flag still wins over the variable (`--assets-dir`), and your own `mise.local.toml` can override or drop either.
 

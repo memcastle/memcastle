@@ -13,6 +13,8 @@ use super::{Desired, FireRequest, Host, Note};
 #[derive(Default)]
 struct Inner {
     desired: Mutex<Desired>,
+    unavailable: Mutex<bool>,
+    desired_reads: Mutex<usize>,
     fires: Mutex<Vec<FireRequest>>,
     notes: Mutex<Vec<(String, Note)>>,
     states: Mutex<HashMap<String, TriggerState>>,
@@ -37,6 +39,16 @@ impl FakeHost {
     /// Say what should be running from now on.
     pub fn set_desired(&self, desired: Desired) {
         *lock(&self.inner.desired) = desired;
+    }
+
+    /// Simulate a transient failure to read the prerequisites for a desired-state decision.
+    pub fn set_unavailable(&self, unavailable: bool) {
+        *lock(&self.inner.unavailable) = unavailable;
+    }
+
+    /// Count reads so a test can wait for a failed supervisor tick before checking its effects.
+    pub fn desired_reads(&self) -> usize {
+        *lock(&self.inner.desired_reads)
     }
 
     /// Give a webhook trigger's secret.
@@ -89,8 +101,9 @@ pub(crate) async fn eventually(what: &str, mut check: impl FnMut() -> bool) {
 }
 
 impl Host for FakeHost {
-    fn desired(&self) -> impl Future<Output = Desired> + Send {
-        let desired = lock(&self.inner.desired).clone();
+    fn desired(&self) -> impl Future<Output = Option<Desired>> + Send {
+        *lock(&self.inner.desired_reads) += 1;
+        let desired = (!*lock(&self.inner.unavailable)).then(|| lock(&self.inner.desired).clone());
         async move { desired }
     }
 

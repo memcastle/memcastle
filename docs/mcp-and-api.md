@@ -171,7 +171,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/events` | A stream of change notices (server-sent events), so a client can read again instead of polling: see [The event stream](#the-event-stream). A read, so a `disabled` session gets a `403`. There is no MCP tool. | none |
 | `GET /api/config` | The configuration in effect, for the [dashboard's](web.md) settings page: listener, palace, datastore, authentication/dashboard state, assets, scheduler limits, provider names and models, provider account IDs/identities/auth kinds/availability and embedding connection-to-account links, and mining limits. It carries no token, credential reference name/path, key, provider URL or command line; a remote datastore location may be a URL with userinfo removed. This is daemon information like `status`, so no memory mode gates it. There is no MCP tool. | none |
 | `POST /api/embeddings/test` | Explicitly send sample text to a selected embedding profile (global default if omitted); validate the response without creating a job or storing text/vectors. Returns `{profile, dimensions}`. Authenticated, with no MCP tool. | JSON body: `text` (nonempty, at most 8000 characters), `profile?`; maximum body 32 KiB |
-| `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical`, `expand` |
+| `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `profile`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical`, `expand` |
 | `POST /api/search` | The same search as a JSON [`SearchQuery`](#searching), the only way to send a `query_embedding`. | JSON body |
 | `GET /api/recall` | Recall drawers. | as `GET /api/search`, and `room` is ignored |
 | `POST /api/recall` | The JSON form of recall. | JSON body |
@@ -182,10 +182,10 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/sources` | The mining adapters this daemon can run and the sources that have been mined: `{adapters, sources}`. A read. | none |
 | `GET /api/miners` | The configured [miners](configuration.md#miners): `{miners, config_file?, error?}`. `error` says why the configuration file cannot be read, and `miners` is then the last good copy. A read. | none |
 | `GET /api/miners/{name}` | One miner with its state (`ready`, `disabled`, `unavailable` and why), its credential as a kind and an availability, and the source it has mined. A read. | none |
-| `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that may broaden its options is a `409` unless `allow_broaden` is set. | JSON body, all optional once the miner exists: `source`, `enabled`, `locator`, `wing`, `credential`, `options`, `unset_options`, `unset`, `allow_broaden` |
+| `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that may broaden its options is a `409` unless `allow_broaden` is set. See [miner configuration](configuration.md#miners) for mapping and schedule shapes. | JSON body, all optional once the miner exists: `source`, `source_config`, `enabled`, `locator`, `wing`, `room`, `mapping`, `max_documents`, `embedding_profile`, `schedule`, `credential`, `options`, `unset_options`, `unset`, `allow_broaden` |
 | `GET /api/source-configs` | Explicit and implicit source configurations with token-free credential status. | none |
 | `GET /api/source-configs/{id}` | One configuration, or a source's implicit default. | none |
-| `PUT /api/source-configs/{id}` | Save source-native defaults and a credential reference. | JSON body: `source` (required for new IDs), `options`, `credential`, `unset_options`, `unset_credential` |
+| `PUT /api/source-configs/{id}` | Save source-native defaults and a credential reference. A change that may broaden what miners read is refused with `409` unless `allow_broaden` is true. | JSON body: `source` (required for new IDs), `options`, `credential`, `unset_options`, `unset_credential`, `allow_broaden` |
 | `DELETE /api/source-configs/{id}` | Remove an explicit configuration without deleting mined memories. | none |
 | `POST /api/source-configs/{id}/auth` | Start an OAuth sign-in using this configuration's credential key. | none |
 | `GET /api/source-configs/{id}/auth?flow=<id>` | Wait for its sign-in to finish. | query: `flow`, optional `seconds` (max 30) |
@@ -504,8 +504,10 @@ The decision is recorded in [ADR-018](adr/018-palace-hierarchy-management.md).
 ### Authentication
 
 Authentication is optional and off by default.
-When the daemon has it enabled, every request, REST and `/mcp` alike, must carry `Authorization: Bearer <token>`.
-The one exception is `GET /api/health`, which stays open for liveness probes.
+When the daemon has it enabled, REST and `/mcp` requests must carry `Authorization: Bearer <token>`.
+`GET /api/health` stays open for liveness probes.
+When `web.enable` is set, `GET` and `HEAD` under `/ui` are also open so a browser can load the sign-in page;
+every `/api` request the page makes still requires a token.
 
 ```sh
 curl -s -H "Authorization: Bearer $MEMCASTLE_AUTH_TOKEN" http://127.0.0.1:8420/api/status
