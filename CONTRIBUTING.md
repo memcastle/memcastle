@@ -27,9 +27,9 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
 | `mise run sources:package` | Package the sources that ship with releases (unpacked bundle, archives and registry index) into `target/bundled-sources` |
-| `mise run integrations:check` | Typecheck and test every package under `integrations/` against a real daemon (needs bun) |
-| `mise run integrations:build` | Bundle the Pi and OpenCode integrations into `integrations/<id>/dist`, for `--assets-dir "$PWD"` (needs bun) |
-| `mise run integrations:package` | Lay out the integrations and skills that ship with releases in `target/bundled-integrations` (needs bun) |
+| `mise run integrations:check` | Package the shared skills and check the checkout and release asset layouts |
+| `mise run integrations:build` | Prepare any Core-shipped declarative integrations (currently none) |
+| `mise run integrations:package` | Lay out the shared skills that ship with releases in `target/bundled-integrations` |
 | `mise run web:check` | Typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node) |
 | `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs bun and node) |
 | `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs bun and node) |
