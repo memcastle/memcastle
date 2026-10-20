@@ -10,7 +10,7 @@ Other commands differ:
 `status` reports a stopped daemon instead of failing, `doctor` reports offline checks without failing,
 `daemon restart` starts a daemon when none is running,
 `completions` prints a script locally and needs neither a daemon nor a configuration file,
-the local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
+the local `source` commands (`build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
 archives with no daemon at all,
 the `integration` commands (`list`, `install`, `update` and `remove`) work on files and the agent's own commands with no
 daemon at all,
@@ -555,12 +555,8 @@ documents to file.
 [Writing a mining source](writing-sources.md) is the guide to making one,
 [Publishing and installing sources](publishing-sources.md) the guide to distributing one; this is the reference.
 
-The first six are **local**: they work on a project directory or on archives, need no daemon, no palace and no
+The first five are **local**: they work on a project directory or on archives, need no daemon, no palace and no
 configuration file, and never touch the network.
-`init` creates `<NAME>` (in the current directory, or in `--parent`) from a template and refuses to write into a
-directory that is not empty.
-The default template is `rust`; `cli` wraps a command-line program, and `typescript` and `python` need their own
-toolchains (see the guide).
 `build` runs the command in the manifest's `[build]` section and checks that the result is a component;
 the component is placed in `dist/source.wasm`.
 `test` builds, then runs the manifest's conformance cases against the component in the same sandbox the daemon uses,
