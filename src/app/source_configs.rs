@@ -26,11 +26,12 @@ fn broadening_reasons(
     if before.is_none() && (after.id != after.source || specs.is_none()) {
         return Ok(Vec::new());
     }
-    let old_options = before.map_or_else(
-        || Ok(crate::domain::Options::new()),
-        SourceConfiguration::options,
-    )
-    .map_err(|reason| Error::invalid_input("options", reason))?;
+    let old_options = before
+        .map_or_else(
+            || Ok(crate::domain::Options::new()),
+            SourceConfiguration::options,
+        )
+        .map_err(|reason| Error::invalid_input("options", reason))?;
     Ok(crate::domain::option_broadening(
         &old_options,
         new_options,
@@ -57,7 +58,7 @@ pub struct SourceConfigurationView {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourceConfigurationPatch {
-    /// Installed source; required for a new configuration.
+    /// Installed source; required for a new named configuration, but inferred for a known source's default.
     pub source: Option<String>,
     /// Credential reference, never its contents.
     pub credential: Option<CredentialRef>,
@@ -281,13 +282,24 @@ impl AppServices {
         let mut state = self.source_configs.state.lock().await;
         self.source_configs.refresh(&mut state)?;
         let old = state.configs.iter().find(|config| config.id == id).cloned();
-        let source = patch
+        let source = if let Some(source) = patch
             .source
             .clone()
             .or_else(|| old.as_ref().map(|config| config.source.clone()))
-            .ok_or_else(|| {
-                Error::invalid_input("source", "creating a source configuration needs `source`")
-            })?;
+        {
+            source
+        } else if crate::mining::registry::option_specs_for(&self.store, &self.mining, id)
+            .await
+            .is_ok()
+        {
+            // A known source's default is readable without a saved entry; make the matching write symmetric.
+            id.to_string()
+        } else {
+            return Err(Error::invalid_input(
+                "source",
+                "creating a named source configuration needs `source`",
+            ));
+        };
         let mut config = old.unwrap_or(SourceConfiguration {
             id: id.into(),
             source: source.clone(),
@@ -416,19 +428,25 @@ mod tests {
             credential: None,
             options: Map::new(),
         };
-        let specs = [OptionSpec::new("channels", "optional channels", OptionKind::String)
-            .with_breadth(OptionBreadth::OptInInclude)];
+        let specs = [
+            OptionSpec::new("channels", "optional channels", OptionKind::String)
+                .with_breadth(OptionBreadth::OptInInclude),
+        ];
         let options = crate::domain::Options::from([("channels".into(), "private".into())]);
-        assert!(!broadening_reasons(None, &config, &options, Some(&specs))
-            .unwrap()
-            .is_empty());
+        assert!(
+            !broadening_reasons(None, &config, &options, Some(&specs))
+                .unwrap()
+                .is_empty()
+        );
         // A new named instance has no existing miners inheriting its options.
         let named = SourceConfiguration {
             id: "work".into(),
             ..config
         };
-        assert!(broadening_reasons(None, &named, &options, Some(&specs))
-            .unwrap()
-            .is_empty());
+        assert!(
+            broadening_reasons(None, &named, &options, Some(&specs))
+                .unwrap()
+                .is_empty()
+        );
     }
 }

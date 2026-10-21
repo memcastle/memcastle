@@ -312,6 +312,34 @@ async fn two_miners_reuse_one_source_configuration_without_sharing_destination_c
 }
 
 #[tokio::test]
+async fn a_known_implicit_default_can_be_saved_without_repeating_its_source() {
+    let daemon = TestDaemon::start().await;
+    let (_, implicit) = get(&daemon, "/api/source-configs/directory").await;
+    assert_eq!(implicit["source"], "directory");
+
+    let (status, saved) = request(
+        &daemon,
+        Method::PUT,
+        "/api/source-configs/directory",
+        Some(json!({"options": {"include": "*.md"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["source"], "directory");
+    assert_eq!(saved["options"]["include"], "*.md");
+
+    let (status, missing) = request(
+        &daemon,
+        Method::PUT,
+        "/api/source-configs/new-named-configuration",
+        Some(json!({"options": {"include": "*.md"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{missing}");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn source_configuration_lifecycle_keeps_defaults_and_never_returns_credential_locations() {
     let daemon = TestDaemon::start_configured(|config| {
         config.credentials.backend = memcastle::config::CredentialBackend::File;

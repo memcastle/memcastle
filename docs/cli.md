@@ -717,7 +717,7 @@ and no MCP tool exists for any of them.
 memcastle source config list
 memcastle source config get <ID>
 memcastle source config auth <ID>
-memcastle source config set <ID> --source <SOURCE> [--option KEY=VALUE]...
+memcastle source config set <ID> [--source <SOURCE>] [--option KEY=VALUE]...
                                  [--credential-env <NAME> | --credential-file <PATH> | --credential-oauth]
                                  [--allow-broaden]
 memcastle source config remove <ID>
