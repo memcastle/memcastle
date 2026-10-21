@@ -5,6 +5,148 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use predicates::str::contains;
 
+#[cfg(target_os = "linux")]
+#[test]
+fn slow_cli_requests_show_feedback_without_corrupting_json_or_errors() {
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::process::{Command as ProcessCommand, Stdio};
+    use std::time::Duration;
+
+    for (args, json, failed, expected_path, message) in [
+        (
+            vec!["plugin", "list"],
+            false,
+            false,
+            "/api/plugins",
+            "Listing installed plugins...",
+        ),
+        (
+            vec!["plugin", "list"],
+            true,
+            false,
+            "/api/plugins",
+            "Listing installed plugins...",
+        ),
+        (
+            vec!["sources"],
+            false,
+            true,
+            "/api/sources",
+            "Listing sources...",
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("config.toml");
+        std::fs::write(
+            &config,
+            format!(
+                "[palace]\npath = {:?}\n[server]\nbind = '127.0.0.1'\nport = {}\n",
+                temp.path().join("palace").display().to_string(),
+                listener.local_addr().unwrap().port()
+            ),
+        )
+        .unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10))
+                    }
+                    Err(error) => panic!("accepting plugin request: {error}"),
+                }
+            };
+            let mut request = [0; 4096];
+            let bytes = stream.read(&mut request).unwrap();
+            assert!(
+                String::from_utf8_lossy(&request[..bytes])
+                    .contains(&format!("GET {expected_path}"))
+            );
+            // Hold the response long enough for the spinner's steady tick to paint a frame.
+            std::thread::sleep(Duration::from_millis(250));
+            if failed {
+                stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: 29\r\nConnection: close\r\n\r\n{\"error\":\"temporary failure\"}").unwrap();
+            } else {
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]").unwrap();
+            }
+        });
+
+        let mut master_fd = -1;
+        let mut slave_fd = -1;
+        // SAFETY: openpty initializes two distinct descriptors and File owns each once.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &raw mut master_fd,
+                    &raw mut slave_fd,
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                )
+            },
+            0
+        );
+        let mut master = unsafe { File::from_raw_fd(master_fd) };
+        let slave = unsafe { File::from_raw_fd(slave_fd) };
+        let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_memcastle"));
+        command
+            .args(["--config", config.to_str().unwrap()])
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::from(slave));
+        if json {
+            command.arg("--json");
+        }
+        for (name, _) in std::env::vars().filter(|(name, _)| name.starts_with("MEMCASTLE_")) {
+            command.env_remove(name);
+        }
+        let output = command.output().unwrap();
+        server.join().unwrap();
+        assert_eq!(output.status.success(), !failed, "{output:?}");
+        if failed {
+            assert!(output.stdout.is_empty(), "{output:?}");
+        } else {
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+                serde_json::json!([])
+            );
+        }
+        let mut terminal = String::new();
+        // No child holds the slave now. Linux reports EIO instead of EOF for a closed PTY.
+        assert_eq!(
+            unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) },
+            0
+        );
+        match master.read_to_string(&mut terminal) {
+            Ok(_) => {}
+            Err(error) if error.raw_os_error() == Some(libc::EIO) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("reading pseudo-terminal: {error}"),
+        }
+        if json {
+            assert!(
+                terminal.is_empty(),
+                "JSON mode wrote progress: {terminal:?}"
+            );
+        } else {
+            assert!(terminal.contains(message), "{terminal:?}");
+            if failed {
+                assert!(terminal.contains("temporary failure"), "{terminal:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn help_lists_the_top_level_commands() {
     Command::cargo_bin("memcastle")

@@ -67,6 +67,10 @@ A job status has the same colour wherever it is shown:
 queued yellow, running cyan, paused magenta, completed green, failed red and cancelled dim.
 Standard output and standard error are decided separately:
 with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
+While a command waits, an interactive standard error shows a spinner naming the current operation.
+Longer commands, such as plugin install and update, change the message as they fetch, preview and install;
+the spinner clears before questions, instructions, results and errors.
+It does not appear with `--json` or when standard error is redirected, and it never changes standard output.
 
 `repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove` and the `delete` commands of `wing`, `room`
 and `drawer` ask for confirmation, with a prompt on standard error that defaults to "no".
