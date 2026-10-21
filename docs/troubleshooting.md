@@ -211,7 +211,7 @@ ask before they act when run in a terminal.
 Run the command again and answer `y`, or pass `--yes` to skip the question.
 In a script, CI job or pipe the first group never asks, so this error only appears at a keyboard.
 `source install` and `source update` do not proceed there either: they refuse with `memcastle::source::consent_required`
-(`update` exits `1`) until you pass `--yes` or `--consent <digest>`.
+(`update` exits `1`) until you pass `--yes`; `source install` also accepts `--consent <digest>` instead.
 
 ### `memcastle::cli::prompt_failed`
 
