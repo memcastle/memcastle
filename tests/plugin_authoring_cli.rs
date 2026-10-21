@@ -73,6 +73,51 @@ fn packaging_and_inspection_work_offline_and_are_repeatable() {
 }
 
 #[test]
+fn a_default_manifest_infers_a_plain_tag_from_the_current_repository() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("plugin.toml"), EMPTY_PLUGIN).unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root.path())
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "plugin.toml"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "-qm",
+        "first",
+    ]);
+    git(&["tag", "0.1.0"]);
+
+    let inspected = command(root.path(), &["inspect"]);
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(manifest["plugin"]["version"], "0.1.0");
+
+    let packaged = command(root.path(), &["package"]);
+    assert!(
+        packaged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&packaged.stderr)
+    );
+    let archive: serde_json::Value = serde_json::from_slice(&packaged.stdout).unwrap();
+    assert_eq!(archive["archive"], "dist/example-0.1.0.tar.gz");
+}
+
+#[test]
 fn a_plugin_is_installed_and_tested_in_disposable_state() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("plugin.toml"), EMPTY_PLUGIN).unwrap();
