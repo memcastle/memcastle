@@ -549,9 +549,10 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   [Deduplication](deduplication.md)), and *additionally* applies its `fact` mutation when present,
   so a checkpoint item is never only a graph mutation with no drawer to audit it.
   There is deliberately no artificial per-item delay, because an emergency checkpoint exists to save state before a crash.
-- **`Embed`** (`src/embed/job.rs`) computes the embedding of every drawer that has none.
-  The database is its cursor: each pass asks for the next unembedded drawers, so pausing, crashing or running it again
-  loses and repeats nothing, and only the `embedding` field is ever written.
+- **`Embed`** (`src/embed/job.rs`) populates or refreshes derived `drawer_embedding` records in a pinned profile's vector
+  space, without rewriting drawer content.
+  A checkpointed drawer page is its cursor; the missing-only sweep skips drawers that already have a vector in that
+  space, so pausing, crashing or running it again loses and repeats nothing.
   It is queued automatically after drawer-writing jobs and writes, and at startup.
 - **`Extract`** (`src/extract/job.rs`) reads every current mined drawer and note with no marker in `drawer_extraction`
   and writes the entities, `mentions` links and `relates_to` edges its provider finds, then the marker.
@@ -564,7 +565,8 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   with a single database.
   It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
   `Failed` jobs that exhausted their attempt budget, a plain count of `Running` jobs,
-  and drawers with no `embedding` (informational: a backlog the `Embed` job clears when a provider is configured).
+  and drawers with no vector in the configured default profile (informational: a backlog the `Embed` job clears).
+  Without a default profile, the embedding count still uses the legacy drawer field as a diagnostic.
   A full scan is cheap and idempotent, so it keeps no per-unit checkpoint.
 - **`Repair`** (`src/repair`) turns a subset of audit findings into a fix.
   It is dry-run-first (`dry_run = true` is the default at every entry point) and deliberately narrow:
@@ -756,8 +758,9 @@ See [Publishing and installing sources](publishing-sources.md) and [ADR-033](adr
 
 **What to mine is configuration the daemon keeps in the file it was started from.**
 A miner is a named `[[miners]]` entry (a source, a locator, saved options, a credential reference), not mined data:
-the cursor stays on the source, so a miner can be renamed, disabled or given new options without losing
-where its source stopped.
+the cursor stays on the effective source identity, so renaming or disabling a miner does not lose where its source
+stopped.
+Changing options or destination mapping may select a different identity and an independent cursor.
 `app::miners` holds the last good copy, re-reads the file when it changes, and rewrites only that section in place through
 `config::miners_file`, so comments and everything else in the file survive.
 The CLI, REST and MCP's two read-only tools all call it; changing a miner has no MCP tool, like installing a source.
@@ -793,8 +796,8 @@ flowchart LR
     MCP["MCP<br/>miner_list, miner_get"] -- read only --> APP
     APP --> FILE[("config.toml<br/>[[miners]]")]
     FILE -- "changed? re-read" --> APP
-    APP -- "miner run" --> JOBS["mine job<br/>source + locator"]
-    JOBS --> CUR[("source cursor<br/>keyed by source + locator")]
+    APP -- "miner run" --> JOBS["mine job<br/>effective source identity"]
+    JOBS --> CUR[("source cursor<br/>adapter / account / locator<br/>plus configuration or destination when needed")]
 ```
 
 ## Non-goals for now
@@ -803,12 +806,14 @@ Deliberately out of scope, and each is structurally possible without rework give
 
 - Semantic processing of mined documents beyond entity extraction (summaries): mining stops at filing drawers, and the
   `extract` job is the stage that reads what was filed.
-- Handing a static credential (an environment variable or a file) to a source: the model stores a credential
-  *reference* and never a secret, and the source contract takes no static credential yet.
-  What exists is an OAuth sign-in a source can declare, which the daemon runs, keeps and renews, and hands over as an
-  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); the separately installed `memcastle-openai`
-  plugin's `chatgpt` source uses it in [experimental web mode](mining-sources.md#chatgpt), while importing an export
-  needs no sign-in.
+- Ambient access to a miner's static credential: the model stores a *reference* and never a secret.
+  A source with `[permissions] credential = true` can request only the selected env/file credential through
+  `host.source-credential()` during acquisition, never during normalization or through `run-process` by default
+  ([Writing sources](writing-sources.md#selected-env-and-file-credentials)).
+  Separately, a source can declare OAuth sign-in, which the daemon runs, keeps and renews before handing over an access
+  token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)).
+  The separately installed `memcastle-openai` plugin's `chatgpt` source uses OAuth in
+  [experimental web mode](mining-sources.md#chatgpt), while importing an export needs no sign-in.
 - Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
   contract allows each, and neither is built.
 - A registry server and a search across registries beyond their names and descriptions: the official registry is a static

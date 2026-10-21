@@ -108,8 +108,8 @@ Both report flags print JSON when piped, or with `--json`, and a short summary i
 
 ```json
 {
-  "current_version": 3,
-  "latest_version": 3,
+  "current_version": 4,
+  "latest_version": 4,
   "pending": []
 }
 ```
@@ -120,8 +120,8 @@ Applying prints what happened, in the same two forms:
 
 ```json
 {
-  "from_version": 3,
-  "to_version": 3,
+  "from_version": 4,
+  "to_version": 4,
   "applied": []
 }
 ```

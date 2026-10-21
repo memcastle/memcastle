@@ -12,6 +12,33 @@ use crate::config::miners_file::{self, FileStamp};
 use crate::domain::{CredentialRef, MemoryMode, SourceConfiguration};
 use crate::error::{Error, Result};
 
+fn broadening_reasons(
+    before: Option<&SourceConfiguration>,
+    after: &SourceConfiguration,
+    new_options: &crate::domain::Options,
+    specs: Option<&[crate::domain::OptionSpec]>,
+) -> Result<Vec<String>> {
+    if before.is_some_and(|before| before.source != after.source) {
+        return Ok(vec!["the source changed".into()]);
+    }
+    // A known source's unsaved default is already in use by miners; saving it for the first time
+    // must be compared with that empty default, not treated as a brand-new independent instance.
+    if before.is_none() && (after.id != after.source || specs.is_none()) {
+        return Ok(Vec::new());
+    }
+    let old_options = before
+        .map_or_else(
+            || Ok(crate::domain::Options::new()),
+            SourceConfiguration::options,
+        )
+        .map_err(|reason| Error::invalid_input("options", reason))?;
+    Ok(crate::domain::option_broadening(
+        &old_options,
+        new_options,
+        specs.unwrap_or_default(),
+    ))
+}
+
 /// A source configuration without a credential's variable name, path or secret.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceConfigurationView {
@@ -31,7 +58,7 @@ pub struct SourceConfigurationView {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourceConfigurationPatch {
-    /// Installed source; required for a new configuration.
+    /// Installed source; required for a new named configuration, but inferred for a known source's default.
     pub source: Option<String>,
     /// Credential reference, never its contents.
     pub credential: Option<CredentialRef>,
@@ -255,13 +282,24 @@ impl AppServices {
         let mut state = self.source_configs.state.lock().await;
         self.source_configs.refresh(&mut state)?;
         let old = state.configs.iter().find(|config| config.id == id).cloned();
-        let source = patch
+        let source = if let Some(source) = patch
             .source
             .clone()
             .or_else(|| old.as_ref().map(|config| config.source.clone()))
-            .ok_or_else(|| {
-                Error::invalid_input("source", "creating a source configuration needs `source`")
-            })?;
+        {
+            source
+        } else if crate::mining::registry::option_specs_for(&self.store, &self.mining, id)
+            .await
+            .is_ok()
+        {
+            // A known source's default is readable without a saved entry; make the matching write symmetric.
+            id.to_string()
+        } else {
+            return Err(Error::invalid_input(
+                "source",
+                "creating a named source configuration needs `source`",
+            ));
+        };
         let mut config = old.unwrap_or(SourceConfiguration {
             id: id.into(),
             source: source.clone(),
@@ -308,27 +346,20 @@ impl AppServices {
         {
             return Err(Error::invalid_input("options", message));
         }
-        if let Some(before) = state.configs.iter().find(|before| before.id == id) {
-            let reasons = if before.source != config.source {
-                vec!["the source changed".into()]
-            } else {
-                crate::domain::option_broadening(
-                    &before
-                        .options()
-                        .map_err(|reason| Error::invalid_input("options", reason))?,
-                    &new_options,
-                    specs.as_deref().unwrap_or_default(),
-                )
-            };
-            if !reasons.is_empty() && !patch.allow_broaden {
-                return Err(Error::invalid_input(
-                    "allow_broaden",
-                    format!(
-                        "this shared configuration may mine more for every miner using it: {}; repeat with `allow_broaden = true` if intended",
-                        reasons.join("; ")
-                    ),
-                ));
-            }
+        let reasons = broadening_reasons(
+            state.configs.iter().find(|before| before.id == id),
+            &config,
+            &new_options,
+            specs.as_deref(),
+        )?;
+        if !reasons.is_empty() && !patch.allow_broaden {
+            return Err(Error::invalid_input(
+                "allow_broaden",
+                format!(
+                    "this shared configuration may mine more for every miner using it: {}; repeat with `allow_broaden = true` if intended",
+                    reasons.join("; ")
+                ),
+            ));
         }
         let mut all = state.configs.clone();
         if let Some(entry) = all.iter_mut().find(|entry| entry.id == id) {
@@ -381,5 +412,41 @@ impl AppServices {
                 ),
             })??;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{OptionBreadth, OptionKind, OptionSpec};
+
+    #[test]
+    fn a_first_saved_default_requires_approval_for_an_opt_in_selection() {
+        let config = SourceConfiguration {
+            id: "example".into(),
+            source: "example".into(),
+            credential: None,
+            options: Map::new(),
+        };
+        let specs = [
+            OptionSpec::new("channels", "optional channels", OptionKind::String)
+                .with_breadth(OptionBreadth::OptInInclude),
+        ];
+        let options = crate::domain::Options::from([("channels".into(), "private".into())]);
+        assert!(
+            !broadening_reasons(None, &config, &options, Some(&specs))
+                .unwrap()
+                .is_empty()
+        );
+        // A new named instance has no existing miners inheriting its options.
+        let named = SourceConfiguration {
+            id: "work".into(),
+            ..config
+        };
+        assert!(
+            broadening_reasons(None, &named, &options, Some(&specs))
+                .unwrap()
+                .is_empty()
+        );
     }
 }

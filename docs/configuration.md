@@ -369,7 +369,7 @@ Some variables are read by the command line rather than the config file:
 
 | Flag | Applies to | Overrides |
 |---|---|---|
-| `--config <FILE>` | every command | the default config file location |
+| `--config <FILE>` | commands that load configuration; completions and local source/plugin publishing commands accept but do not read it | the default config file location |
 | `--palace <PATH>` | every command | `palace.path`, `MEMCASTLE_PALACE_PATH` |
 | `--bind <IP>` | `serve`, `daemon start`, `daemon restart` | `server.bind`, `MEMCASTLE_BIND` |
 | `--port <PORT>` | `serve`, `daemon start`, `daemon restart` | `server.port`, `MEMCASTLE_PORT` |
@@ -892,6 +892,7 @@ Source configuration options are applied first and matching miner options replac
 one-off `miner run` options replace matching saved options without rewriting either definition.
 A change to shared source defaults that may read more material needs `--allow-broaden` in the CLI
 or `allow_broaden = true` in the REST body; the UI asks for the same explicit choice.
+That includes the first saved entry for a source's implicit default when its options select additional material.
 The common `mining.max_documents` default (zero for unlimited) is overridden by a miner's positive `max_documents`.
 `embedding_profile` selects a runnable named embedding profile for drawers this miner files.
 The resolved vector space is pinned to its durable job; an explicit embedding-job profile outranks the miner override,

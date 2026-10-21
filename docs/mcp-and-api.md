@@ -185,7 +185,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that may broaden its options is a `409` unless `allow_broaden` is set. See [miner configuration](configuration.md#miners) for mapping and schedule shapes. | JSON body, all optional once the miner exists: `source`, `source_config`, `enabled`, `locator`, `wing`, `room`, `mapping`, `max_documents`, `embedding_profile`, `schedule`, `credential`, `options`, `unset_options`, `unset`, `allow_broaden` |
 | `GET /api/source-configs` | Explicit and implicit source configurations with token-free credential status. | none |
 | `GET /api/source-configs/{id}` | One configuration, or a source's implicit default. | none |
-| `PUT /api/source-configs/{id}` | Save source-native defaults and a credential reference. A change that may broaden what miners read is refused with `409` unless `allow_broaden` is true. | JSON body: `source` (required for new IDs), `options`, `credential`, `unset_options`, `unset_credential`, `allow_broaden` |
+| `PUT /api/source-configs/{id}` | Save source-native defaults and a credential reference. A change that may broaden what miners read is refused with `409` unless `allow_broaden` is true. | JSON body: `source` (required for a new named ID, inferred for a known source's default), `options`, `credential`, `unset_options`, `unset_credential`, `allow_broaden` |
 | `DELETE /api/source-configs/{id}` | Remove an explicit configuration without deleting mined memories. | none |
 | `POST /api/source-configs/{id}/auth` | Start an OAuth sign-in using this configuration's credential key. | none |
 | `GET /api/source-configs/{id}/auth?flow=<id>` | Wait for its sign-in to finish. | query: `flow`, optional `seconds` (max 30) |
@@ -347,8 +347,10 @@ nothing matched.
 `auto` is hybrid when the query can be embedded and lexical otherwise: a palace with no
 [embedding provider](configuration.md#embeddings) keeps searching exactly as before, and a provider that is down
 degrades `auto` to lexical with a warning in the daemon log.
-An explicit `semantic` or `hybrid` that cannot get a vector fails with `memcastle::search::semantic_unavailable`
-instead of answering lexically.
+An explicit `semantic` or `hybrid` with no available query vector fails with
+`memcastle::search::semantic_unavailable` (HTTP 400) instead of answering lexically.
+If a configured embedding provider fails while producing the vector, the provider error
+`memcastle::embed::failed` is returned instead (HTTP 502); only `auto` degrades to lexical in that case.
 
 **Time.**
 Time here is *validity time*: `valid_from` and `valid_to` say when a piece of knowledge was true,
