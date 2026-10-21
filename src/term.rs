@@ -9,6 +9,7 @@
 use std::io::IsTerminal;
 
 use console::Style;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::domain::JobStatus;
 use crate::error::{Error, Result};
@@ -168,6 +169,77 @@ pub fn pretty() -> bool {
     )
 }
 
+thread_local! {
+    // Only the binary's command thread owns presentation; HTTP clients and the TUI must never acquire a spinner.
+    static ACTIVE_PROGRESS: std::cell::RefCell<Option<ProgressBar>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A transient CLI wait indicator. Dropping it clears the line even when a command returns an error.
+pub struct Progress;
+
+impl Progress {
+    /// Start only for a person reading a terminal, never for JSON or a redirected stderr stream.
+    #[must_use]
+    pub fn start(message: &str) -> Self {
+        Self::start_for(
+            message,
+            JSON_FLAG.get().copied().unwrap_or(false),
+            std::io::stderr().is_terminal(),
+        )
+    }
+
+    fn start_for(message: &str, json: bool, terminal: bool) -> Self {
+        if progress_enabled(json, terminal) {
+            let bar = ProgressBar::new_spinner();
+            bar.set_style(
+                ProgressStyle::with_template("{spinner} {msg}")
+                    .expect("static spinner template is valid")
+                    .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+            );
+            bar.set_message(message.to_owned());
+            bar.enable_steady_tick(std::time::Duration::from_millis(80));
+            ACTIVE_PROGRESS.with(|active| *active.borrow_mut() = Some(bar));
+        }
+        Self
+    }
+
+    /// Name the actual next operation rather than leaving a stale message after a preview or lookup.
+    pub fn message(message: &str) {
+        ACTIVE_PROGRESS.with(|active| {
+            if let Some(bar) = active.borrow().as_ref() {
+                bar.set_message(message.to_owned());
+            }
+        });
+    }
+
+    /// Print an instruction or ask a question without the animated line overwriting it.
+    pub fn suspend<T>(f: impl FnOnce() -> T) -> T {
+        ACTIVE_PROGRESS.with(|active| match active.borrow().as_ref() {
+            Some(bar) => bar.suspend(f),
+            None => f(),
+        })
+    }
+
+    /// Clear before the command's final result or a diagnostic reaches the terminal.
+    pub fn clear() {
+        ACTIVE_PROGRESS.with(|active| {
+            if let Some(bar) = active.borrow_mut().take() {
+                bar.finish_and_clear();
+            }
+        });
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        Self::clear();
+    }
+}
+
+const fn progress_enabled(json: bool, stderr_terminal: bool) -> bool {
+    !json && stderr_terminal
+}
+
 /// The terminal's width in columns, when stdout is one and it reports a real
 /// size. A pseudo-terminal that was never sized reports 0 columns; taken
 /// literally, a table would be squeezed to one character per column, so 0 is
@@ -312,7 +384,7 @@ impl Painter {
 /// the exit code says nothing was done. [`Error::PromptFailed`] when the
 /// terminal could not be read (Ctrl-C included).
 pub fn confirm(question: &str, action: &str, assume_yes: bool) -> Result<()> {
-    confirm_with(assume_yes, is_interactive(), action, || ask(question))
+    Progress::suspend(|| confirm_with(assume_yes, is_interactive(), action, || ask(question)))
 }
 
 /// Open `url` in the user's browser, best effort, and say whether something was started.
@@ -389,7 +461,7 @@ pub fn edit(initial: &str) -> Result<String> {
         .iter()
         .filter_map(|name| std::env::var(name).ok())
         .find(|value| !value.trim().is_empty());
-    edit_with(configured.as_deref(), initial)
+    Progress::suspend(|| edit_with(configured.as_deref(), initial))
 }
 
 /// [`edit`] with the editor command given, which is the seam the tests use instead of the real environment.
@@ -444,6 +516,38 @@ mod tests {
         assert!(!is_pretty(true, true), "--json forces JSON on a terminal");
         assert!(!is_pretty(false, false), "a pipe always gets JSON");
         assert!(!is_pretty(true, false), "--json on a pipe is still JSON");
+    }
+
+    #[test]
+    fn progress_needs_a_terminal_and_is_silent_for_json() {
+        assert!(progress_enabled(false, true));
+        assert!(!progress_enabled(true, true));
+        assert!(!progress_enabled(false, false));
+        assert!(!progress_enabled(true, false));
+    }
+
+    #[test]
+    fn a_progress_scope_changes_messages_and_clears_even_when_dropped() {
+        let progress = Progress::start_for("Preparing...", false, true);
+        ACTIVE_PROGRESS.with(|active| {
+            // No actual terminal is needed: the test checks the lifecycle, not escape sequences.
+            let active = active.borrow();
+            let bar = active.as_ref().unwrap();
+            bar.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+            assert_eq!(bar.message(), "Preparing...");
+        });
+        Progress::message("Installing...");
+        let instruction = Progress::suspend(|| "Permission needed");
+        assert_eq!(instruction, "Permission needed");
+        ACTIVE_PROGRESS.with(|active| {
+            assert_eq!(active.borrow().as_ref().unwrap().message(), "Installing...");
+        });
+        drop(progress);
+        ACTIVE_PROGRESS.with(|active| assert!(active.borrow().is_none()));
+        // Once cleared, later messages and instructions cannot resurrect a completed spinner.
+        Progress::message("Ignored...");
+        assert_eq!(Progress::suspend(|| 42), 42);
+        Progress::clear();
     }
 
     #[test]

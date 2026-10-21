@@ -32,7 +32,7 @@ use memcastle::client::{DaemonClient, SetFlags, StatusView, TriggerSetFlags};
 use memcastle::config::{Config, Overrides};
 use memcastle::domain::{MemoryMode, NameKind, PalacePath, validate_name};
 use memcastle::store::SurrealStore;
-use memcastle::term::{self, Painter};
+use memcastle::term::{self, Painter, Progress};
 use memcastle::{Error, Result};
 
 /// Not `#[tokio::main]`: that runs the runtime's `block_on` — and so, for
@@ -105,18 +105,22 @@ async fn async_main() -> ExitCode {
         | SourceCommand::Keygen(_)),
     ) = &args.command
     {
+        let _progress = Progress::start("Preparing source project...");
         return match cmd_source_local(command).await {
             Ok(code) => code,
             Err(error) => {
+                Progress::clear();
                 eprintln!("{:?}", miette::Report::new(error));
                 ExitCode::FAILURE
             }
         };
     }
     if let Command::Plugin(PluginCommand::Sign { archive, key }) = &args.command {
+        let _progress = Progress::start("Signing plugin archive...");
         return match cmd_plugin_sign(archive, key) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
+                Progress::clear();
                 eprintln!("{:?}", miette::Report::new(error));
                 ExitCode::FAILURE
             }
@@ -128,9 +132,11 @@ async fn async_main() -> ExitCode {
         | PluginCommand::Test { .. }),
     ) = &args.command
     {
+        let _progress = Progress::start("Preparing plugin archive...");
         return match cmd_plugin_local(command).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
+                Progress::clear();
                 eprintln!("{:?}", miette::Report::new(error));
                 ExitCode::FAILURE
             }
@@ -157,6 +163,8 @@ async fn async_main() -> ExitCode {
     // Read before `run` consumes `args`. Only these two commands open the embedded
     // datastore; every other one is an HTTP client with nothing to wait for.
     let opens_storage = matches!(args.command, Command::Serve(_) | Command::Migrate(_));
+    let migrating = matches!(args.command, Command::Migrate(_));
+    let _progress = progress_label(&args.command).map(Progress::start);
     let outcome = if matches!(args.command, Command::Doctor) {
         let report = memcastle::doctor::run(args.config.as_deref(), args.mode, config).await;
         print_for_terminal_or_json(|painter, _| report.render(painter), &report)
@@ -168,8 +176,12 @@ async fn async_main() -> ExitCode {
         }
     };
     if opens_storage {
+        // The report may already have cleared its spinner, but flushing the embedded store can still take seconds.
+        let _shutdown_progress =
+            migrating.then(|| Progress::start("Waiting for datastore shutdown..."));
         wait_for_datastore_shutdown().await;
     }
+    Progress::clear();
     match outcome {
         Ok(code) => code,
         Err(error) => {
@@ -177,6 +189,118 @@ async fn async_main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The command's first wait; multi-step commands replace this label as their work changes.
+fn progress_label(command: &Command) -> Option<&'static str> {
+    Some(match command {
+        Command::Serve(_) | Command::Tui | Command::Completions(_) | Command::Maintenance => {
+            return None;
+        }
+        Command::Status => "Checking daemon status...",
+        Command::Doctor => "Checking configuration and daemon...",
+        Command::Migrate(_) => "Opening palace for migration...",
+        Command::Daemon(DaemonCommand::Start(_) | DaemonCommand::Restart(_)) => {
+            "Starting daemon..."
+        }
+        Command::Daemon(DaemonCommand::Stop) => "Stopping daemon...",
+        Command::Search(_) | Command::Recall(_) => "Searching memories...",
+        Command::WakeUp(_) => "Loading session context...",
+        Command::Mine(_) => "Submitting mining job...",
+        Command::Sources => "Listing sources...",
+        Command::Source(SourceCommand::Search(_)) => "Searching source registry...",
+        Command::Source(SourceCommand::Install(_)) => "Preparing source installation...",
+        Command::Source(SourceCommand::Update(_)) => "Checking source updates...",
+        Command::Source(
+            SourceCommand::List
+            | SourceCommand::Config {
+                command: cli::SourceConfigCommand::List,
+            },
+        ) => "Listing sources...",
+        Command::Source(
+            SourceCommand::Show(_)
+            | SourceCommand::Config {
+                command: cli::SourceConfigCommand::Get { .. },
+            },
+        ) => "Loading source details...",
+        Command::Source(
+            SourceCommand::Auth(_)
+            | SourceCommand::Config {
+                command: cli::SourceConfigCommand::Auth { .. },
+            },
+        ) => "Starting source sign-in...",
+        Command::Source(SourceCommand::Enable(_)) => "Enabling source...",
+        Command::Source(SourceCommand::Disable(_)) => "Disabling source...",
+        Command::Source(
+            SourceCommand::Remove(_)
+            | SourceCommand::Config {
+                command: cli::SourceConfigCommand::Remove { .. },
+            },
+        ) => "Removing source...",
+        Command::Source(SourceCommand::Config {
+            command: cli::SourceConfigCommand::Set { .. },
+        }) => "Saving source configuration...",
+        Command::Source(_) => "Preparing source...",
+        Command::Plugin(PluginCommand::Search { .. }) => "Searching plugin catalogues...",
+        Command::Plugin(PluginCommand::List) => "Listing installed plugins...",
+        Command::Plugin(PluginCommand::Show { .. }) => "Loading plugin details...",
+        Command::Plugin(PluginCommand::Install(_)) => "Preparing plugin installation...",
+        Command::Plugin(PluginCommand::Update(_)) => "Checking plugin updates...",
+        Command::Plugin(PluginCommand::Uninstall(_)) => "Uninstalling plugin...",
+        Command::Plugin(_) => "Preparing plugin...",
+        Command::Miner(MinerCommand::List) => "Listing miners...",
+        Command::Miner(MinerCommand::Get(_)) => "Loading miner details...",
+        Command::Miner(MinerCommand::Run(_)) => "Submitting miner run...",
+        Command::Miner(MinerCommand::Reload) => "Reloading miners...",
+        Command::Miner(MinerCommand::Remove(_)) => "Removing miner...",
+        Command::Miner(_) => "Changing miner configuration...",
+        Command::Trigger(TriggerCommand::List) => "Listing triggers...",
+        Command::Trigger(TriggerCommand::Get(_)) => "Loading trigger details...",
+        Command::Trigger(TriggerCommand::Fire(_)) => "Firing trigger...",
+        Command::Trigger(TriggerCommand::Reload) => "Reloading triggers...",
+        Command::Trigger(TriggerCommand::Remove(_)) => "Removing trigger...",
+        Command::Trigger(_) => "Changing trigger configuration...",
+        Command::Integration(IntegrationCommand::List(_)) => "Listing agent integrations...",
+        Command::Integration(IntegrationCommand::Install(_)) => "Installing agent integration...",
+        Command::Integration(IntegrationCommand::Update(_)) => "Updating agent integration...",
+        Command::Integration(IntegrationCommand::Remove(_)) => "Removing agent integration...",
+        Command::Note(_) => "Saving note...",
+        Command::Checkpoint(_) => "Submitting checkpoint job...",
+        Command::Audit(_) => "Submitting audit job...",
+        Command::Embed(_) => "Requesting embedding operation...",
+        Command::Extract(_) => "Submitting extraction job...",
+        Command::Repair(_) => "Submitting repair job...",
+        Command::Diary(DiaryCommand::Read { .. }) => "Reading diary...",
+        Command::Diary(DiaryCommand::Write { .. }) => "Writing diary entry...",
+        Command::Job(JobCommand::List { .. }) => "Listing jobs...",
+        Command::Job(JobCommand::Show { .. }) => "Loading job details...",
+        Command::Job(JobCommand::Pause { .. }) => "Pausing job...",
+        Command::Job(JobCommand::Resume { .. }) => "Resuming job...",
+        Command::Job(JobCommand::Cancel { .. }) => "Cancelling job...",
+        Command::Job(JobCommand::Retry { .. }) => "Retrying job...",
+        Command::Job(JobCommand::Demo { .. }) => "Submitting demo job...",
+        Command::Wing(WingCommand::List) => "Listing wings...",
+        Command::Wing(WingCommand::Show { .. }) => "Loading wing...",
+        Command::Wing(WingCommand::Create { .. }) => "Creating wing...",
+        Command::Wing(WingCommand::Delete { .. }) => "Deleting wing...",
+        Command::Room(RoomCommand::List { .. }) => "Listing rooms...",
+        Command::Room(RoomCommand::Show { .. }) => "Loading room...",
+        Command::Room(RoomCommand::Create { .. }) => "Creating room...",
+        Command::Room(RoomCommand::Delete { .. }) => "Deleting room...",
+        Command::Drawer(DrawerCommand::List { .. }) => "Listing drawers...",
+        Command::Drawer(DrawerCommand::Show { .. }) => "Loading drawer...",
+        Command::Drawer(DrawerCommand::Create { .. }) => "Creating drawer...",
+        Command::Drawer(DrawerCommand::Supersede { .. }) => "Superseding drawer...",
+        Command::Drawer(DrawerCommand::History { .. }) => "Loading drawer history...",
+        Command::Drawer(DrawerCommand::Mention { .. }) => "Linking drawer to entity...",
+        Command::Drawer(DrawerCommand::Delete { .. }) => "Deleting drawer...",
+        Command::Fact(_) => "Loading relationship history...",
+        Command::Auth(AuthCommand::Generate(_)) => "Generating authentication token...",
+        Command::Auth(AuthCommand::Revoke(_)) => "Revoking authentication token...",
+        Command::Db(DbCommand::Start(_)) => "Opening database endpoint...",
+        Command::Db(DbCommand::Stop) => "Closing database endpoint...",
+        Command::Db(DbCommand::Status) => "Checking database endpoint...",
+    })
 }
 
 /// Keep the runtime alive until the embedded datastore has finished stopping.
@@ -362,6 +486,7 @@ fn cmd_completions(args: &CompletionsArgs) -> ExitCode {
 /// Print `value` as pretty JSON, highlighting only on a coloured terminal — or fail loudly. A serialization error used
 /// to print an empty line and exit 0, which a script reads as "no results".
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    Progress::clear();
     let text = serde_json::to_string_pretty(value)
         .map_err(|source| Error::serialization("the command's output", source))?;
     if term::terminal_json_color() {
@@ -398,6 +523,7 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
     let store = SurrealStore::connect(&backend).await?;
 
     if args.check || args.status {
+        Progress::message("Checking migration status...");
         let status = memcastle::migrate::status(&store).await?;
         print_for_terminal_or_json(
             |painter, _| memcastle::client::report_view::render_migration_status(&status, painter),
@@ -412,6 +538,7 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
         return Ok(());
     }
 
+    Progress::message("Applying palace migrations...");
     let report = memcastle::migrate::run(&store).await?;
     print_for_terminal_or_json(
         |painter, _| memcastle::client::report_view::render_migration_report(&report, painter),
@@ -466,6 +593,7 @@ async fn cmd_daemon_restart(
 ) -> Result<()> {
     let daemon = client(config, mode);
     if daemon.health().await {
+        Progress::message("Waiting for old daemon to stop...");
         daemon.shutdown().await?;
         // Wait for the old daemon to be *gone*, not merely to stop answering:
         // its listener closes as soon as shutdown begins, but it then drains
@@ -482,6 +610,7 @@ async fn cmd_daemon_restart(
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
+    Progress::message("Starting replacement daemon...");
     spawn_and_wait(config, config_path, &args, "restarted:").await
 }
 
@@ -570,6 +699,7 @@ async fn spawn_and_wait(
         // bound.
         for _ in 0..600 {
             if let Some(info) = memcastle::server::lifecycle::read_if_live(&config.palace.path) {
+                Progress::clear();
                 let paint = Painter::for_stdout();
                 println!(
                     "{} memcastle is serving on {}",
@@ -766,17 +896,19 @@ fn agree_to_plugin(
         if source.already_granted || given.contains_key(&source.source) {
             continue;
         }
-        eprintln!(
-            "{} {} {} asks to: {}",
-            Painter::for_stderr().warn(if source.source.starts_with("embedding:") {
-                "Embedding provider"
-            } else {
-                "Source"
-            }),
-            source.source,
-            preview.version,
-            source.permissions
-        );
+        Progress::suspend(|| {
+            eprintln!(
+                "{} {} {} asks to: {}",
+                Painter::for_stderr().warn(if source.source.starts_with("embedding:") {
+                    "Embedding provider"
+                } else {
+                    "Source"
+                }),
+                source.source,
+                preview.version,
+                source.permissions
+            )
+        });
         if yes || term::is_interactive() {
             term::confirm(
                 "Install this module with these permissions?",
@@ -835,6 +967,7 @@ fn cmd_plugin_sign(archive: &std::path::Path, key: &std::path::Path) -> Result<(
 async fn cmd_plugin_local(command: &PluginCommand) -> Result<()> {
     match command {
         PluginCommand::Inspect { manifest } => {
+            Progress::message("Inspecting plugin manifest...");
             let plugin = memcastle::plugin::package::inspect_manifest(manifest)?;
             print_for_terminal_or_json(
                 |_, _| {
@@ -853,6 +986,7 @@ async fn cmd_plugin_local(command: &PluginCommand) -> Result<()> {
             output,
             version,
         } => {
+            Progress::message("Packaging plugin modules...");
             let packaged = memcastle::plugin::package::package_manifest_with_version(
                 manifest,
                 output.as_deref(),
@@ -870,7 +1004,9 @@ async fn cmd_plugin_local(command: &PluginCommand) -> Result<()> {
             )
         }
         PluginCommand::Test { archive } => {
+            Progress::message("Testing plugin in a disposable daemon...");
             memcastle::client::plugin_test::run(archive).await?;
+            Progress::clear();
             println!("Plugin archive installation and source activation passed");
             Ok(())
         }
@@ -976,13 +1112,17 @@ async fn cmd_plugin(
                     ));
                 }
                 let archive = if path.is_dir() {
+                    Progress::message("Packaging local plugin project...");
                     memcastle::plugin::package::pack_project(path)?
                 } else {
+                    Progress::message("Reading local plugin archive...");
                     std::fs::read(path).map_err(|e| Error::io(path.display().to_string(), e))?
                 };
+                Progress::message("Previewing plugin permissions...");
                 let preview = daemon.preview_plugin(&archive).await?;
                 check_plugin_adoptions(&preview, &args.adopt_sources)?;
                 let consents = agree_to_plugin(&preview, given, args.yes)?;
+                Progress::message("Installing plugin modules...");
                 daemon
                     .install_plugin(archive, &consents, &args.adopt_sources)
                     .await?
@@ -994,6 +1134,7 @@ async fn cmd_plugin(
                             "a direct repository URL is already the plugin's location",
                         ));
                     }
+                    Progress::message("Finding repository releases...");
                     let search = daemon.search_plugins(None, Some(&args.target)).await?;
                     let plugin = search.plugins.into_iter().next().ok_or_else(|| {
                         Error::PluginRegistryUnavailable {
@@ -1004,11 +1145,13 @@ async fn cmd_plugin(
                             ),
                         }
                     })?;
+                    Progress::message("Fetching and previewing plugin release...");
                     let preview = daemon
                         .preview_registry_plugin(&plugin.id, None, Some(&args.target))
                         .await?;
                     check_plugin_adoptions(&preview.plugin, &args.adopt_sources)?;
                     let consents = agree_to_plugin(&preview.plugin, given, args.yes)?;
+                    Progress::message("Installing plugin modules...");
                     let installed = daemon
                         .install_registry_plugin(
                             &plugin.id,
@@ -1048,11 +1191,13 @@ async fn cmd_plugin(
                         (id, Some(version))
                     });
                 let registry = args.registry.as_deref().map(absolute_location);
+                Progress::message("Fetching and previewing plugin release...");
                 let preview = daemon
                     .preview_registry_plugin(id, version, registry.as_deref())
                     .await?;
                 check_plugin_adoptions(&preview.plugin, &args.adopt_sources)?;
                 let consents = agree_to_plugin(&preview.plugin, given, args.yes)?;
+                Progress::message("Installing plugin modules...");
                 daemon
                     .install_registry_plugin(
                         id,
@@ -1081,6 +1226,7 @@ async fn cmd_plugin(
             let upstream = record.upstream.as_deref().ok_or_else(|| Error::PluginBlocked {
                 name: args.id.clone(), reason: "this plugin was installed from local files; install a newer archive or project explicitly".into(),
             })?;
+            Progress::message("Fetching and previewing plugin update...");
             let preview = daemon
                 .preview_registry_plugin(&args.id, None, Some(upstream))
                 .await?;
@@ -1104,6 +1250,7 @@ async fn cmd_plugin(
             }
             let consents =
                 agree_to_plugin(&preview.plugin, plugin_consents(&args.consents)?, args.yes)?;
+            Progress::message("Installing plugin update...");
             let installed = daemon
                 .install_registry_plugin(
                     &args.id,
@@ -1140,6 +1287,7 @@ async fn cmd_plugin(
                 },
             )
             .await?;
+            Progress::message("Uninstalling plugin modules...");
             let removed = daemon.uninstall_plugin(&args.id).await?;
             print_for_terminal_or_json(|_, _| format!("Uninstalled {}", args.id), &removed)
         }
@@ -1154,8 +1302,11 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
     use memcastle::source::build::Project;
     match command {
         SourceCommand::Build(args) => {
+            Progress::message("Building source component...");
             let project = Project::open(&args.path)?;
-            let component = project.build()?;
+            // The build program writes its own output to the terminal; keep that output legible.
+            let component = Progress::suspend(|| project.build())?;
+            Progress::clear();
             println!(
                 "{} {}",
                 Painter::for_stdout().ok("Built"),
@@ -1166,11 +1317,14 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
         SourceCommand::Test(args) => {
             let project = Project::open(&args.path)?;
             if !args.no_build {
-                project.build()?;
+                Progress::message("Building source component...");
+                Progress::suspend(|| project.build())?;
             }
+            Progress::message("Testing source component...");
             let report = project
                 .test(&memcastle::config::MiningConfig::default())
                 .await?;
+            Progress::clear();
             let paint = Painter::for_stdout();
             for case in &report.cases {
                 if case.failures.is_empty() {
@@ -1191,9 +1345,12 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
         SourceCommand::Package(args) => {
             let project = Project::open(&args.path)?;
             if !args.no_build {
-                project.build()?;
+                Progress::message("Building source component...");
+                Progress::suspend(|| project.build())?;
             }
+            Progress::message("Packaging source component...");
             let (archive, package) = project.package(args.output.as_deref())?;
+            Progress::clear();
             println!(
                 "{} {}",
                 Painter::for_stdout().ok("Packaged"),
@@ -1227,6 +1384,7 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
             memcastle::source::signing::write_signing_key(&args.file, &key)?;
             let public = key.verifying_key();
             let paint = Painter::for_stdout();
+            Progress::clear();
             println!("{} {}", paint.ok("Wrote"), args.file.display());
             println!(
                 "  key id      {}",
@@ -1244,6 +1402,7 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         SourceCommand::Index(args) => {
+            Progress::message("Indexing source archives...");
             use memcastle::source::publish;
             let key = args
                 .sign
@@ -1260,6 +1419,7 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
                     .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
                 let url = publish::archive_url(args.base_url.as_deref(), &file_name);
                 let (name, version) = publish::add_archive(&mut index, &bytes, &url, key.as_ref())?;
+                Progress::clear();
                 println!(
                     "{} {name} {version}{}",
                     paint.ok("Added"),
@@ -1364,10 +1524,12 @@ async fn cmd_source(
             )
         }
         SourceCommand::Search(args) => {
-            eprintln!(
-                "{} `source search` uses the legacy source registry; use `plugin search` for provider packages",
-                Painter::for_stderr().warn("Deprecated:")
-            );
+            Progress::suspend(|| {
+                eprintln!(
+                    "{} `source search` uses the legacy source registry; use `plugin search` for provider packages",
+                    Painter::for_stderr().warn("Deprecated:")
+                )
+            });
             let registry = args.registry.as_deref().map(absolute_location);
             let found = client(config, None)
                 .search_registry(args.query.as_deref(), registry.as_deref())
@@ -1445,7 +1607,7 @@ async fn cmd_sign_source(config: &Config, name: &str, named: bool) -> Result<()>
         daemon.begin_source_auth(name).await?
     };
     let painter = Painter::for_stderr();
-    match challenge.kind {
+    Progress::suspend(|| match challenge.kind {
         FlowKind::Device => {
             let page = challenge
                 .verification_uri
@@ -1477,14 +1639,17 @@ async fn cmd_sign_source(config: &Config, name: &str, named: bool) -> Result<()>
                 painter.dim("The browser must be on the machine the daemon runs on.")
             );
         }
-    }
-    eprintln!(
-        "{}",
-        painter.dim(&format!(
-            "Waiting for you to finish (within {} minutes)...",
-            challenge.expires_in.div_ceil(60)
-        ))
-    );
+    });
+    Progress::suspend(|| {
+        eprintln!(
+            "{}",
+            painter.dim(&format!(
+                "Waiting for you to finish (within {} minutes)...",
+                challenge.expires_in.div_ceil(60)
+            ))
+        )
+    });
+    Progress::message("Waiting for source sign-in...");
     // A long poll, repeated: the daemon holds each request for a few seconds and then says it is still waiting, so no
     // proxy or timeout sits between the user and the end of their sign-in.
     let signed_in = loop {
@@ -1757,11 +1922,13 @@ fn consent_for(
         return Ok(Some(digest));
     }
     if term::is_interactive() {
-        eprintln!(
-            "{} {name} {version} asks to: {}",
-            Painter::for_stderr().warn("Source"),
-            permissions.describe()
-        );
+        Progress::suspend(|| {
+            eprintln!(
+                "{} {name} {version} asks to: {}",
+                Painter::for_stderr().warn("Source"),
+                permissions.describe()
+            )
+        });
         term::confirm(
             "Install it with these permissions?",
             "installing the source",
@@ -1774,10 +1941,12 @@ fn consent_for(
 
 /// `memcastle source install <file|directory|name[@version]>`.
 async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Result<()> {
-    eprintln!(
-        "{} `source install` installs a legacy source package; use `plugin install` for provider packages",
-        Painter::for_stderr().warn("Deprecated:")
-    );
+    Progress::suspend(|| {
+        eprintln!(
+            "{} `source install` installs a legacy source package; use `plugin install` for provider packages",
+            Painter::for_stderr().warn("Deprecated:")
+        )
+    });
     let render = |installed: &memcastle::app::InstalledSource| {
         print_for_terminal_or_json(
             |painter, _| memcastle::client::table::render_source(&installed.source, painter),
@@ -1786,6 +1955,7 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
     };
     match classify_install(&args.source) {
         InstallTarget::Named { name, version } => {
+            Progress::message("Fetching and previewing source package...");
             let registry = args.registry.as_deref().map(absolute_location);
             let daemon = client(config, None);
             // The daemon downloads and verifies the package first, so what is agreed to is what was actually
@@ -1793,18 +1963,20 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
             let preview = daemon
                 .preview_registry_source(&name, version.as_deref(), registry.as_deref())
                 .await?;
-            eprintln!(
-                "{} {} {} from {} ({}){}",
-                Painter::for_stderr().ok("Found"),
-                preview.name,
-                preview.version,
-                preview.registry,
-                preview.origin,
-                preview
-                    .signed_by
-                    .as_ref()
-                    .map_or_else(String::new, |key| format!(", signed by key {key}"))
-            );
+            Progress::suspend(|| {
+                eprintln!(
+                    "{} {} {} from {} ({}){}",
+                    Painter::for_stderr().ok("Found"),
+                    preview.name,
+                    preview.version,
+                    preview.registry,
+                    preview.origin,
+                    preview
+                        .signed_by
+                        .as_ref()
+                        .map_or_else(String::new, |key| format!(", signed by key {key}"))
+                )
+            });
             let consent = consent_for(
                 &preview.name,
                 &preview.version,
@@ -1813,6 +1985,7 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
                 args.consent,
                 args.yes,
             )?;
+            Progress::message("Installing source package...");
             let installed = daemon
                 .install_registry_source(&memcastle::app::RegistryInstall {
                     name,
@@ -1828,20 +2001,24 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
         target => {
             let archive_path = match target {
                 InstallTarget::Directory(dir) => {
+                    Progress::message("Building source project...");
                     use memcastle::source::build::Project;
                     let project = Project::open(&dir)?;
-                    project.build()?;
+                    Progress::suspend(|| project.build())?;
                     let (archive, _) = project.package(None)?;
-                    eprintln!(
-                        "{} {}",
-                        Painter::for_stderr().ok("Packaged"),
-                        archive.display()
-                    );
+                    Progress::suspend(|| {
+                        eprintln!(
+                            "{} {}",
+                            Painter::for_stderr().ok("Packaged"),
+                            archive.display()
+                        )
+                    });
                     archive
                 }
                 InstallTarget::File(path) => path,
                 InstallTarget::Named { .. } => unreachable!("handled above"),
             };
+            Progress::message("Reading source archive...");
             let archive = std::fs::read(&archive_path)
                 .map_err(|source| Error::io(archive_path.display().to_string(), source))?;
             // Read here only to show what is being agreed to; the daemon reads it again and trusts none of this.
@@ -1856,6 +2033,7 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
                 args.consent,
                 args.yes,
             )?;
+            Progress::message("Installing source package...");
             let installed = client(config, None)
                 .install_source(archive, consent.as_deref(), args.enable)
                 .await?;
@@ -1869,10 +2047,12 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
 /// Exits non-zero when something could not be updated, or is waiting for consent to permissions it newly asks for, so
 /// a script that updates unattended notices.
 async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Result<ExitCode> {
-    eprintln!(
-        "{} `source update` uses the legacy source registry; use `plugin update` for provider packages",
-        Painter::for_stderr().warn("Deprecated:")
-    );
+    Progress::suspend(|| {
+        eprintln!(
+            "{} `source update` uses the legacy source registry; use `plugin update` for provider packages",
+            Painter::for_stderr().warn("Deprecated:")
+        )
+    });
     use memcastle::app::UpdateStatus;
     let daemon = client(config, None);
     if args.check {
@@ -1888,6 +2068,7 @@ async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Res
         return Ok(ExitCode::SUCCESS);
     }
 
+    Progress::message("Fetching source updates...");
     let mut outcomes = daemon.update_sources(args.name.as_deref(), None).await?;
     for outcome in &mut outcomes {
         let UpdateStatus::NeedsConsent {
@@ -1901,12 +2082,14 @@ async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Res
         let agreed = if args.yes {
             true
         } else if term::is_interactive() {
-            eprintln!(
-                "{} {} {} now asks to: {permissions}",
-                Painter::for_stderr().warn("Source"),
-                outcome.name,
-                outcome.to.as_deref().unwrap_or("?")
-            );
+            Progress::suspend(|| {
+                eprintln!(
+                    "{} {} {} now asks to: {permissions}",
+                    Painter::for_stderr().warn("Source"),
+                    outcome.name,
+                    outcome.to.as_deref().unwrap_or("?")
+                )
+            });
             term::confirm(
                 "Update it with these permissions?",
                 "updating the source",
@@ -1916,13 +2099,15 @@ async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Res
         } else {
             false
         };
-        if agreed
-            && let Some(again) = daemon
+        if agreed {
+            Progress::message("Installing consented source update...");
+            if let Some(again) = daemon
                 .update_sources(Some(&outcome.name), Some(&digest))
                 .await?
                 .pop()
-        {
-            *outcome = again;
+            {
+                *outcome = again;
+            }
         }
     }
     let healthy = outcomes.iter().all(|outcome| {
@@ -2252,8 +2437,10 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
         Painter::for_stdout(),
     )?;
     if !term::pretty() && term::terminal_json_color() {
+        Progress::clear();
         println!("{}", term::highlight_json(&text, Painter::for_stdout()));
     } else {
+        Progress::clear();
         println!("{text}");
     }
     Ok(())
@@ -2273,6 +2460,7 @@ fn print_for_terminal_or_json(
     human: impl FnOnce(Painter, Option<u16>) -> String,
     json: &impl serde::Serialize,
 ) -> Result<()> {
+    Progress::clear();
     if term::pretty() {
         println!("{}", human(Painter::for_stdout(), term::terminal_width()));
         Ok(())
@@ -2292,7 +2480,8 @@ where
     F: std::future::Future<Output = Result<String>>,
 {
     if !yes && term::is_interactive() {
-        eprintln!("{}\n", stakes.await?);
+        let description = stakes.await?;
+        Progress::suspend(|| eprintln!("{description}\n"));
     }
     term::confirm(question, action, yes)
 }
@@ -2579,6 +2768,7 @@ async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
             // The token alone on stdout, so `memcastle auth generate | op item
             // create ...` captures exactly it. It is printed here and nowhere
             // else: not logged, not written to a file, not in any JSON.
+            Progress::clear();
             println!("{}", generated.token);
             // Guidance goes to stderr so it never ends up in the captured token.
             let paint = Painter::for_stderr();
@@ -2636,6 +2826,7 @@ async fn cmd_db(config: &Config, command: DbCommand) -> Result<()> {
 /// Print the admin endpoint's state, as JSON for scripts or as the few lines a
 /// person needs to point SurrealDB Studio at it.
 fn print_db_status(status: &DbEndpointStatus) -> Result<()> {
+    Progress::clear();
     if !term::pretty() {
         return print_json(status);
     }
@@ -2725,4 +2916,261 @@ fn init_tracing(filter: String, format: memcastle::config::LogFormat) {
         memcastle::config::LogFormat::Text => builder.try_init(),
         memcastle::config::LogFormat::Json => builder.json().try_init(),
     };
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn every_wait_is_named_for_the_action_and_interactive_consoles_stay_undecorated() {
+        // Parse real CLI arguments so a renamed subcommand cannot silently keep an obsolete status message.
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["serve"], None),
+            (&["tui"], None),
+            (&["completions", "bash"], None),
+            (&["maintenance"], None),
+            (&["status"], Some("Checking daemon status...")),
+            (&["doctor"], Some("Checking configuration and daemon...")),
+            (
+                &["migrate", "--status"],
+                Some("Opening palace for migration..."),
+            ),
+            (&["daemon", "start"], Some("Starting daemon...")),
+            (&["daemon", "restart"], Some("Starting daemon...")),
+            (&["daemon", "stop"], Some("Stopping daemon...")),
+            (&["search", "needle"], Some("Searching memories...")),
+            (&["recall", "needle"], Some("Searching memories...")),
+            (
+                &["wake-up", "--agent-identity", "agent"],
+                Some("Loading session context..."),
+            ),
+            (&["mine", "."], Some("Submitting mining job...")),
+            (&["sources"], Some("Listing sources...")),
+            (&["source", "search"], Some("Searching source registry...")),
+            (
+                &["source", "install", "example"],
+                Some("Preparing source installation..."),
+            ),
+            (&["source", "update"], Some("Checking source updates...")),
+            (&["source", "list"], Some("Listing sources...")),
+            (
+                &["source", "show", "example"],
+                Some("Loading source details..."),
+            ),
+            (
+                &["source", "auth", "example"],
+                Some("Starting source sign-in..."),
+            ),
+            (&["source", "enable", "example"], Some("Enabling source...")),
+            (
+                &["source", "disable", "example"],
+                Some("Disabling source..."),
+            ),
+            (&["source", "remove", "example"], Some("Removing source...")),
+            (&["source", "config", "list"], Some("Listing sources...")),
+            (
+                &["source", "config", "get", "example"],
+                Some("Loading source details..."),
+            ),
+            (
+                &["source", "config", "auth", "example"],
+                Some("Starting source sign-in..."),
+            ),
+            (
+                &["source", "config", "remove", "example"],
+                Some("Removing source..."),
+            ),
+            (
+                &["source", "config", "set", "example"],
+                Some("Saving source configuration..."),
+            ),
+            (
+                &["plugin", "search"],
+                Some("Searching plugin catalogues..."),
+            ),
+            (&["plugin", "list"], Some("Listing installed plugins...")),
+            (
+                &["plugin", "show", "example"],
+                Some("Loading plugin details..."),
+            ),
+            (
+                &["plugin", "install", "example"],
+                Some("Preparing plugin installation..."),
+            ),
+            (
+                &["plugin", "update", "example"],
+                Some("Checking plugin updates..."),
+            ),
+            (
+                &["plugin", "uninstall", "example"],
+                Some("Uninstalling plugin..."),
+            ),
+            (&["miner", "list"], Some("Listing miners...")),
+            (
+                &["miner", "get", "example"],
+                Some("Loading miner details..."),
+            ),
+            (
+                &["miner", "run", "example"],
+                Some("Submitting miner run..."),
+            ),
+            (&["miner", "reload"], Some("Reloading miners...")),
+            (&["miner", "remove", "example"], Some("Removing miner...")),
+            (
+                &["miner", "disable", "example"],
+                Some("Changing miner configuration..."),
+            ),
+            (&["trigger", "list"], Some("Listing triggers...")),
+            (
+                &["trigger", "get", "example"],
+                Some("Loading trigger details..."),
+            ),
+            (&["trigger", "fire", "example"], Some("Firing trigger...")),
+            (&["trigger", "reload"], Some("Reloading triggers...")),
+            (
+                &["trigger", "remove", "example"],
+                Some("Removing trigger..."),
+            ),
+            (
+                &["trigger", "disable", "example"],
+                Some("Changing trigger configuration..."),
+            ),
+            (
+                &["integration", "list"],
+                Some("Listing agent integrations..."),
+            ),
+            (
+                &["integration", "install", "pi"],
+                Some("Installing agent integration..."),
+            ),
+            (
+                &["integration", "update", "pi"],
+                Some("Updating agent integration..."),
+            ),
+            (
+                &["integration", "remove", "pi"],
+                Some("Removing agent integration..."),
+            ),
+            (&["note", "private-text"], Some("Saving note...")),
+            (&["checkpoint"], Some("Submitting checkpoint job...")),
+            (&["audit"], Some("Submitting audit job...")),
+            (&["embed"], Some("Requesting embedding operation...")),
+            (&["extract"], Some("Submitting extraction job...")),
+            (&["repair"], Some("Submitting repair job...")),
+            (
+                &[
+                    "diary",
+                    "read",
+                    "--agent-identity",
+                    "example",
+                    "--wing",
+                    "example",
+                ],
+                Some("Reading diary..."),
+            ),
+            (
+                &[
+                    "diary",
+                    "write",
+                    "--agent-identity",
+                    "example",
+                    "--wing",
+                    "example",
+                    "private-text",
+                ],
+                Some("Writing diary entry..."),
+            ),
+            (&["job", "list"], Some("Listing jobs...")),
+            (&["job", "show", "example"], Some("Loading job details...")),
+            (&["job", "pause", "example"], Some("Pausing job...")),
+            (&["job", "resume", "example"], Some("Resuming job...")),
+            (&["job", "cancel", "example"], Some("Cancelling job...")),
+            (&["job", "retry", "example"], Some("Retrying job...")),
+            (&["job", "demo"], Some("Submitting demo job...")),
+            (&["wing", "list"], Some("Listing wings...")),
+            (&["wing", "show", "example"], Some("Loading wing...")),
+            (&["wing", "create", "example"], Some("Creating wing...")),
+            (&["wing", "delete", "example"], Some("Deleting wing...")),
+            (&["room", "list"], Some("Listing rooms...")),
+            (&["room", "show", "example/room"], Some("Loading room...")),
+            (
+                &["room", "create", "example/room"],
+                Some("Creating room..."),
+            ),
+            (
+                &["room", "delete", "example/room"],
+                Some("Deleting room..."),
+            ),
+            (
+                &["drawer", "list", "--room", "example/room"],
+                Some("Listing drawers..."),
+            ),
+            (
+                &["drawer", "show", "example/room/drawer"],
+                Some("Loading drawer..."),
+            ),
+            (
+                &[
+                    "drawer",
+                    "create",
+                    "example/room/drawer",
+                    "--content",
+                    "private-text",
+                ],
+                Some("Creating drawer..."),
+            ),
+            (
+                &["drawer", "supersede", "example/room/drawer", "--invalidate"],
+                Some("Superseding drawer..."),
+            ),
+            (
+                &["drawer", "history", "example/room/drawer"],
+                Some("Loading drawer history..."),
+            ),
+            (
+                &[
+                    "drawer",
+                    "mention",
+                    "example/room/drawer",
+                    "--name",
+                    "example",
+                    "--kind",
+                    "person",
+                ],
+                Some("Linking drawer to entity..."),
+            ),
+            (
+                &["drawer", "delete", "example/room/drawer"],
+                Some("Deleting drawer..."),
+            ),
+            (
+                &["fact", "history", "example"],
+                Some("Loading relationship history..."),
+            ),
+            (
+                &["auth", "generate"],
+                Some("Generating authentication token..."),
+            ),
+            (
+                &["auth", "revoke"],
+                Some("Revoking authentication token..."),
+            ),
+            (&["db", "start"], Some("Opening database endpoint...")),
+            (&["db", "stop"], Some("Closing database endpoint...")),
+            (&["db", "status"], Some("Checking database endpoint...")),
+        ];
+        for (args, expected) in cases {
+            let parsed =
+                Cli::try_parse_from(std::iter::once("memcastle").chain(args.iter().copied()))
+                    .unwrap_or_else(|error| panic!("{args:?}: {error}"));
+            let actual = progress_label(&parsed.command);
+            assert_eq!(actual, *expected, "{args:?}");
+            assert!(
+                !actual.unwrap_or_default().contains("private-text"),
+                "a message must never reveal an argument"
+            );
+        }
+    }
 }
