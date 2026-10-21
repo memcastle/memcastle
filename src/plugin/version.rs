@@ -46,6 +46,12 @@ fn release_version(tag: &str) -> Option<semver::Version> {
 ///
 /// A checkout without Git history needs an explicit `--version` when packaging.
 pub fn infer(root: &Path) -> Result<String> {
+    // A bare `plugin.toml` has an empty parent, but Git treats it as the working directory.
+    let root = if root.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        root
+    };
     let hash = git(root, &["rev-parse", "--short=12", "HEAD"])?;
     let dirty = !git(root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty();
     // Git globs cannot express SemVer, so only pass validated tag names to describe.
