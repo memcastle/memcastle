@@ -322,8 +322,8 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
-sources/        official and reference WebAssembly sources (`directory`, `github`, ...), one package per directory, built and
-                tested but not compiled into MemCastle; bundled sources ship with releases (`packaging/sources/build.sh`)
+sources/        reference WebAssembly sources (`directory`, ...), built and tested but not compiled or bundled into Core;
+                `packaging/sources/build.sh` exercises local bundle packaging, while plugins distribute provider modules
 integrations/   Agent integration documentation; Core ships no agent-specific integration assets.
                 Pi, OpenCode and Claude Code source/integration modules live in standalone `memcastle-pi`,
                 `memcastle-opencode` and `memcastle-anthropic` plugins; Codex's integration and history and ChatGPT

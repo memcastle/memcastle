@@ -201,7 +201,8 @@ The assets root is the one [runtime assets](configuration.md#runtime-assets) dir
 
 Any of the MemCastle release packages carry the assets root: the tarballs, the `.deb` and `.rpm`, the AUR package and the
 Homebrew formula (see [Installation](installation.md)).
-The standalone tarball `memcastle_<version>_integrations.tar.gz` holds the empty `integrations/` tree and shared `skills/`.
+The standalone tarball `memcastle_<version>_skills.tar.gz` holds only the shared `skills/` tree.
+Packaged installations retain an empty `integrations/` directory; provider plugins supply their own integration files.
 
 `memcastle integration list` prints the assets root it used and how it was chosen, so you can see which of the two you
 are looking at.

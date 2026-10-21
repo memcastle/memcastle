@@ -4,7 +4,7 @@
 # Usage: packaging/nfpm/build.sh <version> <dist-dir>
 #
 # Reads  <dist-dir>/memcastle_<version>_linux-{amd64,arm64}
-# Reads  $SOURCES_DIR (packaging/sources/build.sh), $INTEGRATIONS_DIR (packaging/integrations/build.sh) and
+# Reads  $SOURCES_DIR (optional bundle), $INTEGRATIONS_DIR (packaging/integrations/build.sh) and
 #        $WEB_DIR (packaging/web/build.sh), if set
 # Runs   the amd64 binary once, to print its shell completion scripts
 # Writes <dist-dir>/memcastle_<version>_linux-{amd64,arm64}.{deb,rpm}
@@ -50,9 +50,8 @@ for shell in bash zsh fish; do
 done
 export COMPLETIONS_DIR="${completions}"
 
-# The sources that ship with MemCastle (docs/adr/040): the unpacked packages of `sources/`, built by packaging/sources/build.sh.
-# An empty directory when the caller has none, so a package built without them is a package without them and not an
-# nfpm error about a path that does not exist.
+# Core has no bundled sources (docs/adr/040), but installed assets retain the empty directory for lookup.
+# A caller can still supply an optional source bundle without changing the native package layout.
 export SOURCES_DIR="${SOURCES_DIR:-${completions}/sources}"
 mkdir -p "${SOURCES_DIR}"
 

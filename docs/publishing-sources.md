@@ -231,12 +231,12 @@ on disk after install is never run.
 ## Bundled sources
 
 Core currently ships no bundled WebAssembly sources; `share/memcastle/sources/` is empty.
+Core releases do not attach a standalone sources archive.
 The runtime can still load a bundle supplied through `mining.bundled_dir`, and its sources appear as `bundled` and
-`installed` until enabled by the user. The release packaging script writes the empty directory to prevent older source
-archives from remaining in an upgraded installation.
+`installed` until enabled by the user. Release packages keep the empty directory for the runtime's bundled-source lookup.
 
-The set is a line in `packaging/sources/build.sh`, which a release and `mise run sources:package` both run,
-and it does not constrain the runtime: any directory under `sources/` could be added.
+`mise run sources:package` still exercises optional local bundles through `packaging/sources/build.sh`.
+Its empty Core bundle does not constrain the runtime: an unpacked source package can still be supplied separately.
 `directory` is the worked example of the built-in source and is not bundled.
 
 The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package

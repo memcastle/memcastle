@@ -37,8 +37,8 @@ contents:
     expand: true
     file_info:
       mode: 0644
-  # The sources that ship with MemCastle, unpacked one directory each (docs/adr/040): installed from the start, run in
-  # place from where the daemon looks for them, with no registry and no network.
+  # Keep an empty Core sources directory for bundled-source lookup (docs/adr/040).
+  # A caller supplying an optional bundle can still package its unpacked sources here.
   - src: "${SOURCES_DIR}"
     dst: /usr/share/memcastle/sources
     type: tree

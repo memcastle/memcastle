@@ -440,21 +440,23 @@ jobs:
           echo "# stub completions for $2"
           STUB
           done
-          # A stand-in for the bundled sources (packaging/sources/build.sh builds the real ones, which
-          # tests/wasm_bundle.rs checks): enough to prove the packages carry whatever the bundle holds.
-          mkdir -p bundle/demo
-          echo 'format = 1' > bundle/demo/memcastle-source.toml
-          printf '\0asm' > bundle/demo/source.wasm
-          # Likewise for the integrations (packaging/integrations/build.sh builds the real ones, which
-          # tests/integration_bundle.rs checks): the layout is what the packages must carry.
-          mkdir -p integrations-bundle/integrations/codex integrations-bundle/skills/wake-up
-          echo 'format = 1' > integrations-bundle/integrations/codex/memcastle-integration.toml
-          echo '# wake' > integrations-bundle/skills/wake-up/SKILL.md
+          # Core ships no source or integration modules; package only the real shared skills.
+          packaging/integrations/build.sh integrations-bundle
+          bash packaging/skills/archive.sh integrations-bundle dist 0.0.0
           # And for the dashboard (packaging/web/build.sh builds the real one, which tests/web_bundle.rs checks).
           mkdir -p web-bundle/web/dist/assets
           echo '<!doctype html>' > web-bundle/web/dist/index.html
-          SOURCES_DIR="${PWD}/bundle" INTEGRATIONS_DIR="${PWD}/integrations-bundle" WEB_DIR="${PWD}/web-bundle" \
+          INTEGRATIONS_DIR="${PWD}/integrations-bundle" WEB_DIR="${PWD}/web-bundle" \
             packaging/nfpm/build.sh 0.0.0 dist
+
+      - name: Check the shared skills release archive
+        run: |
+          tar -tzf dist/memcastle_0.0.0_skills.tar.gz > entries.txt
+          grep -Fxq 'memcastle-skills-0.0.0/skills/wake-up/SKILL.md' entries.txt
+          if grep -Eq '(^|/)(sources|integrations)/' entries.txt; then
+            echo '::error::Core source or integration modules leaked into the skills archive'
+            exit 1
+          fi
 
       # Building without error is not enough: the binary must land where the
       # systemd unit expects it.
@@ -469,11 +471,12 @@ jobs:
                         usr/share/bash-completion/completions/memcastle \
                         usr/share/zsh/site-functions/_memcastle \
                         usr/share/fish/vendor_completions.d/memcastle.fish \
-                        usr/share/memcastle/sources/demo/source.wasm \
-                        usr/share/memcastle/integrations/codex/memcastle-integration.toml \
                         usr/share/memcastle/skills/wake-up/SKILL.md \
                         usr/share/memcastle/web/dist/index.html; do
               grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }
+            done
+            for dir in usr/share/memcastle/sources usr/share/memcastle/integrations; do
+              grep -q " ./${dir}/$" contents.txt || { echo "::error::${asset}: empty ${dir} is missing"; exit 1; }
             done
           done
 

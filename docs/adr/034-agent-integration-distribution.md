@@ -8,6 +8,8 @@ Amends [ADR-013](013-release-packaging-and-asset-resolution.md) (the assets root
 reads them) and [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) (an integration is also
 distributed as one bundled file, still tested from its sources).
 [ADR-035](035-web-ui.md) adds `web/` as a further tree under the same root.
+After provider integrations moved to plugins, Core's separate archive carries only shared skills as
+`memcastle_<version>_skills.tar.gz`; the integrations archive described below is historical.
 
 ## Context
 
@@ -50,7 +52,7 @@ That directory is the natural place for integrations too, and the same rule make
   `packaging/integrations/build.sh` bundles each integration with `bun build` into one file (the agents' own SDKs stay
   external), so installing needs no `node_modules`, no bun and no npm package.
   The release tarballs, `.deb`, `.rpm`, AUR package and Homebrew formula carry `share/memcastle/{integrations,skills}`,
-  and `memcastle_<version>_integrations.tar.gz` carries them alone for the recipes that fetch a single binary.
+  At the time of this decision, `memcastle_<version>_integrations.tar.gz` carried them for recipes that fetch a single binary.
 - **`memcastle integration list|install|update|remove` is local tooling.**
   It reads files and runs the agent's own program; it opens no palace, calls no daemon and uses no network, like
   `memcastle source build`.
