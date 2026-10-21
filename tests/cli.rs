@@ -101,6 +101,8 @@ fn slow_cli_requests_show_feedback_without_corrupting_json_or_errors() {
         command
             .args(["--config", config.to_str().unwrap()])
             .args(args)
+            // indicatif intentionally hides progress when CI leaves TERM unset or sets it to dumb.
+            .env("TERM", "xterm-256color")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(slave));
