@@ -803,12 +803,14 @@ Deliberately out of scope, and each is structurally possible without rework give
 
 - Semantic processing of mined documents beyond entity extraction (summaries): mining stops at filing drawers, and the
   `extract` job is the stage that reads what was filed.
-- Handing a static credential (an environment variable or a file) to a source: the model stores a credential
-  *reference* and never a secret, and the source contract takes no static credential yet.
-  What exists is an OAuth sign-in a source can declare, which the daemon runs, keeps and renews, and hands over as an
-  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); the separately installed `memcastle-openai`
-  plugin's `chatgpt` source uses it in [experimental web mode](mining-sources.md#chatgpt), while importing an export
-  needs no sign-in.
+- Ambient access to a miner's static credential: the model stores a *reference* and never a secret.
+  A source with `[permissions] credential = true` can request only the selected env/file credential through
+  `host.source-credential()` during acquisition, never during normalization or through `run-process` by default
+  ([Writing sources](writing-sources.md#selected-env-and-file-credentials)).
+  Separately, a source can declare OAuth sign-in, which the daemon runs, keeps and renews before handing over an access
+  token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)).
+  The separately installed `memcastle-openai` plugin's `chatgpt` source uses OAuth in
+  [experimental web mode](mining-sources.md#chatgpt), while importing an export needs no sign-in.
 - Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
   contract allows each, and neither is built.
 - A registry server and a search across registries beyond their names and descriptions: the official registry is a static
