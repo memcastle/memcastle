@@ -28,9 +28,12 @@ path = "junit.xml"
 [profile.wasm]
 default-filter = "binary(/^wasm_/)"
 
-# What CI's `wasm` job runs. `ci` inherits the basic filter, so this one overrides it.
+# What CI's `wasm` job runs. Repeat CI settings because older nextest versions do not support profile inheritance.
 [profile.ci-wasm]
-inherits = "ci"
+fail-fast = false
+failure-output = "immediate-final"
+status-level = "skip"
+final-status-level = "slow"
 default-filter = "binary(/^wasm_/)"
 
 [profile.ci-wasm.junit]
@@ -40,8 +43,12 @@ path = "junit.xml"
 [profile.slow]
 default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and (test(retrieval_eval::suite::) or test(miners::a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_disabled)))"
 
+# Repeat CI settings here too, so older nextest keeps the slow job's reporting and failure policy.
 [profile.ci-slow]
-inherits = "ci"
+fail-fast = false
+failure-output = "immediate-final"
+status-level = "skip"
+final-status-level = "slow"
 default-filter = "binary(/^(persistence|mcp_smoke|auth_lifecycle)$/) or (binary(in_process) and (test(retrieval_eval::suite::) or test(miners::a_miner_timetable_stays_off_until_explicitly_enabled_and_stops_when_disabled)))"
 
 [profile.ci-slow.junit]

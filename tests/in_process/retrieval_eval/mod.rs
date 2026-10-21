@@ -39,8 +39,11 @@ pub struct Options {
 /// A finished evaluation: the report, and the raw results the report was computed from.
 pub struct Evaluation {
     pub report: Report,
+    // Only the Linux slow suite inspects raw hits; explicit runs still produce them without that feature.
+    #[cfg_attr(not(feature = "slow-tests"), allow(dead_code))]
     pub dataset: Dataset,
     /// Per configuration name, what each query returned.
+    #[cfg_attr(not(feature = "slow-tests"), allow(dead_code))]
     pub results: BTreeMap<String, Vec<QueryResult>>,
 }
 
@@ -131,6 +134,8 @@ pub async fn evaluate(path: &Path, options: &Options) -> Evaluation {
 }
 
 /// The committed baseline for the core dataset.
+// Only the slow suite compares against it; the basic matrix must not compile an unused helper.
+#[cfg(feature = "slow-tests")]
 fn committed_baseline() -> Report {
     let path = dataset::baseline_path();
     let json = std::fs::read_to_string(&path).unwrap_or_else(|error| {
