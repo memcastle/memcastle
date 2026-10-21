@@ -520,8 +520,11 @@ otherwise it derives the package version from the plugin's own Git tags. It retu
 It builds `manifest.toml` only inside the archive, combining descriptor metadata, module versions and SHA-256 checksums.
 The descriptor may list extra support file/directory paths under `artifacts`; integration manifests also supply their
 own asset and skill paths. Symbolic links, missing entries and unlisted archive files are refused.
-An exact `ID/vVERSION` tag supplies the release version; an untagged checkout gets a SemVer development version based
-on the nearest matching release tag, commit distance, revision and dirty state (initial base `0.1.0`).
+An exact `X.Y.Z` or `vX.Y.Z` tag supplies the release version; prerelease and build-metadata tags do not.
+An untagged checkout gets a SemVer development version based on the nearest matching release tag, commit distance,
+revision and dirty state (initial base `0.1.0`).
+In a Git repository containing more than one plugin, use `--version` when packaging from a subdirectory;
+repository-wide plain tags cannot identify the owning plugin.
 Use `--version` to override Git inference or package from a checkout without Git metadata.
 The archive does not contain `plugin.toml`; an `ID-VERSION.sha256sum` beside it verifies the entire archive.
 It never builds a module or writes `manifest.toml` beside the project; commit source locks before publishing.

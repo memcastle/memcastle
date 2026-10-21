@@ -61,7 +61,7 @@ pub fn inspect_manifest(path: &Path) -> Result<PluginManifest> {
         descriptor.clone()
     };
     descriptor.plugin.version = if release.plugin.version.is_empty() {
-        super::version::infer(root, &descriptor.plugin.id)?
+        super::version::infer(root)?
     } else {
         release.plugin.version
     };
@@ -319,7 +319,7 @@ fn pack_project_with_manifest(
     {
         version.map(str::to_owned)
     } else {
-        Some(super::version::infer(root, &plugin.plugin.id)?)
+        Some(super::version::infer(root)?)
     };
     pack_with_version(&files, version.as_deref())
 }
