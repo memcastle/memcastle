@@ -369,7 +369,7 @@ Some variables are read by the command line rather than the config file:
 
 | Flag | Applies to | Overrides |
 |---|---|---|
-| `--config <FILE>` | every command | the default config file location |
+| `--config <FILE>` | commands that load configuration; completions and local source/plugin publishing commands accept but do not read it | the default config file location |
 | `--palace <PATH>` | every command | `palace.path`, `MEMCASTLE_PALACE_PATH` |
 | `--bind <IP>` | `serve`, `daemon start`, `daemon restart` | `server.bind`, `MEMCASTLE_BIND` |
 | `--port <PORT>` | `serve`, `daemon start`, `daemon restart` | `server.port`, `MEMCASTLE_PORT` |
