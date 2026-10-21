@@ -347,8 +347,10 @@ nothing matched.
 `auto` is hybrid when the query can be embedded and lexical otherwise: a palace with no
 [embedding provider](configuration.md#embeddings) keeps searching exactly as before, and a provider that is down
 degrades `auto` to lexical with a warning in the daemon log.
-An explicit `semantic` or `hybrid` that cannot get a vector fails with `memcastle::search::semantic_unavailable`
-instead of answering lexically.
+An explicit `semantic` or `hybrid` with no available query vector fails with
+`memcastle::search::semantic_unavailable` (HTTP 400) instead of answering lexically.
+If a configured embedding provider fails while producing the vector, the provider error
+`memcastle::embed::failed` is returned instead (HTTP 502); only `auto` degrades to lexical in that case.
 
 **Time.**
 Time here is *validity time*: `valid_from` and `valid_to` say when a piece of knowledge was true,
