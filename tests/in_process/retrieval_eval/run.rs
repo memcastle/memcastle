@@ -18,8 +18,11 @@ pub const LIMIT: usize = 10;
 /// What one query returned under one configuration.
 #[derive(Debug, Clone)]
 pub struct QueryResult {
+    // Only the Linux slow suite checks individual hits; explicit runs still collect them.
+    #[cfg_attr(not(feature = "slow-tests"), allow(dead_code))]
     pub query: String,
     /// The dataset's document ids, best first, with the score the daemon gave each.
+    #[cfg_attr(not(feature = "slow-tests"), allow(dead_code))]
     pub ranked: Vec<(String, f32)>,
 }
 
