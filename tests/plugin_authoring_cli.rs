@@ -114,7 +114,10 @@ fn a_default_manifest_infers_a_plain_tag_from_the_current_repository() {
         String::from_utf8_lossy(&packaged.stderr)
     );
     let archive: serde_json::Value = serde_json::from_slice(&packaged.stdout).unwrap();
-    assert_eq!(archive["archive"], "dist/example-0.1.0.tar.gz");
+    assert_eq!(
+        Path::new(archive["archive"].as_str().unwrap()),
+        Path::new("dist").join("example-0.1.0.tar.gz")
+    );
 }
 
 #[test]
