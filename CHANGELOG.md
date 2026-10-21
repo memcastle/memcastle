@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3](https://github.com/memcastle/memcastle/compare/0.5.2..0.5.3) - 2026-10-21
+
+### 🐛 Bug Fixes
+
+- **release** Install Bun before packaging the web UI ([#362](https://github.com/memcastle/memcastle/issues/362)) - ([7961732](https://github.com/memcastle/memcastle/commit/796173201358aa4422560ea7bd35bdce1c0e8fc3))
+
 ## [0.5.2](https://github.com/memcastle/memcastle/compare/0.5.1..0.5.2) - 2026-10-21
 
 ### 🐛 Bug Fixes
