@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2](https://github.com/memcastle/memcastle/compare/0.5.1..0.5.2) - 2026-10-21
+
+### 🐛 Bug Fixes
+
+- **cli** Show progress during command waits ([#359](https://github.com/memcastle/memcastle/issues/359)) - ([fdfa5f5](https://github.com/memcastle/memcastle/commit/fdfa5f5c5f3f2ef19e227bb47c901e031c95197d))
+- **plugin** Infer tags from the default manifest path ([#357](https://github.com/memcastle/memcastle/issues/357)) - ([2fe8637](https://github.com/memcastle/memcastle/commit/2fe86375d2950f2f766f82fe2ebef1ad3296e2cb))
+- **source** Infer source for an implicit default configuration - ([6e4f0cd](https://github.com/memcastle/memcastle/commit/6e4f0cd8782c829ceb1047f075f0d080940a7be9))
+- **source** Guard first saved default against broadening - ([05d1caf](https://github.com/memcastle/memcastle/commit/05d1caf1eddb3c61012ce19218e759559ed26b24))
+- **test** Silence nextest and basic-suite build warnings ([#358](https://github.com/memcastle/memcastle/issues/358)) - ([d23f57c](https://github.com/memcastle/memcastle/commit/d23f57c41cfe981f32b6040e9a1338f13952ec2f))
+
+### 📚 Documentation
+
+- **architecture** Clarify source cursor identity - ([575460e](https://github.com/memcastle/memcastle/commit/575460eddaa086a55268f209f80eb7a27239f1b8))
+- **architecture** Explain profile-aware embedding jobs and audits - ([0d92593](https://github.com/memcastle/memcastle/commit/0d92593674cbbc73aeb38cd58e381aa022fec163))
+- **architecture** Describe scoped source credentials - ([06c7c67](https://github.com/memcastle/memcastle/commit/06c7c676060c2e24a6b3c6e8250d5ab059d38342))
+- **cli** Remove obsolete source init listing - ([995dae3](https://github.com/memcastle/memcastle/commit/995dae33e707f1c5beaeb42a01ef412cb606333a))
+- **config** Clarify commands that skip config loading - ([53a1d90](https://github.com/memcastle/memcastle/commit/53a1d906fde2f76d5e517ad28ce84dce752717af))
+- **integration** List every supported agent kind - ([a1f1d41](https://github.com/memcastle/memcastle/commit/a1f1d414c4f9bf3d3bf860c537f5ad357badd679))
+- **integration** Direct new modules to provider plugins - ([c221f64](https://github.com/memcastle/memcastle/commit/c221f64dbbcd6763464ef8d81327dcaff3166ce5))
+- **migrate** Update current version in status examples - ([41b955f](https://github.com/memcastle/memcastle/commit/41b955fadad5302a793911444a3b05e94903fb29))
+- **search** Distinguish missing vectors from provider failure - ([89e9bd4](https://github.com/memcastle/memcastle/commit/89e9bd4938dbb4d6e31148bdd1a1333c9d8b34de))
+- **source** Distinguish reference component from built-in adapter - ([ba42109](https://github.com/memcastle/memcastle/commit/ba421096bec4fbcbcdc8f34c453351c3a55311ad))
+- **source** Correct unattended update consent flag - ([d7be7e8](https://github.com/memcastle/memcastle/commit/d7be7e81f47d2016891a6d2c3bc463d2d4aebd9a))
+
 ## [0.5.1](https://github.com/memcastle/memcastle/compare/0.5.0..0.5.1) - 2026-10-21
 
 ### 🐛 Bug Fixes
