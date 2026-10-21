@@ -892,6 +892,7 @@ Source configuration options are applied first and matching miner options replac
 one-off `miner run` options replace matching saved options without rewriting either definition.
 A change to shared source defaults that may read more material needs `--allow-broaden` in the CLI
 or `allow_broaden = true` in the REST body; the UI asks for the same explicit choice.
+That includes the first saved entry for a source's implicit default when its options select additional material.
 The common `mining.max_documents` default (zero for unlimited) is overridden by a miner's positive `max_documents`.
 `embedding_profile` selects a runnable named embedding profile for drawers this miner files.
 The resolved vector space is pinned to its durable job; an explicit embedding-job profile outranks the miner override,

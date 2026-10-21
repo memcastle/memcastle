@@ -12,6 +12,32 @@ use crate::config::miners_file::{self, FileStamp};
 use crate::domain::{CredentialRef, MemoryMode, SourceConfiguration};
 use crate::error::{Error, Result};
 
+fn broadening_reasons(
+    before: Option<&SourceConfiguration>,
+    after: &SourceConfiguration,
+    new_options: &crate::domain::Options,
+    specs: Option<&[crate::domain::OptionSpec]>,
+) -> Result<Vec<String>> {
+    if before.is_some_and(|before| before.source != after.source) {
+        return Ok(vec!["the source changed".into()]);
+    }
+    // A known source's unsaved default is already in use by miners; saving it for the first time
+    // must be compared with that empty default, not treated as a brand-new independent instance.
+    if before.is_none() && (after.id != after.source || specs.is_none()) {
+        return Ok(Vec::new());
+    }
+    let old_options = before.map_or_else(
+        || Ok(crate::domain::Options::new()),
+        SourceConfiguration::options,
+    )
+    .map_err(|reason| Error::invalid_input("options", reason))?;
+    Ok(crate::domain::option_broadening(
+        &old_options,
+        new_options,
+        specs.unwrap_or_default(),
+    ))
+}
+
 /// A source configuration without a credential's variable name, path or secret.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceConfigurationView {
@@ -308,27 +334,20 @@ impl AppServices {
         {
             return Err(Error::invalid_input("options", message));
         }
-        if let Some(before) = state.configs.iter().find(|before| before.id == id) {
-            let reasons = if before.source != config.source {
-                vec!["the source changed".into()]
-            } else {
-                crate::domain::option_broadening(
-                    &before
-                        .options()
-                        .map_err(|reason| Error::invalid_input("options", reason))?,
-                    &new_options,
-                    specs.as_deref().unwrap_or_default(),
-                )
-            };
-            if !reasons.is_empty() && !patch.allow_broaden {
-                return Err(Error::invalid_input(
-                    "allow_broaden",
-                    format!(
-                        "this shared configuration may mine more for every miner using it: {}; repeat with `allow_broaden = true` if intended",
-                        reasons.join("; ")
-                    ),
-                ));
-            }
+        let reasons = broadening_reasons(
+            state.configs.iter().find(|before| before.id == id),
+            &config,
+            &new_options,
+            specs.as_deref(),
+        )?;
+        if !reasons.is_empty() && !patch.allow_broaden {
+            return Err(Error::invalid_input(
+                "allow_broaden",
+                format!(
+                    "this shared configuration may mine more for every miner using it: {}; repeat with `allow_broaden = true` if intended",
+                    reasons.join("; ")
+                ),
+            ));
         }
         let mut all = state.configs.clone();
         if let Some(entry) = all.iter_mut().find(|entry| entry.id == id) {
@@ -381,5 +400,35 @@ impl AppServices {
                 ),
             })??;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{OptionBreadth, OptionKind, OptionSpec};
+
+    #[test]
+    fn a_first_saved_default_requires_approval_for_an_opt_in_selection() {
+        let config = SourceConfiguration {
+            id: "example".into(),
+            source: "example".into(),
+            credential: None,
+            options: Map::new(),
+        };
+        let specs = [OptionSpec::new("channels", "optional channels", OptionKind::String)
+            .with_breadth(OptionBreadth::OptInInclude)];
+        let options = crate::domain::Options::from([("channels".into(), "private".into())]);
+        assert!(!broadening_reasons(None, &config, &options, Some(&specs))
+            .unwrap()
+            .is_empty());
+        // A new named instance has no existing miners inheriting its options.
+        let named = SourceConfiguration {
+            id: "work".into(),
+            ..config
+        };
+        assert!(broadening_reasons(None, &named, &options, Some(&specs))
+            .unwrap()
+            .is_empty());
     }
 }
