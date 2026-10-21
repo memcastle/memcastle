@@ -549,9 +549,10 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   [Deduplication](deduplication.md)), and *additionally* applies its `fact` mutation when present,
   so a checkpoint item is never only a graph mutation with no drawer to audit it.
   There is deliberately no artificial per-item delay, because an emergency checkpoint exists to save state before a crash.
-- **`Embed`** (`src/embed/job.rs`) computes the embedding of every drawer that has none.
-  The database is its cursor: each pass asks for the next unembedded drawers, so pausing, crashing or running it again
-  loses and repeats nothing, and only the `embedding` field is ever written.
+- **`Embed`** (`src/embed/job.rs`) populates or refreshes derived `drawer_embedding` records in a pinned profile's vector
+  space, without rewriting drawer content.
+  A checkpointed drawer page is its cursor; the missing-only sweep skips drawers that already have a vector in that
+  space, so pausing, crashing or running it again loses and repeats nothing.
   It is queued automatically after drawer-writing jobs and writes, and at startup.
 - **`Extract`** (`src/extract/job.rs`) reads every current mined drawer and note with no marker in `drawer_extraction`
   and writes the entities, `mentions` links and `relates_to` edges its provider finds, then the marker.
@@ -564,7 +565,8 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   with a single database.
   It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
   `Failed` jobs that exhausted their attempt budget, a plain count of `Running` jobs,
-  and drawers with no `embedding` (informational: a backlog the `Embed` job clears when a provider is configured).
+  and drawers with no vector in the configured default profile (informational: a backlog the `Embed` job clears).
+  Without a default profile, the embedding count still uses the legacy drawer field as a diagnostic.
   A full scan is cheap and idempotent, so it keeps no per-unit checkpoint.
 - **`Repair`** (`src/repair`) turns a subset of audit findings into a fix.
   It is dry-run-first (`dry_run = true` is the default at every entry point) and deliberately narrow:
