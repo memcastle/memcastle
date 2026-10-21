@@ -375,8 +375,11 @@ An integration maps to the daemon's names and never renames anything in MemCastl
 1. Replay the fixtures under `tests/fixtures/integration/` against a real daemon from the client's own test suite.
 1. Write the client-side tests that this page lists for each capability.
 1. Document every gap in the three-line form above.
-1. Make it installable: add a `memcastle-integration.toml`, an adapter for the agent in `src/integration/agent.rs`
-   and its bundle to `packaging/integrations/build.sh`, as [Agent integrations](integrations.md#the-manifest) describes.
+1. Make it installable in the provider plugin: declare an integration module in its `plugin.toml`, with a
+   `memcastle-integration.toml` and agent assets under `integrations/<id>/`, as [Plugin packages](plugins.md) and
+   [Agent integrations](integrations.md#the-manifest) describe.
+   If the agent itself is not supported yet, add its `agent.kind` and installation adapter in Core's
+   `src/integration/agent.rs` before publishing the module.
 
 The `architecture` hook's integration rules (see [Development](development.md#the-architecture-guard))
 fail the build if supported source files under `integrations/` reach into MemCastle's storage or job code
