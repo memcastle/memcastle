@@ -44,7 +44,7 @@ and the other commands that queue a job
 Four groups of commands have no answer to render and print the same text on every stream:
 
 - `daemon start` and `daemon restart` print the `started:` or `restarted:` line.
-- The local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) print their progress.
+- The local `source` commands (`build`, `test`, `package`, `index` and `keygen`) print their progress.
 - `auth generate` prints the token and nothing else, so it can be captured.
   A secret is never put in JSON.
 - `completions` prints a script.
