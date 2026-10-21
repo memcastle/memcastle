@@ -2917,3 +2917,260 @@ fn init_tracing(filter: String, format: memcastle::config::LogFormat) {
         memcastle::config::LogFormat::Json => builder.json().try_init(),
     };
 }
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn every_wait_is_named_for_the_action_and_interactive_consoles_stay_undecorated() {
+        // Parse real CLI arguments so a renamed subcommand cannot silently keep an obsolete status message.
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["serve"], None),
+            (&["tui"], None),
+            (&["completions", "bash"], None),
+            (&["maintenance"], None),
+            (&["status"], Some("Checking daemon status...")),
+            (&["doctor"], Some("Checking configuration and daemon...")),
+            (
+                &["migrate", "--status"],
+                Some("Opening palace for migration..."),
+            ),
+            (&["daemon", "start"], Some("Starting daemon...")),
+            (&["daemon", "restart"], Some("Starting daemon...")),
+            (&["daemon", "stop"], Some("Stopping daemon...")),
+            (&["search", "needle"], Some("Searching memories...")),
+            (&["recall", "needle"], Some("Searching memories...")),
+            (
+                &["wake-up", "--agent-identity", "agent"],
+                Some("Loading session context..."),
+            ),
+            (&["mine", "."], Some("Submitting mining job...")),
+            (&["sources"], Some("Listing sources...")),
+            (&["source", "search"], Some("Searching source registry...")),
+            (
+                &["source", "install", "example"],
+                Some("Preparing source installation..."),
+            ),
+            (&["source", "update"], Some("Checking source updates...")),
+            (&["source", "list"], Some("Listing sources...")),
+            (
+                &["source", "show", "example"],
+                Some("Loading source details..."),
+            ),
+            (
+                &["source", "auth", "example"],
+                Some("Starting source sign-in..."),
+            ),
+            (&["source", "enable", "example"], Some("Enabling source...")),
+            (
+                &["source", "disable", "example"],
+                Some("Disabling source..."),
+            ),
+            (&["source", "remove", "example"], Some("Removing source...")),
+            (&["source", "config", "list"], Some("Listing sources...")),
+            (
+                &["source", "config", "get", "example"],
+                Some("Loading source details..."),
+            ),
+            (
+                &["source", "config", "auth", "example"],
+                Some("Starting source sign-in..."),
+            ),
+            (
+                &["source", "config", "remove", "example"],
+                Some("Removing source..."),
+            ),
+            (
+                &["source", "config", "set", "example"],
+                Some("Saving source configuration..."),
+            ),
+            (
+                &["plugin", "search"],
+                Some("Searching plugin catalogues..."),
+            ),
+            (&["plugin", "list"], Some("Listing installed plugins...")),
+            (
+                &["plugin", "show", "example"],
+                Some("Loading plugin details..."),
+            ),
+            (
+                &["plugin", "install", "example"],
+                Some("Preparing plugin installation..."),
+            ),
+            (
+                &["plugin", "update", "example"],
+                Some("Checking plugin updates..."),
+            ),
+            (
+                &["plugin", "uninstall", "example"],
+                Some("Uninstalling plugin..."),
+            ),
+            (&["miner", "list"], Some("Listing miners...")),
+            (
+                &["miner", "get", "example"],
+                Some("Loading miner details..."),
+            ),
+            (
+                &["miner", "run", "example"],
+                Some("Submitting miner run..."),
+            ),
+            (&["miner", "reload"], Some("Reloading miners...")),
+            (&["miner", "remove", "example"], Some("Removing miner...")),
+            (
+                &["miner", "disable", "example"],
+                Some("Changing miner configuration..."),
+            ),
+            (&["trigger", "list"], Some("Listing triggers...")),
+            (
+                &["trigger", "get", "example"],
+                Some("Loading trigger details..."),
+            ),
+            (&["trigger", "fire", "example"], Some("Firing trigger...")),
+            (&["trigger", "reload"], Some("Reloading triggers...")),
+            (
+                &["trigger", "remove", "example"],
+                Some("Removing trigger..."),
+            ),
+            (
+                &["trigger", "disable", "example"],
+                Some("Changing trigger configuration..."),
+            ),
+            (
+                &["integration", "list"],
+                Some("Listing agent integrations..."),
+            ),
+            (
+                &["integration", "install", "pi"],
+                Some("Installing agent integration..."),
+            ),
+            (
+                &["integration", "update", "pi"],
+                Some("Updating agent integration..."),
+            ),
+            (
+                &["integration", "remove", "pi"],
+                Some("Removing agent integration..."),
+            ),
+            (&["note", "private-text"], Some("Saving note...")),
+            (&["checkpoint"], Some("Submitting checkpoint job...")),
+            (&["audit"], Some("Submitting audit job...")),
+            (&["embed"], Some("Requesting embedding operation...")),
+            (&["extract"], Some("Submitting extraction job...")),
+            (&["repair"], Some("Submitting repair job...")),
+            (
+                &[
+                    "diary",
+                    "read",
+                    "--agent-identity",
+                    "example",
+                    "--wing",
+                    "example",
+                ],
+                Some("Reading diary..."),
+            ),
+            (
+                &[
+                    "diary",
+                    "write",
+                    "--agent-identity",
+                    "example",
+                    "--wing",
+                    "example",
+                    "private-text",
+                ],
+                Some("Writing diary entry..."),
+            ),
+            (&["job", "list"], Some("Listing jobs...")),
+            (&["job", "show", "example"], Some("Loading job details...")),
+            (&["job", "pause", "example"], Some("Pausing job...")),
+            (&["job", "resume", "example"], Some("Resuming job...")),
+            (&["job", "cancel", "example"], Some("Cancelling job...")),
+            (&["job", "retry", "example"], Some("Retrying job...")),
+            (&["job", "demo"], Some("Submitting demo job...")),
+            (&["wing", "list"], Some("Listing wings...")),
+            (&["wing", "show", "example"], Some("Loading wing...")),
+            (&["wing", "create", "example"], Some("Creating wing...")),
+            (&["wing", "delete", "example"], Some("Deleting wing...")),
+            (&["room", "list"], Some("Listing rooms...")),
+            (&["room", "show", "example/room"], Some("Loading room...")),
+            (
+                &["room", "create", "example/room"],
+                Some("Creating room..."),
+            ),
+            (
+                &["room", "delete", "example/room"],
+                Some("Deleting room..."),
+            ),
+            (
+                &["drawer", "list", "--room", "example/room"],
+                Some("Listing drawers..."),
+            ),
+            (
+                &["drawer", "show", "example/room/drawer"],
+                Some("Loading drawer..."),
+            ),
+            (
+                &[
+                    "drawer",
+                    "create",
+                    "example/room/drawer",
+                    "--content",
+                    "private-text",
+                ],
+                Some("Creating drawer..."),
+            ),
+            (
+                &["drawer", "supersede", "example/room/drawer", "--invalidate"],
+                Some("Superseding drawer..."),
+            ),
+            (
+                &["drawer", "history", "example/room/drawer"],
+                Some("Loading drawer history..."),
+            ),
+            (
+                &[
+                    "drawer",
+                    "mention",
+                    "example/room/drawer",
+                    "--name",
+                    "example",
+                    "--kind",
+                    "person",
+                ],
+                Some("Linking drawer to entity..."),
+            ),
+            (
+                &["drawer", "delete", "example/room/drawer"],
+                Some("Deleting drawer..."),
+            ),
+            (
+                &["fact", "history", "example"],
+                Some("Loading relationship history..."),
+            ),
+            (
+                &["auth", "generate"],
+                Some("Generating authentication token..."),
+            ),
+            (
+                &["auth", "revoke"],
+                Some("Revoking authentication token..."),
+            ),
+            (&["db", "start"], Some("Opening database endpoint...")),
+            (&["db", "stop"], Some("Closing database endpoint...")),
+            (&["db", "status"], Some("Checking database endpoint...")),
+        ];
+        for (args, expected) in cases {
+            let parsed =
+                Cli::try_parse_from(std::iter::once("memcastle").chain(args.iter().copied()))
+                    .unwrap_or_else(|error| panic!("{args:?}: {error}"));
+            let actual = progress_label(&parsed.command);
+            assert_eq!(actual, *expected, "{args:?}");
+            assert!(
+                !actual.unwrap_or_default().contains("private-text"),
+                "a message must never reveal an argument"
+            );
+        }
+    }
+}

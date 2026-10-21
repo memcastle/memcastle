@@ -181,10 +181,15 @@ impl Progress {
     /// Start only for a person reading a terminal, never for JSON or a redirected stderr stream.
     #[must_use]
     pub fn start(message: &str) -> Self {
-        if progress_enabled(
+        Self::start_for(
+            message,
             JSON_FLAG.get().copied().unwrap_or(false),
             std::io::stderr().is_terminal(),
-        ) {
+        )
+    }
+
+    fn start_for(message: &str, json: bool, terminal: bool) -> Self {
+        if progress_enabled(json, terminal) {
             let bar = ProgressBar::new_spinner();
             bar.set_style(
                 ProgressStyle::with_template("{spinner} {msg}")
@@ -519,6 +524,30 @@ mod tests {
         assert!(!progress_enabled(true, true));
         assert!(!progress_enabled(false, false));
         assert!(!progress_enabled(true, false));
+    }
+
+    #[test]
+    fn a_progress_scope_changes_messages_and_clears_even_when_dropped() {
+        let progress = Progress::start_for("Preparing...", false, true);
+        ACTIVE_PROGRESS.with(|active| {
+            // No actual terminal is needed: the test checks the lifecycle, not escape sequences.
+            let active = active.borrow();
+            let bar = active.as_ref().unwrap();
+            bar.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+            assert_eq!(bar.message(), "Preparing...");
+        });
+        Progress::message("Installing...");
+        let instruction = Progress::suspend(|| "Permission needed");
+        assert_eq!(instruction, "Permission needed");
+        ACTIVE_PROGRESS.with(|active| {
+            assert_eq!(active.borrow().as_ref().unwrap().message(), "Installing...");
+        });
+        drop(progress);
+        ACTIVE_PROGRESS.with(|active| assert!(active.borrow().is_none()));
+        // Once cleared, later messages and instructions cannot resurrect a completed spinner.
+        Progress::message("Ignored...");
+        assert_eq!(Progress::suspend(|| 42), 42);
+        Progress::clear();
     }
 
     #[test]
