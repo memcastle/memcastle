@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the agent integrations that ship with MemCastle, and optionally lay them out as a package tree.
+# Lay out Core's shared skills and any Core-shipped integrations as a local package tree.
 #
 # Usage: packaging/integrations/build.sh [out-dir]
 #

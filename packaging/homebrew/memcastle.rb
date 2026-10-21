@@ -26,18 +26,11 @@ class Memcastle < Formula
     end
   end
 
-  # The sources bundled with MemCastle (docs/adr/040): portable WebAssembly packages, unpacked one directory each, one
-  # asset for every platform. Homebrew strips the archive's single top-level directory when it stages the resource.
-  resource "sources" do
-    url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_sources.tar.gz"
-    sha256 "@SHA256_SOURCES@"
-  end
-
-  # The agent integrations and the shared skills they read (docs/adr/034): bundled JavaScript, one asset for every
-  # platform, with `integrations/` and `skills/` under its single top-level directory.
-  resource "integrations" do
-    url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_integrations.tar.gz"
-    sha256 "@SHA256_INTEGRATIONS@"
+  # Core's shared skills (docs/adr/020): Homebrew strips the archive's top-level directory when staging the resource.
+  # Provider plugins carry their own sources and agent integrations.
+  resource "skills" do
+    url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_skills.tar.gz"
+    sha256 "@SHA256_SKILLS@"
   end
 
   # The web UI (docs/adr/035): static files, one asset for every platform, with `web/` under its single top-level
@@ -53,15 +46,10 @@ class Memcastle < Formula
     # suffix, not the command users are meant to type.
     bin.install Dir["*"].first => "memcastle"
 
-    # Beside the binary's prefix, where the daemon looks for them (`share/memcastle/sources`), so
-    # `memcastle source enable pi` is all they need: no registry and no network.
-    resource("sources").stage { (pkgshare/"sources").install Dir["*"] }
-
-    # Likewise `share/memcastle/{integrations,skills}`, where `memcastle integration install pi` looks.
-    resource("integrations").stage do
-      (pkgshare/"integrations").install Dir["integrations/*"]
-      (pkgshare/"skills").install Dir["skills/*"]
-    end
+    # Keep empty compatibility roots beside the binary; install only the shared skills from Core.
+    (pkgshare/"sources").mkpath
+    (pkgshare/"integrations").mkpath
+    resource("skills").stage { (pkgshare/"skills").install Dir["skills/*"] }
 
     # And `share/memcastle/web/dist`, which the daemon serves under `/ui` when `web.enable` is set.
     resource("web").stage { (pkgshare/"web").install Dir["web/*"] }
@@ -73,8 +61,8 @@ class Memcastle < Formula
 
   test do
     assert_match version.to_s, shell_output("#{bin}/memcastle --version")
-    assert_path_exists pkgshare/"sources/pi/source.wasm"
-    assert_path_exists pkgshare/"integrations/pi/memcastle-integration.toml"
+    assert_path_exists pkgshare/"sources"
+    assert_path_exists pkgshare/"integrations"
     assert_path_exists pkgshare/"skills/wake-up/SKILL.md"
     assert_path_exists pkgshare/"web/dist/index.html"
 

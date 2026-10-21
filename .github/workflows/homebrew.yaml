@@ -70,8 +70,7 @@ jobs:
           declare -A targets=(
             [DARWIN_ARM64]="memcastle_${TAG}_darwin-arm64"
             [DARWIN_AMD64]="memcastle_${TAG}_darwin-amd64"
-            [SOURCES]="memcastle_${TAG}_sources.tar.gz"
-            [INTEGRATIONS]="memcastle_${TAG}_integrations.tar.gz"
+            [SKILLS]="memcastle_${TAG}_skills.tar.gz"
             [WEB]="memcastle_${TAG}_web.tar.gz"
           )
           for placeholder in "${!targets[@]}"; do

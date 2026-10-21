@@ -26,7 +26,7 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
-| `mise run sources:package` | Package the sources that ship with releases (unpacked bundle, archives and registry index) into `target/bundled-sources` |
+| `mise run sources:package` | Exercise local source-bundle packaging into `target/bundled-sources`; Core releases carry no sources |
 | `mise run integrations:check` | Package the shared skills and check the checkout and release asset layouts |
 | `mise run integrations:build` | Prepare any Core-shipped declarative integrations (currently none) |
 | `mise run integrations:package` | Lay out the shared skills that ship with releases in `target/bundled-integrations` |
@@ -99,14 +99,13 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
   `cargo binstall` fetch by name, so renaming them breaks those;
 - a tarball for each Unix platform, `memcastle_<tag>_<platform>.tar.gz`, in the native-package layout
   (`bin/`, `share/doc/memcastle/`, `share/memcastle/{sources,integrations,skills,web}/`);
-- the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, the bundled integrations with their skills,
-  `memcastle_<tag>_integrations.tar.gz`, and the web UI, `memcastle_<tag>_web.tar.gz`, which one asset each serves
-  to the AUR package and the Homebrew formula;
-- source packages as archives, `<name>-<version>.tar.gz` with their `.sha256`, when Core bundles sources;
-  an empty Core bundle has no source archive assets (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
+- the shared skills on their own, `memcastle_<tag>_skills.tar.gz`, and the web UI,
+  `memcastle_<tag>_web.tar.gz`, which one asset each serves to the AUR package and the Homebrew formula;
+- no Core source or agent-integration archive: provider plugins publish those modules independently
+  (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
-  from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation, bundled sources,
-  integrations, skills and the web UI)
+  from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation,
+  shared skills and the web UI)
   and smoke-tested before upload;
   CI builds them from stub binaries on every pull request, through the same `packaging/nfpm/build.sh`,
   so a broken packaging config fails on the pull request and not mid-release;

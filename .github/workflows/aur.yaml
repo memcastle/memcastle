@@ -94,10 +94,8 @@ jobs:
           license=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/LICENSE" | sha256sum | cut -d' ' -f1)
           sed -i "s/@SHA256_LICENSE@/${license}/" build/PKGBUILD
 
-          # The bundled sources are a release asset, hashed from the published file like the binaries.
-          sed -i "s/@SHA256_SOURCES@/$(checksum "memcastle_${TAG}_sources.tar.gz")/" build/PKGBUILD
-          # And the agent integrations with the skills they read.
-          sed -i "s/@SHA256_INTEGRATIONS@/$(checksum "memcastle_${TAG}_integrations.tar.gz")/" build/PKGBUILD
+          # Core ships shared skills but no source or agent integration archive.
+          sed -i "s/@SHA256_SKILLS@/$(checksum "memcastle_${TAG}_skills.tar.gz")/" build/PKGBUILD
           # And the web UI.
           sed -i "s/@SHA256_WEB@/$(checksum "memcastle_${TAG}_web.tar.gz")/" build/PKGBUILD
 

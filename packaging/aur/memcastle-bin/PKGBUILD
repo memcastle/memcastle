@@ -38,22 +38,17 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 # is not one of the licences Arch keeps in /usr/share/licenses/common.
 # The systemd user unit is fetched from the tag for the same reason.
 #
-# The sources bundled with MemCastle (docs/adr/040) are portable WebAssembly packages, so one release asset serves both
-# architectures. makepkg extracts it to `$srcdir/memcastle-sources-$pkgver/`.
-#
-# The agent integrations and the shared skills (docs/adr/034) are bundled JavaScript, equally portable, and arrive the
-# same way: `$srcdir/memcastle-integrations-$pkgver/{integrations,skills}`.
+# Shared skills travel as one portable release asset for both architectures, unpacked by makepkg under
+# `$srcdir/memcastle-skills-$pkgver/skills/`. Provider plugins ship sources and agent integrations separately.
 #
 # The web UI (docs/adr/035) is static files, portable the same way: `$srcdir/memcastle-web-$pkgver/web/dist`.
 source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE"
         "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service"
-        "memcastle-sources-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_sources.tar.gz"
-        "memcastle-integrations-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_integrations.tar.gz"
+        "memcastle-skills-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_skills.tar.gz"
         "memcastle-web-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_web.tar.gz")
 sha256sums=('@SHA256_LICENSE@'
             '@SHA256_SERVICE@'
-            '@SHA256_SOURCES@'
-            '@SHA256_INTEGRATIONS@'
+            '@SHA256_SKILLS@'
             '@SHA256_WEB@')
 
 package() {
@@ -66,16 +61,10 @@ package() {
 	install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 	# Package-owned user unit: `systemctl --user start memcastle`. Config and secrets stay user-owned.
 	install -Dm644 "$srcdir/memcastle-$pkgver.service" "$pkgdir/usr/lib/systemd/user/memcastle.service"
-	# The bundled sources, unpacked one directory each, where the daemon looks for them beside `/usr/bin`: they are
-	# installed from the start and `memcastle source enable pi` is all they need. A tree, not a flat copy.
-	install -dm755 "$pkgdir/usr/share/memcastle/sources"
-	cp -r "$srcdir/memcastle-sources-$pkgver"/. "$pkgdir/usr/share/memcastle/sources/"
-	find "$pkgdir/usr/share/memcastle/sources" -type d -exec chmod 755 {} +
-	find "$pkgdir/usr/share/memcastle/sources" -type f -exec chmod 644 {} +
-	# The integrations and skills beside them, where `memcastle integration install pi` looks. A tree, not a flat copy.
-	install -dm755 "$pkgdir/usr/share/memcastle"
-	cp -r "$srcdir/memcastle-integrations-$pkgver/integrations" "$srcdir/memcastle-integrations-$pkgver/skills" \
-		"$pkgdir/usr/share/memcastle/"
+	# Keep both empty install roots for asset lookup; provider plugins supply their contents separately.
+	install -dm755 "$pkgdir/usr/share/memcastle/sources" "$pkgdir/usr/share/memcastle/integrations"
+	# Only Core's shared skills arrive with the binary.
+	cp -r "$srcdir/memcastle-skills-$pkgver/skills" "$pkgdir/usr/share/memcastle/"
 	# The dashboard, at the `web/dist` a checkout has too, so one lookup finds it. Served only when `web.enable` is set.
 	cp -r "$srcdir/memcastle-web-$pkgver/web" "$pkgdir/usr/share/memcastle/"
 }

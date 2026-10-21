@@ -268,15 +268,6 @@ jobs:
           # persisted checkout credential.
           persist-credentials: false
 
-      # The tag predates this fix; checkout the reviewed staging helper from
-      # the dispatch commit without changing any of the tagged package inputs.
-      - uses: actions/checkout@v7
-        if: inputs.recover
-        with:
-          ref: ${{ github.sha }}
-          path: .release-workflow
-          persist-credentials: false
-
       - uses: actions/download-artifact@v8
         with:
           pattern: asset-*
@@ -285,49 +276,13 @@ jobs:
           run-id: ${{ inputs.recover && inputs.run_id || github.run_id }}
           github-token: ${{ steps.app-token.outputs.token }}
 
-      # The sources that ship with MemCastle (docs/adr/033, docs/adr/040):
-      # independently packaged WebAssembly components, not linked into the
-      # binary. They are portable, so one build serves every platform. The
-      # script is the one `mise run sources:package` runs, and
-      # tests/wasm_bundle.rs runs it too, so what is bundled is checked before
-      # a tag. The Linux binary is the one a runner can execute.
-      #
-      # It writes two things: `sources/`, the unpacked packages every
-      # package of MemCastle carries and the daemon runs in place; and
-      # `archives/`, the same packages as release assets named
-      # `<name>-<version>.tar.gz`. The official registry is a static file in
-      # the documentation that names this repository, and a daemon resolves
-      # the versions from the releases' assets and the digests GitHub reports
-      # for them, so there is no index to build or publish here (docs/adr/040).
-      - uses: dtolnay/rust-toolchain@1.98.1
-        with:
-          targets: wasm32-wasip2
-      - name: Package the bundled sources
-        env:
-          TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          chmod +x "dist/memcastle_${TAG}_linux-amd64"
-          packaging/sources/build.sh "dist/memcastle_${TAG}_linux-amd64" stage-sources
-          # Core can bundle zero sources; only stage archives that actually exist.
-          if [ "${{ inputs.recover }}" = true ]; then
-            bash .release-workflow/packaging/sources/stage-archives.sh stage-sources dist
-          else
-            bash packaging/sources/stage-archives.sh stage-sources dist
-          fi
-
-      # The declarative agent integrations (docs/adr/034), with the shared skills they read.
-      # Nothing is published to npm: the bundles are release assets and package content, and
-      # `memcastle integration install` copies them from `share/memcastle/`. The script is the one
-      # `mise run integrations:package` runs and tests/integration_bundle.rs checks.
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1"
-      - name: Package the bundled integrations
+      # Core's shared skills are packaged without provider-owned integrations.
+      # The local integration packaging task uses this script and its bundle test checks the tree.
+      - name: Package the shared skills
         run: packaging/integrations/build.sh stage-integrations
 
       # The web UI (docs/adr/035): a Vue application built into static files under `web/dist/`, shipped as
-      # package content next to the sources and the integrations, and served by the daemon only when `web.enable` is
+      # package content next to the shared skills, and served by the daemon only when `web.enable` is
       # set. Nothing is published to npm. Vite and vue-tsc run on node. The script is the one
       # `mise run web:package` runs and tests/web_bundle.rs checks.
       - uses: actions/setup-node@v7
@@ -337,14 +292,11 @@ jobs:
         run: packaging/web/build.sh stage-web
 
       # The native-package layout (docs/adr/013): the executable under `bin/`,
-      # the documentation under `share/doc/memcastle/`, the bundled sources
-      # under `share/memcastle/sources/` (unpacked, one directory each), the integrations and skills under
-      # `share/memcastle/{integrations,skills}/` and the dashboard under
+      # the documentation under `share/doc/memcastle/`, empty sources and integrations
+      # directories beside the shared skills under `share/memcastle/`, and the dashboard under
       # `share/memcastle/web/`, so unpacking at a prefix
       # (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each file
-      # where a package manager would, and the daemon finds the bundle beside
-      # the binary, and so does
-      # `memcastle integration install codex`.
+      # where a package manager would, and the daemon finds the assets beside the binary.
       #
       # Every flag that follows exists so the same inputs give the same bytes:
       # a fixed order, the commit time for every mtime, no owner, and `gzip -n`
@@ -366,7 +318,6 @@ jobs:
             install -d -m 755 "${root}/bin" "${root}/share/doc/memcastle" "${root}/share/memcastle/sources"
             install -m 755 "dist/memcastle_${TAG}_${asset}" "${root}/bin/memcastle"
             install -m 644 LICENSE README.md "${root}/share/doc/memcastle/"
-            cp -r stage-sources/sources/. "${root}/share/memcastle/sources/"
             cp -r stage-integrations/integrations stage-integrations/skills "${root}/share/memcastle/"
             cp -r stage-web/web "${root}/share/memcastle/"
             find "${root}/share/memcastle/sources" "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" "${root}/share/memcastle/web" -type d -exec chmod 755 {} +
@@ -375,30 +326,6 @@ jobs:
               --owner=0 --group=0 --numeric-owner -cf - "${name}" \
               | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
           done
-
-          # The bundled sources on their own (docs/adr/040): they are portable, so one asset serves the AUR package
-          # and the Homebrew formula, whose recipes fetch a single raw binary and would otherwise ship none. One
-          # top-level directory, which makepkg extracts as it is and Homebrew strips; inside it, one directory for
-          # each unpacked package.
-          name="memcastle-sources-${TAG}"
-          install -d -m 755 "stage/${name}"
-          cp -r stage-sources/sources/. "stage/${name}/"
-          find "stage/${name}" -type d -exec chmod 755 {} +
-          find "stage/${name}" -type f -exec chmod 644 {} +
-          tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
-            --owner=0 --group=0 --numeric-owner -cf - "${name}" \
-            | gzip -n -9 > "dist/memcastle_${TAG}_sources.tar.gz"
-
-          # The integrations and the skills on their own (docs/adr/034), for the AUR package and the Homebrew
-          # formula, whose recipes fetch a single raw binary and would otherwise ship none.
-          name="memcastle-integrations-${TAG}"
-          install -d -m 755 "stage/${name}"
-          cp -r stage-integrations/integrations stage-integrations/skills "stage/${name}/"
-          find "stage/${name}" -type d -exec chmod 755 {} +
-          find "stage/${name}" -type f -exec chmod 644 {} +
-          tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
-            --owner=0 --group=0 --numeric-owner -cf - "${name}" \
-            | gzip -n -9 > "dist/memcastle_${TAG}_integrations.tar.gz"
 
           # The dashboard on its own (docs/adr/035), for the same reason: the AUR package and the Homebrew formula
           # fetch one raw binary and would otherwise ship no dashboard.
@@ -411,6 +338,9 @@ jobs:
             --owner=0 --group=0 --numeric-owner -cf - "${name}" \
             | gzip -n -9 > "dist/memcastle_${TAG}_web.tar.gz"
 
+      - name: Package the shared skills for AUR and Homebrew
+        run: bash packaging/skills/archive.sh stage-integrations dist "${{ inputs.tag }}"
+
       # `.deb` and `.rpm` from the staged binaries. The same install and the
       # same script run in CI on every pull request (see ci.yaml), so a broken
       # nfpm config fails there rather than here.
@@ -420,7 +350,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          SOURCES_DIR="${PWD}/stage-sources/sources" INTEGRATIONS_DIR="${PWD}/stage-integrations" WEB_DIR="${PWD}/stage-web" \
+          INTEGRATIONS_DIR="${PWD}/stage-integrations" WEB_DIR="${PWD}/stage-web" \
             packaging/nfpm/build.sh "${TAG}" dist
 
       # Before upload, so a broken package never reaches the draft release.
