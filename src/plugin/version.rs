@@ -56,10 +56,13 @@ pub fn infer(root: &Path) -> Result<String> {
         .collect();
     if !release_tags.is_empty() {
         let top = git(root, &["rev-parse", "--show-toplevel"])?;
+        let top = Path::new(&top)
+            .canonicalize()
+            .map_err(|e| invalid(format!("cannot resolve Git root: {e}")))?;
         let root = root
             .canonicalize()
             .map_err(|e| invalid(format!("cannot resolve plugin root: {e}")))?;
-        if root != Path::new(&top) {
+        if root != top {
             return Err(invalid(
                 "plain release tags belong to the whole Git repository; package a plugin in a subdirectory with --version",
             ));
