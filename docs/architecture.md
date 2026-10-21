@@ -758,8 +758,9 @@ See [Publishing and installing sources](publishing-sources.md) and [ADR-033](adr
 
 **What to mine is configuration the daemon keeps in the file it was started from.**
 A miner is a named `[[miners]]` entry (a source, a locator, saved options, a credential reference), not mined data:
-the cursor stays on the source, so a miner can be renamed, disabled or given new options without losing
-where its source stopped.
+the cursor stays on the effective source identity, so renaming or disabling a miner does not lose where its source
+stopped.
+Changing options or destination mapping may select a different identity and an independent cursor.
 `app::miners` holds the last good copy, re-reads the file when it changes, and rewrites only that section in place through
 `config::miners_file`, so comments and everything else in the file survive.
 The CLI, REST and MCP's two read-only tools all call it; changing a miner has no MCP tool, like installing a source.
@@ -795,8 +796,8 @@ flowchart LR
     MCP["MCP<br/>miner_list, miner_get"] -- read only --> APP
     APP --> FILE[("config.toml<br/>[[miners]]")]
     FILE -- "changed? re-read" --> APP
-    APP -- "miner run" --> JOBS["mine job<br/>source + locator"]
-    JOBS --> CUR[("source cursor<br/>keyed by source + locator")]
+    APP -- "miner run" --> JOBS["mine job<br/>effective source identity"]
+    JOBS --> CUR[("source cursor<br/>adapter / account / locator<br/>plus configuration or destination when needed")]
 ```
 
 ## Non-goals for now
