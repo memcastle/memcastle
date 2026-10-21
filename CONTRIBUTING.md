@@ -116,6 +116,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 The release is built to be reproducible, and two things keep it that way.
 The Rust toolchain, `cross` and the runner images are pinned to exact versions,
 so moving any of them is an edit to the workflow and not something that happens between two releases.
+The publish job also installs Bun at the version recorded in `mise.lock`, alongside Node 24,
+so the web UI packages with the same tool version used in local checks.
 Build paths are remapped to fixed names, and the tarballs have a fixed order, timestamps and ownership.
 CI does not rebuild the release to check this, because two LTO release builds are too slow for a pull request.
 Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
@@ -151,7 +153,7 @@ Fix the publishing step on `main` through a reviewed pull request, then dispatch
 the existing tag and failed publish run ID:
 
 ```sh
-gh workflow run recover-release.yaml --ref main -f tag=0.5.0 -f run_id=<failed-publish-run-id>
+gh workflow run recover-release.yaml --ref main -f tag=<tag> -f run_id=<failed-publish-run-id>
 ```
 
 The recovery verifies that the saved binaries came from the tag, packages the tagged source with the fixed publish
