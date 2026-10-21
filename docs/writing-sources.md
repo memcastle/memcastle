@@ -413,7 +413,8 @@ Publishing one, finding one by name, updating it, signing it and trusting a publ
 ## Reference sources
 
 `sources/` holds maintained reference sources, one directory each, with the same package layout as any other.
-`sources/directory/` is the built-in `directory` source as a Rust component, and is the worked example to read.
+`sources/directory/` is a reference Rust WebAssembly component implementing the same contract as the built-in
+`directory` adapter in `src/mining/adapters/directory.rs`, and is the worked example to read when writing a package.
 The Pi coding agent's session-history source now lives in
 [`memcastle-pi`](https://github.com/memcastle/memcastle-pi) and retains its original `pi` ID.
 The [`memcastle-openai`](https://github.com/memcastle/memcastle-openai) plugin owns the `codex` and `chatgpt` sources,
