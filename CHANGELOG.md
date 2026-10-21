@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1](https://github.com/memcastle/memcastle/compare/0.5.0..0.5.1) - 2026-10-21
+
+### 🐛 Bug Fixes
+
+- **ci** Smoke-test current Core assets in AUR ([#353](https://github.com/memcastle/memcastle/issues/353)) - ([c7ef423](https://github.com/memcastle/memcastle/commit/c7ef4235c3b27c98b86c639a96fd80ab3e6d7641))
+- **ci** Check draft release with publishing app ([#352](https://github.com/memcastle/memcastle/issues/352)) - ([75fc969](https://github.com/memcastle/memcastle/commit/75fc969ca2b7eada6dcac16084ef0781b880a5c3))
+- **ci** Grant release recovery attestation permissions ([#351](https://github.com/memcastle/memcastle/issues/351)) - ([f0ce0ce](https://github.com/memcastle/memcastle/commit/f0ce0ceffce651e95c1b0729288b711a59abb8d5))
+- **ci** Recover releases with no bundled source archives ([#349](https://github.com/memcastle/memcastle/issues/349)) - ([9f636d1](https://github.com/memcastle/memcastle/commit/9f636d116615b6f728cb2a17ca2b1b06888fcdc3))
+- **plugin** Infer versions from SemVer release tags ([#356](https://github.com/memcastle/memcastle/issues/356)) - ([c00b69e](https://github.com/memcastle/memcastle/commit/c00b69edca1ad4d9b0a07677887a4923cf5a4d20))
+- **release** Publish skills-only archive ([#354](https://github.com/memcastle/memcastle/issues/354)) - ([e2f5de7](https://github.com/memcastle/memcastle/commit/e2f5de707a30aca46bba5d47825c93aaa8308765))
+
 ## [0.5.0](https://github.com/memcastle/memcastle/compare/0.4.1..0.5.0) - 2026-10-20
 
 ### 💫 Features
