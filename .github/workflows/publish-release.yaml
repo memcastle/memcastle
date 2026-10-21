@@ -283,11 +283,16 @@ jobs:
 
       # The web UI (docs/adr/035): a Vue application built into static files under `web/dist/`, shipped as
       # package content next to the shared skills, and served by the daemon only when `web.enable` is
-      # set. Nothing is published to npm. Vite and vue-tsc run on node. The script is the one
-      # `mise run web:package` runs and tests/web_bundle.rs checks.
+      # set. Nothing is published to npm. Bun installs and runs the scripts, while Vite and
+      # vue-tsc run on Node; both must be available on this runner, including during recovery.
+      # Pin Bun to mise.lock so the published build matches the one checked in CI.
+      # The script is the one `mise run web:package` runs and tests/web_bundle.rs checks.
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
       - name: Package the web UI
         run: packaging/web/build.sh stage-web
 
