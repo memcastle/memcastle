@@ -271,8 +271,8 @@ name = "search-before-answer"
 | `integration.description` | One line. |
 | `compatibility.memcastle` | The MemCastle versions it works with, as a semver requirement. |
 | `compatibility.agent` | The agent versions it works with. Unset means any. An agent whose version cannot be read is refused when this is set. |
-| `agent.kind` | `pi` or `opencode`: which adapter registers it. |
-| `agent.entry` | The file the agent loads, relative to the installed copy. It must be among the installed files. Required for `opencode`. |
+| `agent.kind` | `pi`, `opencode`, `claude-code` or `codex`: which adapter registers it. |
+| `agent.entry` | The file the agent loads, relative to the installed copy. It must be among the installed files. Required for `opencode`, `claude-code` and `codex`; optional for `pi`. |
 | `[[assets]]` | `from` (inside the integration's directory) and `to` (inside the installed copy, `.` for its top). Paths that climb out are refused. |
 | `[[skills]]` | One skill the integration exposes to its agent, copied to `skills/<name>/` in the installed copy. Optional, and repeatable. |
 | `skills.name` | The skill's name, which is its directory name: lowercase letters, digits or `-`. Listed once. By default it is the shared `skills/<name>/` of the assets root. |
