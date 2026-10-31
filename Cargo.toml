@@ -197,7 +197,7 @@ surrealkit = { version = "1.0.0-beta.2", default-features = false }
 # move with it. `default-features = false` keeps `surrealdb-core` from pulling
 # in its GraphQL stack or any storage engine of its own: it is already in the
 # lockfile through `surrealdb`, and `tests/dependencies.rs` guards the engines.
-surrealdb-core = { version = "=3.3.3", default-features = false }
+surrealdb-core = { version = "=3.3.4", default-features = false }
 surrealdb-rpc = "=3.3.4"
 
 # HTTP API + MCP-over-HTTP share one axum router. `ws` backs the admin
