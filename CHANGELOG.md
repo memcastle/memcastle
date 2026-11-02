@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3](https://github.com/memcastle/memcastle/compare/0.5.2..0.5.3) - 2026-11-02
+
+### 🐛 Bug Fixes
+
+- **release** Install Bun before packaging the web UI ([#362](https://github.com/memcastle/memcastle/issues/362)) - ([7961732](https://github.com/memcastle/memcastle/commit/796173201358aa4422560ea7bd35bdce1c0e8fc3))
+
+### 🏗️ Build
+
+- **deps** Bump the web-dependencies group in /web with 4 updates ([#364](https://github.com/memcastle/memcastle/issues/364)) - ([9cb887c](https://github.com/memcastle/memcastle/commit/9cb887c8241fbfc0578e102817eb41902279973b))
+- **deps** Bump the rust-dependencies group with 4 updates ([#365](https://github.com/memcastle/memcastle/issues/365)) - ([ed403eb](https://github.com/memcastle/memcastle/commit/ed403eba916597d9859344a07e353152e8c86006))
+- **deps-dev** Bump the web-dependencies group in /web with 2 updates ([#366](https://github.com/memcastle/memcastle/issues/366)) - ([a1743db](https://github.com/memcastle/memcastle/commit/a1743db5a5ba86fa5749d1fe1d7db51faae88049))
+
 ## [0.5.2](https://github.com/memcastle/memcastle/compare/0.5.1..0.5.2) - 2026-10-21
 
 ### 🐛 Bug Fixes
