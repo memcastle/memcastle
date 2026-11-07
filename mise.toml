@@ -10,23 +10,22 @@
 # cargo-binstall has no prebuilt artifact for some cargo tools, so a global
 # entry would make every CI job compile them from source.
 #
-# Rust itself is intentionally not managed here: CI needs per-job components
-# (rustfmt, clippy, llvm-tools-preview) and cross-compilation targets, which
-# `dtolnay/rust-toolchain` handles better. `rust-toolchain.toml` pins the
-# channel for both.
+# Rustup still owns toolchains. Native mbx integration needs a Rust tool entry;
+# the environment below preserves explicit and CI-selected runtime toolchains.
 
 [settings]
 # Resolve tools through mise.lock and keep it updated. Without this, the
 # lockfile is ignored and `latest` really means latest.
 lockfile = true
 
-# Do not let mise adopt `rust-toolchain.toml`. Rust is installed by rustup
-# locally and by `dtolnay/rust-toolchain` in CI, which handle per-job
-# components and cross-compilation targets that mise does not. Leaving both
-# in charge would have mise shadow the toolchain CI just installed.
+# The explicit Rust entry supplies native wrapping. Avoid a second request
+# from the version file; runtime selection below preserves CI's toolchain.
 idiomatic_version_file_enable_tools = []
 
 [tools]
+# Keep the install request stable and lockable; runtime selection lives in env.
+rust = { version = "stable", components = ["rustfmt", "clippy"], mr_boxington = true }
+mr-boxington = "latest"
 actionlint = "latest"
 # actionlint silently skips its shellcheck integration when the binary is
 # absent, so without this a local run is NOT the CI run. Runners ship it.
@@ -52,13 +51,33 @@ cargo-binstall = "latest"
 # cargo-binstall present this downloads a release archive — about three seconds
 # against several minutes to compile a crate that vendors libgit2.
 #
-# An explicit version, never `latest`: mise applies a `minimum_release_age`, so
-# `latest` resolves to whatever is old enough rather than to the newest release.
-"cargo:git-tpl" = "0.11.0"
+# `latest` follows mise's minimum release age when resolving updates; mise.lock
+# records the exact selected build so local and CI installations agree.
+"cargo:git-tpl" = "latest"
 # Zensical runs through `uvx`, so uv is the only thing the docs build needs.
 uv = "latest"
 # cargo-insta is declared on the task that uses it instead of here — see the
 # note in the header.
+
+[env]
+# dtolnay selects a rustup default, not RUSTUP_TOOLCHAIN. Explicit selections
+# win; otherwise retain that default in Actions and the project's channel locally.
+RUSTUP_TOOLCHAIN = """
+{%- if env.RUSTUP_TOOLCHAIN | default(value='', boolean=true) -%}
+{{ env.RUSTUP_TOOLCHAIN }}
+{%- elif env.GITHUB_ACTIONS | default(value='') == 'true' -%}
+{{ exec(command='rustup default') | trim | split(pat=' ') | first }}
+{%- else -%}
+stable
+{%- endif -%}
+"""
+# Keep existing target outputs in place; automatic cache collection follows
+# the developer's global mbx policy (or mbx's bounded defaults).
+MBX_TARGET_VIEWS = "0"
+
+[hooks]
+# prek.toml declares both pre-commit and commit-msg as default hook types.
+postinstall = "prek install"
 
 # --- Everyday ---------------------------------------------------------------
 #
@@ -75,7 +94,7 @@ description = "Run format, lint, build and test"
 depends = ["format", "lint", "lint:actions", "lint:md", "build", "test"]
 
 [tasks.build]
-description = "Build the binary"
+description = "Build the project"
 run = "cargo build"
 
 [tasks.test]
@@ -111,17 +130,13 @@ run = "actionlint .github/workflows/*.yaml"
 
 [tasks."lint:md"]
 description = "Lint the documentation Markdown"
-# Through `npx -p`, not mise's `npm:` backend: .markdownlint-cli2.yaml loads
-# the pretty output formatter alongside markdownlint-cli2 itself, and mise's
-# `npm:` backend installs each tool into its own isolated tree, where one
-# cannot resolve the other — `npx -p pkg1 -p pkg2` installs both into one
-# shared cache instead. Also not in [tools] for the usual reason: `mise
-# install`, what CI's other jobs run, would then pull an npm toolchain onto
-# every job in the matrix for a check only this task needs.
+# Install the native binary only for this task; keep its version aligned with
+# the rumdl pre-commit hook in prek.toml.
+tools = { rumdl = "0.3.2" }
 #
 # Scoped to the same files as the prek hook, minus CHANGELOG.md, which is
 # git-cliff's output, not prose to wrap.
-run = 'npx -y -p markdownlint-cli2 -p markdownlint-cli2-formatter-pretty -- markdownlint-cli2 "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/**/*.md"'
+run = 'rumdl check "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/"'
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"
