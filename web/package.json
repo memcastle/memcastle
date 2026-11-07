@@ -14,23 +14,23 @@
     "test:daemon": "bun test --timeout 60000 test/daemon"
   },
   "dependencies": {
-    "@openvue/themes": "^1.0.0",
+    "@openvue/themes": "^1.1.0",
     "cytoscape": "^3.34.4",
-    "openvue": "^1.0.0",
+    "openvue": "^1.1.0",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
     "@types/cytoscape": "^3.21.0",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@vitejs/plugin-vue": "^6.0.10",
     "@vitest/coverage-v8": "^5",
     "@vue/test-utils": "^2.4.0",
     "happy-dom": "^21.0.4",
     "typescript": "^5.9.0",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5",
-    "vue-tsc": "^3.3.13"
+    "vitest": "^5.1.0",
+    "vue-tsc": "^3.3.14"
   }
 }
