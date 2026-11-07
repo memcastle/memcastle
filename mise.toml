@@ -39,7 +39,7 @@ idiomatic_version_file_enable_tools = []
 actionlint = "latest"
 # The project-owned architecture hook runs in CI's lint job, so `mise install`
 # must install the same pinned ast-grep binary on developer machines and CI.
-"aqua:ast-grep/ast-grep" = "0.51.0"
+"aqua:ast-grep/ast-grep" = "latest"
 # actionlint silently skips its shellcheck integration when the binary is
 # absent, so without this a local run is NOT the CI run. Runners ship it.
 #
@@ -66,7 +66,7 @@ cargo-binstall = "latest"
 #
 # An explicit version, never `latest`: mise applies a `minimum_release_age`, so
 # `latest` resolves to whatever is old enough rather than to the newest release.
-"cargo:git-tpl" = "0.11.0"
+"cargo:git-tpl" = "latest"
 # Zensical runs through `uvx`, so uv is the only thing the docs build needs.
 uv = "latest"
 bun = "latest"
