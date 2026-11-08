@@ -20,25 +20,11 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
 
-  # sccache caches individual compiled objects rather than Cargo's target/
-  # dir wholesale, so a Cargo.lock bump doesn't force every crate (SurrealDB
-  # included) to recompile from zero the way Swatinem/rust-cache's key does.
-  RUSTC_WRAPPER: sccache
-  # Required by sccache: incremental compilation writes its own on-disk
-  # state that sccache cannot reuse, so the two are mutually exclusive.
+  # Shared action caching cannot reuse Cargo's private incremental state.
   CARGO_INCREMENTAL: "0"
-  # Back sccache with GitHub's own Actions cache instead of a separate
-  # cloud bucket and its credentials.
-  SCCACHE_GHA_ENABLED: "true"
-  # lld-link ships with windows-latest (via VS's bundled LLVM/Clang
-  # component, no install step) and links noticeably faster than the
-  # default link.exe; nextest builds one binary per test target, so this
-  # applies dozens of times per run. Scoped to this one target triple via
-  # the CARGO_TARGET_<triple>_LINKER var, so it's a no-op on Linux/macOS.
-  # macOS gets no equivalent here: Xcode 15+ (which macos-latest ships)
-  # already defaults to Apple's own rewritten linker, so there's no
-  # faster drop-in available without a real brew-install cost for a leg
-  # that's already the fastest of the three.
+  # lld-link ships with windows-latest (no install step) and links faster than link.exe; nextest links one binary
+  # per test target, so this matters. Scoped to this triple, so it's a no-op on Linux/macOS — which already
+  # defaults to Apple's own faster linker on Xcode 15+.
   CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link
 
 concurrency:
@@ -59,17 +45,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      # PR target caches duplicated main's ~1 GB/job and evicted the Windows test cache between main runs.
-      # PRs can restore main's caches, while only main replenishes them.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # mold links faster than GNU ld, and clippy still has to link every
-      # test/example target it type-checks.
+      # mold links faster than GNU ld, and clippy still has to link every test/example target it type-checks.
       - uses: rui314/setup-mold@v1
-
-      - uses: mozilla-actions/sccache-action@v0.0.11
 
       # Tool versions come from mise.toml + mise.lock, so CI runs exactly
       # what `mise run default` runs locally. No pinned mise version: an
@@ -79,14 +57,31 @@ jobs:
         with:
           cache: true
 
-      # Run the same hooks as `git commit` so their results cannot drift.
+      # Includes Cargo downloads and target outputs; do not duplicate rust-cache.
+      # Workload generations scope fallback restores too, unlike key suffixes.
+      # PRs restore only: archiving large target trees delays feedback and churns the cache budget.
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: lint-v1
+
+      # Run the same hooks as `git commit`, then the heavier Rust lint task
+      # separately so committing does not require a Clippy compilation.
       - name: Run hooks
         run: prek run --all-files --show-diff-on-failure
 
-      # Full-project Clippy is too expensive for every local commit; keep it
-      # in CI through the same lint task developers can run explicitly.
-      - name: Run Clippy
+      - name: Lint Rust
         run: mise run lint
+
+      # Check the release configuration and its workflows before release day.
+      - name: Install gh-ship
+        run: gh extension install noirbizarre/gh-ship
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate the release setup
+        run: gh ship validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Basic behavior on every OS; expensive process-boundary and retrieval-baseline tests run in the Linux slow job.
   test:
@@ -110,17 +105,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # mold is Linux-only (it doesn't support the Windows/macOS linkers),
-      # so it only ever applies to this one leg of the matrix.
+      # mold is Linux-only, so it only applies to this one leg of the matrix.
       - name: Install mold (faster Linux linker)
         if: matrix.os.flag == 'linux'
         uses: rui314/setup-mold@v1
-
-      - uses: mozilla-actions/sccache-action@v0.0.11
 
       # nextest and llvm-cov are pinned by mise.lock rather than resolved
       # per-run, so a tool release cannot change CI behaviour on its own.
@@ -128,36 +117,25 @@ jobs:
         with:
           cache: true
 
-      - name: Disable Windows Defender real-time scanning
-        if: matrix.os.flag == 'windows'
-        shell: pwsh
-        # A Rust test suite spawns many short-lived processes and writes just as
-        # many small files into fresh temp directories. Defender's real-time
-        # protection inspects both, and that inspection is the standard,
-        # documented reason this workload is dramatically slower on
-        # `windows-latest` than on Linux/macOS — matching the "~4x slower" this
-        # project already lives with per `.github/codecov.yml`. The runner is
-        # destroyed at the end of the job, so there is nothing to re-enable.
-        run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true
-          # Belt-and-suspenders: Tamper Protection or a platform update
-          # could silently no-op the line above (already observed on the
-          # windows-11-arm runner image, per actions/runner-images#14326).
-          # Logging this turns a silent regression into a visible one.
-          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, IsTamperProtected, AntivirusEnabled | Format-List
+      # Bootstrap tools first: mise installs on C: with a same-volume temporary rename.
+      # Storage still precedes Cargo caches so their post hooks run before drive teardown.
+      - name: Tune Windows runner
+        uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
 
-      - name: Put temporary files on the workspace drive (Windows)
-        if: matrix.os.flag == 'windows'
-        # The workspace and target/ are on D:, but every test palace is a
-        # tempdir, and TEMP defaults to C:. Each one is an on-disk database that
-        # is written and flushed many times, so keep them on the same drive.
-        run: |
-          mkdir -p "$RUNNER_TEMP/tmp"
-          echo "TMP=$(cygpath -w "$RUNNER_TEMP/tmp")" >> "$GITHUB_ENV"
-          echo "TEMP=$(cygpath -w "$RUNNER_TEMP/tmp")" >> "$GITHUB_ENV"
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: tests-${{ matrix.os.flag }}-v1
+
+      - name: Verify Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/actions/setup-windows/verify.ps1
 
       - name: Run tests (with coverage)
         run: |
+          # --no-report retains cached profiles unless they are explicitly cleaned first.
+          cargo llvm-cov clean --workspace
           # nextest's filter skips execution, not linking; select only basic Cargo targets too.
           targets=(--lib --bin memcastle --test in_process)
           for file in tests/*.rs; do
@@ -168,8 +146,22 @@ jobs:
               *) targets+=(--test "$name") ;;
             esac
           done
-          cargo llvm-cov nextest --profile ci "${targets[@]}"
+          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}"
           cargo llvm-cov report --lcov --output-path lcov.info
+
+      # Keep raw inputs even when a corrupt profile prevents generating lcov.info.
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os.flag }}-${{ github.run_attempt }}
+          path: |
+            lcov.info
+            target/llvm-cov-target/*.profraw
+            target/llvm-cov-target/*.profdata
+            target/llvm-cov-target/*-profraw-list
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -194,17 +186,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: rui314/setup-mold@v1
-      - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: jdx/mise-action@v5
         with:
           cache: true
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: slow-v1
       - name: Run slow tests (with coverage)
         run: |
-          cargo llvm-cov nextest --profile ci-slow --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov nextest --profile ci-slow --no-report --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
           cargo llvm-cov report --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -232,15 +224,15 @@ jobs:
           components: llvm-tools-preview
           # The test components are built for this target.
           targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: rui314/setup-mold@v1
-      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: wasm-v1
 
       # If instrumenting breaks the `wasm32-wasip2` builds (`can't find crate for profiler_builtins` has been seen
       # locally), run this step with plain `cargo nextest run --profile ci-wasm` and drop the coverage steps.
@@ -249,7 +241,8 @@ jobs:
       # tests start.
       - name: Run tests (with coverage)
         run: |
-          cargo llvm-cov nextest --profile ci-wasm --test 'wasm_*'
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov nextest --profile ci-wasm --no-report --test 'wasm_*'
           cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
@@ -280,17 +273,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # The fixture modules have their own targets, but packaging invokes Core's cargo run.
-          shared-key: core-build
       - uses: rui314/setup-mold@v1
-      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: core-build-v1
 
       # `sources:test` depends on `build`, so `memcastle` is built first, then runs `memcastle source test` on
       # the one source. The name goes through the environment, never into the script text.
@@ -309,13 +300,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # These jobs run a Linux debug build of Core; one cache avoids four copies of its dependencies.
-          shared-key: core-build
       - uses: rui314/setup-mold@v1
-      - uses: mozilla-actions/sccache-action@v0.0.11
+      # This job builds through rustup directly rather than mise's Cargo wrapper.
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          version: 1.28.0
+          cache-generation: example-plugin-v1
 
       - name: Check Core release selection tooling
         run: python3 -m unittest discover -s packaging/plugins
@@ -359,16 +349,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          shared-key: core-build
       - uses: rui314/setup-mold@v1
-      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: core-build-v1
 
       # `build` is a dependency of the task, so the installer tests have a current binary.
       - name: Package and test the integrations
@@ -384,16 +373,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          shared-key: core-build
       - uses: rui314/setup-mold@v1
-      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: core-build-v1
 
       # `build` is a dependency of the task, so the debug binary the tests start is built first.
       - name: Typecheck, test and package the dashboard
@@ -480,26 +468,94 @@ jobs:
             done
           done
 
-  # gh-ship runs the release. Its configuration and the workflows it names must
-  # satisfy the contract it enforces, and finding out otherwise mid-release is
-  # the worst possible moment — so it is checked on every pull request instead.
-  ship:
-    name: 🚢 Ship setup
+  # `rust-version` in Cargo.toml is a promise. Without a job that keeps it, it
+  # drifts the first time anyone uses a newer language feature — and the
+  # breakage surfaces in a user's build, not here.
+  msrv:
+    name: 🧓 MSRV
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install gh-ship
-        run: gh extension install noirbizarre/gh-ship
+      - name: Read the MSRV from Cargo.toml
+        id: msrv
+        run: |
+          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Validate the release setup
-        run: gh ship validate
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      # This job is Linux-only, so mold always applies (see the lint job).
+      - uses: rui314/setup-mold@v1
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          version: 1.28.0
+          cache-generation: msrv-v1
+
+      # `check`, not `test`: dev-dependencies routinely require a newer
+      # toolchain than the crate itself, and the MSRV is a promise about
+      # consuming the library, not about developing it.
+      - name: Check
+        run: mbx check --all-targets
+
+  # Link every target on PRs without paying release optimization/LTO costs.
+  build:
+    name: 🏗️ Build (${{ matrix.build.label }})
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ matrix.build.runner }}
+    env:
+      RUSTFLAGS: -D warnings
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { label: linux-amd64, target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, cross: true }
+          - { label: linux-arm64, target: aarch64-unknown-linux-gnu, runner: ubuntu-latest, cross: true }
+          - { label: darwin-amd64, target: x86_64-apple-darwin, runner: macos-latest }
+          - { label: darwin-arm64, target: aarch64-apple-darwin, runner: macos-latest }
+          - { label: windows-amd64, target: x86_64-pc-windows-msvc, runner: windows-latest }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.build.target }}
+      # Bootstrap the toolchain before relocating temporary storage, but keep cache cleanup before drive teardown.
+      - name: Tune Windows runner
+        uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
+      # This PR-only workload restores compatible baselines without saving PR-scoped archives.
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          version: 1.28.0
+          cache-generation: pr-build-${{ matrix.build.target }}-v1
+      - uses: taiki-e/install-action@cross
+        if: matrix.build.cross
+      # Exercise the same CRT choice as downloaded Windows release binaries.
+      - name: Statically link the MSVC C runtime
+        if: endsWith(matrix.build.target, 'windows-msvc')
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Verify Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/actions/setup-windows/verify.ps1
+      - name: Build
+        env:
+          TARGET: ${{ matrix.build.target }}
+          CROSS: ${{ matrix.build.cross }}
+        run: |
+          if [ "${CROSS:-}" = "true" ]; then
+            cross build --locked --target "$TARGET"
+          else
+            mbx build --locked --target "$TARGET"
+          fi
 
   development:
     name: 🧪 Publish tested development Core
-    needs: [lint, test, slow, wasm, sources, example_plugin, integrations, web, packaging, ship]
+    needs: [lint, test, slow, wasm, sources, example_plugin, integrations, web, packaging, msrv]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.lint.result == 'success' && needs.test.result == 'success' &&
@@ -507,7 +563,7 @@ jobs:
       needs.wasm.result == 'success' && needs.sources.result == 'success' &&
       needs.example_plugin.result == 'success' && needs.integrations.result == 'success' &&
       needs.web.result == 'success' && needs.packaging.result == 'success' &&
-      needs.ship.result == 'success'
+      needs.msrv.result == 'success'
     uses: ./.github/workflows/development-release.yaml
     with:
       sha: ${{ github.sha }}

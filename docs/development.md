@@ -27,7 +27,9 @@ workflow inputs and compatibility policy.
 
 - Node and bun, only for `web/` and `integrations/` (`mise run web:check` and `integrations:check` install them for the
   task; the Rust build needs neither).
-- Rust, via `rustup`, which installs the channel pinned in `rust-toolchain.toml` (mise does not manage Rust itself).
+- Rust via `rustup`, with mise 2026.9.2+ providing native Mr Boxington wrapping for Cargo builds.
+  `rust-toolchain.toml` and mise declare the stable channel; explicit `RUSTUP_TOOLCHAIN` selections still win.
+  Mise also installs `wasm32-wasip2` for the reference sources and WebAssembly tests.
 - The remaining tools (nextest, prek, ast-grep, typos, ...) via `mise` — run `mise install` once.
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
@@ -70,9 +72,15 @@ Changing a source or removing an output makes the corresponding task run again; 
 (or the other task name) to rebuild regardless of freshness.
 The test and check tasks still run on every invocation, including when used through `mise run check` or `mise run ci`.
 
-`prek install` (once) wires formatting, spelling, actionlint, markdownlint, commitlint, basic file hygiene,
+`mise install` also installs the Git hooks through its postinstall hook.
+The hooks wire formatting, spelling, actionlint, rumdl, Commitizen with Emotional, basic file hygiene,
 and the architecture guard described below into `git commit` as hooks.
 Full-project Clippy runs in CI and with `mise run lint`, rather than on every local commit.
+
+Cargo commands in mise tasks use Mr Boxington automatically.
+For direct commands, use `mise exec -- cargo ...` so the wrapper is active even without shell activation.
+`MBX_TARGET_VIEWS=0` keeps existing `target/` paths, and machine-specific cache budgets stay in the global mbx config.
+See [Mr Boxington build caching](../CONTRIBUTING.md#mr-boxington-build-caching) for diagnostics and cache policy.
 
 ## Running the daemon locally
 

@@ -120,7 +120,6 @@ An invariant nothing checks is a comment, and it will be violated.
    (Markdown and `node_modules` excepted),
    and by `tests/in_process/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon
    and fails when the contract page, the capability manifest and the test names disagree.
-
 9. **Source-specific code stays out of the mining pipeline, and adapters stay out of storage** —
    everything that differs between mining sources (discovery, reading, normalizing) lives in one adapter under
    `src/mining/adapters/`, and the pipeline, the chunker and the domain model know no source by name and read no file.
@@ -146,7 +145,6 @@ An invariant nothing checks is a comment, and it will be violated.
    `domain/resolution.rs` stays pure (see `docs/adr/025-memory-deduplication-and-entity-resolution.md`).
    The host, the adapters and `src/source/` reaching `store` or `jobs`, and any module but `src/mining/wasm/` or
    `src/embed/wasm.rs` naming the runtime, fail the same test.
-
 10. **An installed source has no ambient authority, and installing one is administrative** —
     a WebAssembly source starts with no filesystem, environment, network or programs, and the host grants exactly what its
     manifest lists and the user consented to at install (a digest of the name and the permissions), read-only for files,
@@ -189,7 +187,6 @@ An invariant nothing checks is a comment, and it will be violated.
     bundled source), `tests/wasm_bundle.rs` (the release script removes stale sources from Core's empty bundle)
     and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
     kept anywhere but the credential store).
-
 11. **The web UI is a client of the REST API and nothing else, and it is opt-in** —
     everything under `web/` reaches MemCastle only over HTTP, never storage, the job code or the database admin endpoint,
     exactly as an integration does (invariant 8), and the daemon serves it only when `web.enable` is set.
@@ -207,7 +204,6 @@ An invariant nothing checks is a comment, and it will be violated.
     by `tests/web_bundle.rs` (the package holds the build and nothing else, and a daemon serves it from an installed prefix
     and from the checkout through the same lookup)
     and by `web/test` (the login, the route guard and the client, with a real daemon).
-
 12. **Changing a miner is administrative, and the daemon is the only writer of miner configuration** —
     miner definitions live in the configuration file the daemon was started from or in individual XDG miner TOML files,
     and adding, changing, enabling,
@@ -222,7 +218,6 @@ An invariant nothing checks is a comment, and it will be violated.
     read-only ones), by `tests/in_process/miners.rs` (validation before anything is written, option changes never
     broaden silently, a credential never leaks, a cursor survives every change, REST, CLI and MCP agree)
     and by `config::miners_file`'s tests (comments and other tables survive an edit, a stale write is refused).
-
 13. **Triggers and miner-owned schedules are opt-in, administrative, and only ask for a run** —
     a trigger decides *when* a miner is run and nothing else: it ends in the one request `memcastle miner run` makes
     (`app::miners`'s `request_miner_run`), so it can cause nothing a person could not, and it acquires, normalises and
@@ -249,7 +244,6 @@ An invariant nothing checks is a comment, and it will be violated.
     missing, deliveries authenticated and idempotent, bursts coalesced, restart and failure handling)
     and by `config::miners_file`'s tests (the `[[triggers]]` section is rewritten in place, with the miners and every
     comment kept).
-
 14. **Plugins are the distribution unit; their modules never acquire one another's lifecycle state** —
     the reviewed `plugins.json` catalogue is separate from the legacy `registry.json` source index, and a release
    archive contains a generated `manifest.toml` with the descriptor's metadata, release versions, checksums of every
@@ -355,7 +349,7 @@ and a code is a public identifier users grep for — renaming one is a breaking 
 The name should say what would be broken if it failed.
 
 **Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
-when it would otherwise exceed the 120-column limit `.markdownlint-cli2.yaml` enforces.
+when it would otherwise exceed the 120-column limit `.config/rumdl.toml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
 The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`);
 `PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
@@ -368,7 +362,7 @@ See [Development](docs/development.md#documentation).
 
 ## Commits
 
-Conventional Commits, enforced by commitlint on `commit-msg`.
+Conventional Commits, enforced by Commitizen with Emotional on `commit-msg`.
 The type becomes a changelog heading, so choose it as if someone will read it in release notes — because they will.
 
 ## Releases
@@ -413,15 +407,8 @@ so staying inside the request is a rule here and not a courtesy.
 
 ## Before you push
 
-```sh
-mise run ci
-```
-
-Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, the basic and WebAssembly
-tests, the build and test of every reference source and integration (which needs bun and the `wasm32-wasip2` target)
-and the documentation build.
-This is the local equivalent of CI's lint, test and docs steps; CI additionally runs every prek hook, coverage on three
-operating systems and `gh ship validate`.
+Follow [CONTRIBUTING.md's validation guidance](CONTRIBUTING.md#before-you-push)
+to choose checks relevant to the change and report any skipped checks in your handoff or PR description.
 
 ## This repository is generated from a template
 
