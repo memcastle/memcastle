@@ -47,6 +47,9 @@ jobs:
     name: 🚀 Publish
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: https://memcastle.github.io/

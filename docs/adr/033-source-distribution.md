@@ -94,7 +94,7 @@ And a user must not need Rust, Python or Node to install a published source, whi
 - **Releases bundle `pi`, `opencode` and `claude`.**
   `packaging/sources/build.sh` packages them and writes their index with the same commands a third party runs;
   the release tarballs and the `.deb` and `.rpm` put the result under `share/memcastle/sources/`.
-   `directory` is the worked example of the built-in source and is not bundled; `claude` is a bundled history source (#88).
+  `directory` is the worked example of the built-in source and is not bundled; `claude` is a bundled history source (#88).
   Which sources ship is a line in that script and does not constrain the runtime.
 - **There is no MCP tool.**
   Searching, installing and updating make the daemon fetch and run code,

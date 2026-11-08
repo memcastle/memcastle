@@ -1,13 +1,14 @@
 # memcastle — Local-first, always-on memory server for AI coding agents over MCP/HTTP
 #
-# Single crate, `[lib]` + `[[bin]]`. The library holds the engine; the binary is
-# a thin CLI over it, so integration tests can exercise either.
+# Single crate, library (`src/lib.rs`) + binary (`src/main.rs`). Cargo discovers
+# both targets automatically. Runtime module ownership belongs to the project;
+# this manifest does not require the binary to delegate to the library.
 
 [package]
 name = "memcastle"
 version = "0.5.2"
 edition = "2024"
-# The MSRV. Checked by a dedicated CI job, which greps this very line — keep it
+# The MSRV. Checked by the MSRV job in ci.yaml, which greps this very line — keep it
 # a plain literal. `rust-toolchain.toml` separately pins the channel to develop
 # against; the two answer different questions.
 rust-version = "1.90"
@@ -56,13 +57,13 @@ pkg-url = "{ repo }/releases/download/{ version }/memcastle_{ version }_darwin-a
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-url = "{ repo }/releases/download/{ version }/memcastle_{ version }_windows-amd64.exe"
 
-[[bin]]
-name = "memcastle"
-path = "src/main.rs"
+# Keep line-number backtraces without full debugger information, reducing
+# compilation IO, link time and the size of dev/test outputs.
+[profile.dev]
+debug = "line-tables-only"
 
-[lib]
-name = "memcastle"
-path = "src/lib.rs"
+[profile.test]
+debug = "line-tables-only"
 
 [profile.release]
 # Release binaries are cross-compiled once per tag and downloaded many times, so
@@ -305,14 +306,6 @@ libc = "0.2.189"
 # not correctness, and nothing here can shrink it, so the noise is silenced rather than left to hide real warnings.
 linker_messages = "allow"
 
-[profile.dev]
-# Full DWARF/PDB debug info (type + variable info for interactive
-# debuggers) costs real compile/link time — especially PDB generation on
-# Windows — and this project doesn't lean on interactive debugging as a
-# workflow. Line tables alone still give RUST_BACKTRACE=full's file:line
-# backtraces.
-debug = "line-tables-only"
-
 # Compiling a source's component with Cranelift is the one heavy thing a debug build of the test suite does, and an
 # unoptimised Cranelift makes it take tens of seconds. Optimising just these crates costs a one-time build and makes
 # every source test (and `memcastle source test`) fast. `cargo test` inherits these from `dev`.
@@ -336,11 +329,3 @@ opt-level = 2
 opt-level = 2
 [profile.dev.package.wasmparser]
 opt-level = 2
-
-[profile.test]
-# cargo test/nextest use this profile, not dev — mirror the same
-# trade-off so CI's llvm-cov-instrumented build gets the same win.
-# Coverage mapping (-C instrument-coverage) is embedded in its own LLVM
-# data section, independent of debuginfo level, so this doesn't affect
-# coverage accuracy (see rustc's instrument-coverage docs).
-debug = "line-tables-only"

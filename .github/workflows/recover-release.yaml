@@ -25,7 +25,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/publish-release.yaml
     with:
-      tag: ${{ inputs.tag }}
+      ref: ${{ inputs.tag }}
       recover: true
       run_id: ${{ inputs.run_id }}
     secrets: inherit
