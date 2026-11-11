@@ -34,7 +34,7 @@ The readable rendering is not meant to be parsed and may change between releases
 `--json` forces the JSON form on a terminal, for `memcastle search auth --json | jq` or to see the same data a script
 would receive.
 On a colour-capable terminal JSON is indented and syntax-highlighted; `NO_COLOR` leaves it indented but plain.
-In a pipe or a file JSON stays indented and free of escape codes, even with `FORCE_COLOR`.
+In a pipe or a file JSON is compact and free of escape codes, even with `FORCE_COLOR`.
 It is a global flag, accepted before or after any subcommand, and it never changes a command's exit code.
 
 This applies to `status`, `doctor`, `db`, `integration`, `migrate`, `daemon stop`, `mine`

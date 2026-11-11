@@ -223,8 +223,8 @@ fn doctor_reports_invalid_config_without_printing_secret_values() {
         .unwrap();
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"status\": \"error\""), "{stdout}");
-    assert!(stdout.contains("\"status\": \"skipped\""), "{stdout}");
+    assert!(stdout.contains("\"status\":\"error\""), "{stdout}");
+    assert!(stdout.contains("\"status\":\"skipped\""), "{stdout}");
     assert!(!stdout.contains("secret-redaction-canary"), "{stdout}");
     assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-redaction-canary"));
 }
@@ -241,7 +241,7 @@ fn doctor_reports_malformed_toml_without_echoing_the_line() {
         .unwrap();
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"status\": \"error\""), "{stdout}");
+    assert!(stdout.contains("\"status\":\"error\""), "{stdout}");
     assert!(!stdout.contains("secret-redaction-canary"), "{stdout}");
     assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-redaction-canary"));
 }
@@ -269,7 +269,7 @@ fn doctor_reports_a_missing_explicit_assets_directory_as_blocking() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!output.status.success(), "{stdout}");
-    assert!(stdout.contains("\"check\": \"assets.dir\""), "{stdout}");
+    assert!(stdout.contains("\"check\":\"assets.dir\""), "{stdout}");
     assert!(
         stdout.contains("Required directory is missing."),
         "{stdout}"
@@ -302,8 +302,8 @@ fn doctor_offline_warns_but_succeeds_without_creating_the_palace() {
         String::from_utf8_lossy(&output.stdout)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"status\": \"warning\""), "{stdout}");
-    assert!(stdout.contains("\"status\": \"skipped\""), "{stdout}");
+    assert!(stdout.contains("\"status\":\"warning\""), "{stdout}");
+    assert!(stdout.contains("\"status\":\"skipped\""), "{stdout}");
     assert!(!palace.exists());
 }
 
@@ -495,9 +495,7 @@ fn an_unknown_shell_is_rejected_listing_the_supported_ones() {
 
 #[test]
 fn a_piped_status_report_is_json_with_no_escape_codes_even_when_colour_is_forced() {
-    // Colour decorates the pretty rendering, which only a terminal gets: forcing it must not
-    // put escape codes into what a pipe reads. The coloured rendering itself is held by the
-    // `client::status` unit tests, since a test process has no terminal to run it in.
+    // Forced colour must not change the machine-readable contract.
     let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let forced = status_without_a_daemon(&state, &palace)
         .env("FORCE_COLOR", "1")
@@ -506,7 +504,7 @@ fn a_piped_status_report_is_json_with_no_escape_codes_even_when_colour_is_forced
         .unwrap();
     let forced = String::from_utf8_lossy(&forced.stdout);
     assert!(!forced.contains('\u{1b}'), "{forced:?}");
-    serde_json::from_str::<serde_json::Value>(&forced).expect("a piped status is JSON");
+    assert_compact_json(forced.as_bytes());
 
     let explicit = status_without_a_daemon(&state, &palace)
         .arg("--json")
@@ -515,8 +513,116 @@ fn a_piped_status_report_is_json_with_no_escape_codes_even_when_colour_is_forced
         .output()
         .unwrap();
     assert!(!explicit.stdout.contains(&b'\x1b'));
-    serde_json::from_slice::<serde_json::Value>(&explicit.stdout)
-        .expect("--json in a pipe is JSON");
+    assert_compact_json(&explicit.stdout);
+}
+
+fn assert_compact_json(output: &[u8]) {
+    let value: serde_json::Value = serde_json::from_slice(output).expect("valid JSON");
+    assert_eq!(
+        output,
+        format!("{}\n", serde_json::to_string(&value).unwrap()).as_bytes()
+    );
+}
+
+#[test]
+fn redirected_json_is_compact_and_uncolored_even_when_color_is_forced() {
+    let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let file = tempfile::tempfile().unwrap();
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_memcastle"))
+        .env("MEMCASTLE_PALACE_PATH", palace.path())
+        .env("XDG_STATE_HOME", state.path())
+        .env("MEMCASTLE_BIND", "127.0.0.1")
+        .env("MEMCASTLE_PORT", "1")
+        .env("FORCE_COLOR", "1")
+        .env_remove("NO_COLOR")
+        .arg("status")
+        .stdout(file.try_clone().unwrap())
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(3));
+    use std::io::{Read, Seek};
+    let mut file = file;
+    file.rewind().unwrap();
+    let mut output = Vec::new();
+    file.read_to_end(&mut output).unwrap();
+    assert!(!output.contains(&b'\x1b'));
+    assert_compact_json(&output);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn terminal_json_stays_pretty_and_respects_color_override_precedence() {
+    use std::fs::File;
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    use std::process::{Command as ProcessCommand, Stdio};
+
+    for (no_color, force_color, term, colored) in [
+        (None, Some("1"), "xterm-256color", true),
+        (Some("1"), Some("1"), "xterm-256color", false),
+        (Some(""), Some("1"), "xterm-256color", false),
+        (None, Some("0"), "xterm-256color", false),
+        (None, Some("1"), "dumb", true),
+        (None, Some(""), "dumb", false),
+        (None, None, "xterm-256color", true),
+        (None, None, "dumb", false),
+    ] {
+        let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let mut master_fd = -1;
+        let mut slave_fd = -1;
+        // SAFETY: openpty initializes distinct descriptors, each owned by exactly one File.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &raw mut master_fd,
+                    &raw mut slave_fd,
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                )
+            },
+            0
+        );
+        let mut master = unsafe { File::from_raw_fd(master_fd) };
+        let slave = unsafe { File::from_raw_fd(slave_fd) };
+        let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_memcastle"));
+        command
+            .env("MEMCASTLE_PALACE_PATH", palace.path())
+            .env("XDG_STATE_HOME", state.path())
+            .env("MEMCASTLE_BIND", "127.0.0.1")
+            .env("MEMCASTLE_PORT", "1")
+            .env("TERM", term)
+            .env_remove("NO_COLOR")
+            .env_remove("FORCE_COLOR")
+            .args(["status", "--json"])
+            .stdin(Stdio::null())
+            .stdout(slave)
+            .stderr(Stdio::piped());
+        if let Some(value) = no_color {
+            command.env("NO_COLOR", value);
+        }
+        if let Some(value) = force_color {
+            command.env("FORCE_COLOR", value);
+        }
+        let output = command.output().unwrap();
+        // Drop the command's slave handle before reading, so the PTY reaches EOF.
+        drop(command);
+        assert_eq!(output.status.code(), Some(3), "{output:?}");
+        let mut text = String::new();
+        match master.read_to_string(&mut text) {
+            Ok(_) => {}
+            // Linux signals a closed PTY slave with EIO rather than EOF.
+            Err(error) if error.raw_os_error() == Some(libc::EIO) => {}
+            Err(error) => panic!("reading stdout terminal: {error}"),
+        }
+        assert_eq!(text.contains('\x1b'), colored, "{text:?}");
+        let plain = console::strip_ansi_codes(&text).replace("\r\n", "\n");
+        let value: serde_json::Value = serde_json::from_str(&plain).unwrap();
+        assert_eq!(
+            plain,
+            format!("{}\n", serde_json::to_string_pretty(&value).unwrap())
+        );
+    }
 }
 
 /// A `memcastle status` with no daemon, pointed at an empty palace and a
@@ -539,7 +645,7 @@ fn status_without_a_reachable_daemon_reports_not_running_and_exits_3() {
         .assert()
         // 3, not 1: a script must be able to tell "stopped" from "broken".
         .code(3)
-        .stdout(contains("\"running\": false"))
+        .stdout(contains("\"running\":false"))
         .stdout(contains("127.0.0.1:1"));
 }
 
@@ -601,8 +707,8 @@ fn status_diagnoses_a_registry_file_left_behind_by_a_killed_daemon() {
     status_without_a_daemon(&state, &palace)
         .assert()
         .code(3)
-        .stdout(contains("\"state\": \"stale\""))
-        .stdout(contains(format!("\"pid\": {dead_pid}")));
+        .stdout(contains("\"state\":\"stale\""))
+        .stdout(contains(format!("\"pid\":{dead_pid}")));
 }
 
 #[cfg(unix)]

@@ -72,6 +72,7 @@ needs next, the job's `id`, is somewhere in the middle.
   This is a breaking change and is released as one.
 - At the time, `CLICOLOR_FORCE` no longer put colour into a command's result in a pipe.
   The current CLI uses `FORCE_COLOR` for help, diagnostics and progress instead;
-  JSON remains plain in pipes and is syntax-highlighted on a coloured terminal (see [the CLI reference](../cli.md#output-colour-and-prompts)).
-- The readable forms are only exercised by unit tests: no test runs the binary on a pseudo-terminal,
-  so the stream decision is covered through `term::is_pretty` and through the piped output of every command.
+  JSON is compact and plain in pipes and indented on terminals, with syntax highlighting when colour is enabled
+  (see [the CLI reference](../cli.md#output-colour-and-prompts)).
+- Unit tests exercise readable forms and the stream decision through `term::is_pretty`.
+  Subprocess tests cover piped JSON, and Linux pseudo-terminal tests cover terminal JSON and progress feedback.
