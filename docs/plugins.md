@@ -1,6 +1,7 @@
 # Plugin packages
 
 This page describes the plugin manifest, archive, registry and module lifecycle contracts.
+Browse the [plugin catalogue](plugin-catalogue.md) to discover plugins, their repositories and module inventories.
 
 A **plugin** is a versioned, installable package published by one repository.
 A **provider** names the shared upstream implementation family.

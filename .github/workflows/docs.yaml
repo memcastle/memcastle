@@ -1,19 +1,23 @@
 name: 📚 Documentation
 
-# A pull request builds the site, so a broken page, a bad link or a mistake in the source registry
-# (`docs/registry.json`, which is published with it) fails there. Only `main` publishes, so the registry
-# is updated by merging a pull request and not by cutting a release (docs/adr/040).
+# A pull request builds the site, including the source registry and generated plugin catalogue.
+# The raw `docs/registry.json` and `docs/plugins.json` are published with it. Only `main` publishes,
+# so registries are updated by merging a pull request and not by cutting a release (docs/adr/040).
 on:
   pull_request:
     paths:
       - docs/**
       - zensical.toml
+      - packaging/docs/**
+      - mise.toml
       - .github/workflows/docs.yaml
   push:
     branches: [main]
     paths:
       - docs/**
       - zensical.toml
+      - packaging/docs/**
+      - mise.toml
       - .github/workflows/docs.yaml
   workflow_dispatch:
 
@@ -40,6 +44,9 @@ jobs:
         with:
           cache: true
 
+      - name: Test catalogue generation
+        run: mise run docs:test
+
       - name: Build the site
         run: mise run docs:build
 
@@ -61,6 +68,9 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      - name: Test catalogue generation
+        run: mise run docs:test
 
       - name: Build the site
         run: mise run docs:build

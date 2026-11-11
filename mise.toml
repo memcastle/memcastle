@@ -177,12 +177,19 @@ run = "cargo install --path . --force"
 
 # --- Documentation ----------------------------------------------------------
 
+[tasks."docs:generate"]
+description = "Validate the plugin catalogue and generate its documentation page"
+# uv supplies Python on machines that have only the docs toolchain installed.
+run = "uv run --no-project --python 3 python -B packaging/docs/generate_plugin_catalogue.py"
+
 [tasks.docs]
 description = "Serve the documentation locally"
+depends = ["docs:generate"]
 run = "uvx zensical serve"
 
 [tasks."docs:build"]
 description = "Build the documentation"
+depends = ["docs:generate"]
 run = "uvx zensical build"
 
 # --- Release ----------------------------------------------------------------
@@ -266,6 +273,10 @@ run = """
 prek run --all-files architecture
 prek run --all-files architecture-rule-tests
 """
+
+[tasks."docs:test"]
+description = "Test plugin catalogue validation and documentation generation"
+run = "uv run --no-project --python 3 python -B -m unittest discover -s packaging/docs -p 'test_*.py'"
 
 [tasks."test:wasm"]
 description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, needs the wasm32-wasip2 target)"

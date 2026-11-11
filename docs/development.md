@@ -444,6 +444,14 @@ These syntax rules cannot resolve renamed imports, computed strings or runtime b
 
 The documentation site is built by [Zensical](https://zensical.org/) from `docs/`, configured in `zensical.toml`.
 `mise run docs` serves it with live reload, and `mise run docs:build` (part of `mise run ci`) builds it.
+Both commands first run `mise run docs:generate` to validate `docs/plugins.json` and generate the
+[plugin catalogue](plugin-catalogue.md).
+Edit the JSON catalogue rather than `docs/plugin-catalogue.md`, which is an ignored build artifact.
+Generation is offline and shows the reviewed metadata without looking up releases or inferring versions.
+Invalid catalogue data fails generation and prevents the documentation command from starting.
+After changing the JSON during an active preview, rerun `mise run docs:generate` to trigger live reload,
+or restart `mise run docs`.
+Run `mise run docs:test` for the generator's focused tests; the documentation workflow runs them before building.
 The documentation workflow builds pull requests without deployment and publishes merged `main` builds into the root of
 `memcastle/memcastle.github.io`'s `gh-pages` branch, where Pages serves `https://memcastle.github.io/`.
 After the first publish creates the branch (if the repository is empty), configure the destination repository's Pages

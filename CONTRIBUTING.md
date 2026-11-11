@@ -148,8 +148,10 @@ optional comprehensive check.
 | `mise run snapshots` | Review pending insta snapshots |
 | `mise run check` | Every lint, the guards, both test suites, the sources and the integrations, without modifying the working tree |
 | `mise run ci` | `check` plus the documentation build |
-| `mise run docs` | Serve the documentation locally |
-| `mise run docs:build` | Build the documentation |
+| `mise run docs` | Generate the plugin catalogue and serve the documentation locally |
+| `mise run docs:build` | Generate the plugin catalogue and build the documentation |
+| `mise run docs:generate` | Validate `docs/plugins.json` and regenerate the catalogue page |
+| `mise run docs:test` | Test catalogue validation and page generation |
 | `mise run changelog` | Preview the changelog for unreleased commits |
 | `mise run release` | Show the version the next release would take |
 | `mise run ship:validate` | Check the release setup against what gh-ship requires |
