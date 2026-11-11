@@ -12,6 +12,114 @@ pub(super) struct Fence {
     token: String,
 }
 
+impl SurrealStore {
+    /// A source has one writer across daemons, not merely one task per process.
+    /// A dead owner's lock is reclaimable only after its durable job lease ends.
+    pub(crate) async fn claim_mining_source(
+        &self,
+        source: SourceId,
+        job: &Job,
+        worker: Option<&str>,
+    ) -> Result<Option<Self>> {
+        let fence = Fence {
+            source,
+            job: job.id,
+            worker: worker.map(str::to_string),
+            attempt: job.attempt,
+            token: uuid::Uuid::new_v4().to_string(),
+        };
+        let claimed = super::retrying_on_conflict(|| async {
+            let mut response = self.db.query(
+                "BEGIN TRANSACTION; \
+                 LET $lock = (SELECT * FROM type::record('source_mining_lock', $source))[0]; \
+                 LET $owner = (SELECT * FROM type::record('job', $lock.job ?? $job))[0]; \
+                 IF $lock != NONE AND ($lock.worker = NONE OR \
+                     ($owner.status = 'running' AND $owner.lease_owner = $lock.worker AND $owner.attempt = $lock.attempt \
+                         AND <datetime>($owner.lease_expires_at ?? '1970-01-01T00:00:00Z') > time::now())) \
+                     { THROW 'mining source busy'; }; \
+                 UPSERT type::record('source_mining_lock', $source) SET job = $job, worker = $worker, \
+                     attempt = $attempt, token = $mining_token, serial = 0; \
+                 COMMIT TRANSACTION;"
+            ).bind(("source", source.to_string())).bind(("job", fence.job.to_string()))
+                .bind(("worker", fence.worker.clone())).bind(("attempt", fence.attempt)).bind(("mining_token", fence.token.clone())).await?;
+            let errors = response.take_errors();
+            if errors.values().any(|error| error.to_string().contains("mining source busy")) { return Ok(false); }
+            if let Some(error) = super::root_cause(errors) { return Err(error.into()); }
+            Ok(true)
+        }).await?;
+        Ok(claimed.then(|| Self {
+            db: self.db.clone(),
+            mining_fence: Some(fence),
+        }))
+    }
+
+    /// A stale owner cannot release a successor's lock. Also used after failures
+    /// and cooperative stops; force-aborted tasks are recovered through the job lease.
+    pub(crate) async fn release_mining_source(&self) -> Result<()> {
+        if let Some(fence) = &self.mining_fence {
+            self.db.query("DELETE source_mining_lock WHERE id = type::record('source_mining_lock', $source) AND token = $mining_token")
+                .bind(("source", fence.source.to_string())).bind(("mining_token", fence.token.clone())).await?.check()?;
+        }
+        Ok(())
+    }
+
+    /// Guard and mutation are one transaction. Updating the lock's serial makes
+    /// ownership transfer conflict with an old transaction, rather than only reading
+    /// a potentially stale snapshot of the lock before an unfenced write.
+    pub(super) fn mining_query(
+        &self,
+        sql: impl Into<String>,
+    ) -> surrealdb::method::Query<'_, surrealdb::engine::any::Any> {
+        let sql = sql.into();
+        let Some(fence) = &self.mining_fence else {
+            return self.db.query(sql);
+        };
+        let body = sql
+            .trim()
+            .strip_prefix("BEGIN TRANSACTION;")
+            .unwrap_or(sql.trim())
+            .trim();
+        let body = body.strip_suffix("COMMIT TRANSACTION;").unwrap_or(body);
+        self.db.query(format!(
+            "BEGIN TRANSACTION; \
+             LET $__locked = (UPDATE source_mining_lock SET serial += 1 \
+                 WHERE id = type::record('source_mining_lock', $__source) AND token = $__token \
+                     AND job = $__job AND attempt = $__attempt RETURN AFTER); \
+             IF array::len($__locked) != 1 {{ THROW 'mining lease lost'; }}; \
+             LET $__owner = (SELECT * FROM type::record('job', $__job))[0]; \
+             IF $__worker != NONE AND ($__owner.status != 'running' OR $__owner.lease_owner != $__worker \
+                 OR $__owner.attempt != $__attempt OR $__owner.lease_expires_at = NONE \
+                 OR <datetime>($__owner.lease_expires_at ?? '1970-01-01T00:00:00Z') <= time::now()) {{ THROW 'mining lease lost'; }}; \
+             {body}; COMMIT TRANSACTION;"
+        )).bind(("__source", fence.source.to_string())).bind(("__token", fence.token.clone()))
+            .bind(("__job", fence.job.to_string())).bind(("__worker", fence.worker.clone())).bind(("__attempt", fence.attempt))
+    }
+
+    pub(super) fn checked_mining(
+        &self,
+        mut response: surrealdb::IndexedResults,
+    ) -> Result<surrealdb::IndexedResults> {
+        let errors = response.take_errors();
+        if errors
+            .values()
+            .any(|error| error.to_string().contains("mining lease lost"))
+        {
+            return Err(Error::LeaseLost {
+                id: self
+                    .mining_fence
+                    .as_ref()
+                    .expect("only a fenced query raises this error")
+                    .job
+                    .to_string(),
+            });
+        }
+        match super::root_cause(errors) {
+            Some(error) => Err(error.into()),
+            None => Ok(response),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,113 +278,5 @@ mod tests {
             .await
             .unwrap();
         current.release_mining_source().await.unwrap();
-    }
-}
-
-impl SurrealStore {
-    /// A source has one writer across daemons, not merely one task per process.
-    /// A dead owner's lock is reclaimable only after its durable job lease ends.
-    pub(crate) async fn claim_mining_source(
-        &self,
-        source: SourceId,
-        job: &Job,
-        worker: Option<&str>,
-    ) -> Result<Option<Self>> {
-        let fence = Fence {
-            source,
-            job: job.id,
-            worker: worker.map(str::to_string),
-            attempt: job.attempt,
-            token: uuid::Uuid::new_v4().to_string(),
-        };
-        let claimed = super::retrying_on_conflict(|| async {
-            let mut response = self.db.query(
-                "BEGIN TRANSACTION; \
-                 LET $lock = (SELECT * FROM type::record('source_mining_lock', $source))[0]; \
-                 LET $owner = (SELECT * FROM type::record('job', $lock.job ?? $job))[0]; \
-                 IF $lock != NONE AND ($lock.worker = NONE OR \
-                     ($owner.status = 'running' AND $owner.lease_owner = $lock.worker AND $owner.attempt = $lock.attempt \
-                         AND <datetime>($owner.lease_expires_at ?? '1970-01-01T00:00:00Z') > time::now())) \
-                     { THROW 'mining source busy'; }; \
-                 UPSERT type::record('source_mining_lock', $source) SET job = $job, worker = $worker, \
-                     attempt = $attempt, token = $token, serial = 0; \
-                 COMMIT TRANSACTION;"
-            ).bind(("source", source.to_string())).bind(("job", fence.job.to_string()))
-                .bind(("worker", fence.worker.clone())).bind(("attempt", fence.attempt)).bind(("token", fence.token.clone())).await?;
-            let errors = response.take_errors();
-            if errors.values().any(|error| error.to_string().contains("mining source busy")) { return Ok(false); }
-            if let Some(error) = super::root_cause(errors) { return Err(error.into()); }
-            Ok(true)
-        }).await?;
-        Ok(claimed.then(|| Self {
-            db: self.db.clone(),
-            mining_fence: Some(fence),
-        }))
-    }
-
-    /// A stale owner cannot release a successor's lock. Also used after failures
-    /// and cooperative stops; force-aborted tasks are recovered through the job lease.
-    pub(crate) async fn release_mining_source(&self) -> Result<()> {
-        if let Some(fence) = &self.mining_fence {
-            self.db.query("DELETE source_mining_lock WHERE id = type::record('source_mining_lock', $source) AND token = $token")
-                .bind(("source", fence.source.to_string())).bind(("token", fence.token.clone())).await?.check()?;
-        }
-        Ok(())
-    }
-
-    /// Guard and mutation are one transaction. Updating the lock's serial makes
-    /// ownership transfer conflict with an old transaction, rather than only reading
-    /// a potentially stale snapshot of the lock before an unfenced write.
-    pub(super) fn mining_query(
-        &self,
-        sql: impl Into<String>,
-    ) -> surrealdb::method::Query<'_, surrealdb::engine::any::Any> {
-        let sql = sql.into();
-        let Some(fence) = &self.mining_fence else {
-            return self.db.query(sql);
-        };
-        let body = sql
-            .trim()
-            .strip_prefix("BEGIN TRANSACTION;")
-            .unwrap_or(sql.trim())
-            .trim();
-        let body = body.strip_suffix("COMMIT TRANSACTION;").unwrap_or(body);
-        self.db.query(format!(
-            "BEGIN TRANSACTION; \
-             LET $__locked = (UPDATE source_mining_lock SET serial += 1 \
-                 WHERE id = type::record('source_mining_lock', $__source) AND token = $__token \
-                     AND job = $__job AND attempt = $__attempt RETURN AFTER); \
-             IF array::len($__locked) != 1 {{ THROW 'mining lease lost'; }}; \
-             LET $__owner = (SELECT * FROM type::record('job', $__job))[0]; \
-             IF $__worker != NONE AND ($__owner.status != 'running' OR $__owner.lease_owner != $__worker \
-                 OR $__owner.attempt != $__attempt OR $__owner.lease_expires_at = NONE \
-                 OR <datetime>($__owner.lease_expires_at ?? '1970-01-01T00:00:00Z') <= time::now()) {{ THROW 'mining lease lost'; }}; \
-             {body}; COMMIT TRANSACTION;"
-        )).bind(("__source", fence.source.to_string())).bind(("__token", fence.token.clone()))
-            .bind(("__job", fence.job.to_string())).bind(("__worker", fence.worker.clone())).bind(("__attempt", fence.attempt))
-    }
-
-    pub(super) fn checked_mining(
-        &self,
-        mut response: surrealdb::IndexedResults,
-    ) -> Result<surrealdb::IndexedResults> {
-        let errors = response.take_errors();
-        if errors
-            .values()
-            .any(|error| error.to_string().contains("mining lease lost"))
-        {
-            return Err(Error::LeaseLost {
-                id: self
-                    .mining_fence
-                    .as_ref()
-                    .expect("only a fenced query raises this error")
-                    .job
-                    .to_string(),
-            });
-        }
-        match super::root_cause(errors) {
-            Some(error) => Err(error.into()),
-            None => Ok(response),
-        }
     }
 }

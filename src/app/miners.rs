@@ -1298,50 +1298,6 @@ fn miner_source_view_key(
     .source_view_key(miner.locator.as_deref(), miner.wing.as_deref(), &options)
 }
 
-#[cfg(test)]
-mod view_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn a_miner_view_key_tracks_its_exact_input_destination_and_configuration() {
-        let miner: MinerDefinition = serde_json::from_value(
-            json!({"name":"knowledge","source":"fixture","locator":"workspace-a","wing":"docs"}),
-        )
-        .unwrap();
-        let config: crate::domain::SourceConfiguration = serde_json::from_value(
-            json!({"id":"fixture","source":"fixture","options":{"account":"team-a"}}),
-        )
-        .unwrap();
-        let original = miner_source_view_key(&miner, &config);
-        assert!(original.is_some());
-        let mut changed = miner.clone();
-        changed.locator = Some("workspace-b".into());
-        assert_ne!(miner_source_view_key(&changed, &config), original);
-        changed = miner.clone();
-        changed.wing = Some("other".into());
-        assert_ne!(miner_source_view_key(&changed, &config), original);
-        changed = miner.clone();
-        changed.room = Some("other".into());
-        assert_ne!(miner_source_view_key(&changed, &config), original);
-        let mut other = config.clone();
-        other.id = "other-config".into();
-        assert_ne!(miner_source_view_key(&miner, &other), original);
-        other = config.clone();
-        other.options.insert("account".into(), json!("team-b"));
-        assert_ne!(miner_source_view_key(&miner, &other), original);
-        assert_eq!(
-            miner_source_view_key(&miner, &config),
-            original,
-            "reverting must select the earlier state rather than the most recently mined different destination"
-        );
-        changed = miner.clone();
-        changed.max_documents = Some(1);
-        changed.enabled = false;
-        assert_eq!(miner_source_view_key(&changed, &config), original);
-    }
-}
-
 fn invalid(name: &str, reason: impl Into<String>) -> Error {
     Error::MinerInvalid {
         name: name.to_string(),
@@ -1464,4 +1420,48 @@ fn apply(
     miner.options.extend(patch.options);
     miner.validate().map_err(|reason| invalid(name, reason))?;
     Ok(miner)
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_miner_view_key_tracks_its_exact_input_destination_and_configuration() {
+        let miner: MinerDefinition = serde_json::from_value(
+            json!({"name":"knowledge","source":"fixture","locator":"workspace-a","wing":"docs"}),
+        )
+        .unwrap();
+        let config: crate::domain::SourceConfiguration = serde_json::from_value(
+            json!({"id":"fixture","source":"fixture","options":{"account":"team-a"}}),
+        )
+        .unwrap();
+        let original = miner_source_view_key(&miner, &config);
+        assert!(original.is_some());
+        let mut changed = miner.clone();
+        changed.locator = Some("workspace-b".into());
+        assert_ne!(miner_source_view_key(&changed, &config), original);
+        changed = miner.clone();
+        changed.wing = Some("other".into());
+        assert_ne!(miner_source_view_key(&changed, &config), original);
+        changed = miner.clone();
+        changed.room = Some("other".into());
+        assert_ne!(miner_source_view_key(&changed, &config), original);
+        let mut other = config.clone();
+        other.id = "other-config".into();
+        assert_ne!(miner_source_view_key(&miner, &other), original);
+        other = config.clone();
+        other.options.insert("account".into(), json!("team-b"));
+        assert_ne!(miner_source_view_key(&miner, &other), original);
+        assert_eq!(
+            miner_source_view_key(&miner, &config),
+            original,
+            "reverting must select the earlier state rather than the most recently mined different destination"
+        );
+        changed = miner.clone();
+        changed.max_documents = Some(1);
+        changed.enabled = false;
+        assert_eq!(miner_source_view_key(&changed, &config), original);
+    }
 }
