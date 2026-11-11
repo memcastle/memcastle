@@ -237,6 +237,7 @@ impl SourceAdapter for DirectoryAdapter {
                 candidates,
                 exhausted,
                 filtered,
+                cursor_after: None,
             }
         })
         .await

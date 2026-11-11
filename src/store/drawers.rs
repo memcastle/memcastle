@@ -132,7 +132,7 @@ impl SurrealStore {
         // Retried because the write touches the drawer's search indexes, which
         // a background task also rewrites: see `retrying_on_conflict`.
         super::retrying_on_conflict(|| async {
-            super::checked(bind_drawer(self.db.query(CREATE_DRAWER), drawer)?.await?)
+            self.checked_mining(bind_drawer(self.mining_query(CREATE_DRAWER), drawer)?.await?)
                 // `.await` alone only reports transport-level failures; a
                 // rejected `SET` (e.g. a schema mismatch) would otherwise fail
                 // silently and leave `create_drawer` reporting success for a
@@ -192,8 +192,7 @@ impl SurrealStore {
         // transaction wrote nothing, so running it again is safe.
         super::retrying_on_conflict(|| async {
             let query = self
-                .db
-                .query(sql.as_str())
+                .mining_query(sql.as_str())
                 .bind(("old", old.to_string()))
                 .bind(("successor", successor.clone()))
                 .bind(("at", super::stored(at)));
@@ -208,6 +207,19 @@ impl SurrealStore {
             let errors: Vec<_> = response.take_errors().into_iter().collect();
             if errors.is_empty() {
                 return Ok(true);
+            }
+            if errors
+                .iter()
+                .any(|(_, error)| error.to_string().contains("mining lease lost"))
+            {
+                return Err(crate::Error::LeaseLost {
+                    id: self
+                        .mining_fence
+                        .as_ref()
+                        .expect("a mining fence raised this error")
+                        .job
+                        .to_string(),
+                });
             }
             // The `THROW` above: nothing matched, nothing was written.
             if errors

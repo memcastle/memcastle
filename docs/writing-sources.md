@@ -62,6 +62,50 @@ the job).
 A trap, a timeout and an out-of-memory are reported by the host as `memcastle::source::failed` or
 `memcastle::source::timeout`.
 
+## Reconciliation extension
+
+Remote synchronizing sources can implement the optional `reconciled-source` world from the same WIT file.
+Declare `reconciliation = "0.1.0"` under `[compatibility]` and export
+`memcastle:source/reconciliation@0.4.0` alongside the original adapter interface.
+The extension version is independent of the unchanged base WIT package version.
+An older host rejects the new manifest key instead of silently treating retirement as a skip.
+Components without the declaration retain the original six-function behavior and identities.
+
+| Function | Contract |
+|---|---|
+| `reconcile(source, known)` | Recheck one Core-owned inventory entry with the run's current options; return `unchanged`, `refresh(handle)` or `retire(reason)`. |
+| `discover(source, cursor, limit)` | The original candidate ordering plus an optional page-level `cursor-after`, committed after every candidate succeeds. |
+| `acquire(source, candidate)` | Return `document(raw)`, `skip` or `retire(reason)` explicitly. |
+
+Core walks the inventory in bounded keyset pages before discovery, even on `--full`.
+A known entry contains its external ID, last revision, source metadata, and `pending`/`retired` flags, never its body.
+`pending` means an ID was registered before its first acquisition but no ingestion has completed yet.
+Registration happens before reads, so a crash cannot leave newly filed content outside the durable inventory.
+The inventory includes older `source_document` records without requiring a backfill.
+Its position is persisted separately from the adapter cursor, so document-limited jobs continue the walk.
+Inventory checks count toward the document limit; empty progress pages do not.
+
+Return `retire` only for confirmed removal, scope exclusion or object-specific loss of access.
+Missing search results, partial listings, global credential failures and transient API errors are not proof of removal.
+Return a source error for failures that should stop the run without advancing its progress.
+Core retires all current chunks for that effective source and external ID, including partially filed chunks from an
+interrupted first ingestion, and retains their history.
+`skip` preserves existing content.
+A subsequent live acquisition can restore a retired document even when its provider revision is unchanged.
+
+An empty discovery page can persist progress using a changed page-level `cursor-after`.
+An empty nonterminal page without an advancing checkpoint is rejected.
+The page checkpoint never commits past an unsuccessful acquisition, normalization or ingestion.
+`normalize` remains pure; the new acquisition functions receive only the original manifest's consented grants.
+
+For these sources, named miners sharing an account, locator and destination have independent state automatically.
+Keep the miner name stable through filter changes; filters are not part of storage identity.
+Changing options restarts discovery and the inventory walk while retaining all known IDs for cleanup.
+Ad-hoc runs for the same effective source continue to share state.
+Legacy components retain their existing sharing behavior; switching an established provider to the extension changes
+named-miner identities and requires planning how its previously mined states are retained or migrated.
+See [ADR-053](adr/053-source-reconciliation.md).
+
 ## The manifest
 
 `memcastle-source.toml` sits at the top of a source project and of a package.
@@ -164,6 +208,9 @@ Only declare a rule when the source's implementation proves it; an undeclared ru
 These rules do not change the component contract or the permissions a source requests.
 
 An option either narrows or selects, and the two are not the same to the cursor, which belongs to the identity:
+
+The following legacy identity rules apply to the original six-function contract.
+Reconciling sources should keep mutable filters out of identity: Core isolates named miners and reconciles option changes.
 
 - An option that only **narrows** what is read (`since`) must not change the identity.
   A later run with another value continues from the same cursor, and `--full` reads back past it.
@@ -382,10 +429,18 @@ A case is described by:
 | `name`, `description` | What it checks. |
 | `locator`, `limit` | The tree, relative to the case, and the page size (smaller than the number of documents, so paging happens). |
 | `options` | The options of the run, when the case is about one (`{"dir": "/home/me/project"}`). |
+| `opaque_locator` | Optional API locator passed verbatim instead of resolving `locator` as a local directory. |
 | `documents` | The external ids that must be produced, each with its normalized `title`, `kind`, `tags`, `room` and `segments`. |
 | `skipped` | Paths in the tree that must produce no document. |
 
 What differs legitimately between sources (the shape of a cursor, a revision's format, a drawer name) is not compared.
+
+For an offline API fixture, set `[test] fixture_credential = true`.
+The runner supplies the fixed selected credential `memcastle-source-test-credential`, only through the normal consented
+credential host function.
+It never resolves a developer environment variable, token file or OAuth sign-in.
+Use the value in your fake transport; do not put a real credential in fixtures or manifests.
+The runner exercises `acquire` and page checkpoints for reconciling components and the original calls for legacy ones.
 
 The cases shipped with MemCastle:
 

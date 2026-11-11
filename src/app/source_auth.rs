@@ -196,6 +196,7 @@ mod tests {
                 repository: None,
             },
             compatibility: Compatibility {
+                reconciliation: None,
                 contract: crate::domain::CONTRACT_VERSION.to_string(),
                 memcastle: ">=0.1".to_string(),
             },

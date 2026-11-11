@@ -26,6 +26,21 @@ use super::{DrawerId, JobId, SourceId, SourceKind, sha256_hex};
 /// duplicates.
 pub type Cursor = serde_json::Value;
 
+/// Metadata supplied from Core's durable inventory, independently of a provider cursor.
+#[derive(Debug, Clone)]
+pub struct KnownDocument {
+    /// Registration preceded a first ingestion that has not completed yet.
+    pub pending: bool,
+    /// A previous explicit retirement closed this document's current chunks.
+    pub retired: bool,
+    /// Stable identity within this effective source, never another miner's inventory.
+    pub external_id: String,
+    /// Last successfully ingested revision; empty for a pending first acquisition.
+    pub revision: String,
+    /// Source-specific provenance; never a credential or document body.
+    pub metadata: serde_json::Value,
+}
+
 /// A reference to a credential, never the credential itself.
 ///
 /// What an adapter needs to authenticate to an external system is looked up through this at acquisition time and
@@ -340,6 +355,12 @@ pub struct ChunkRef {
 /// authenticate (by reference only).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceRecord {
+    /// Named owner for an opt-in reconciler's independently partitioned state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub miner: Option<String>,
+    /// Exact input/destination selectors used for miner status, not storage partitioning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub miner_key: Option<String>,
     /// Derived from [`SourceRecord::reference`].
     pub id: SourceId,
     /// The adapter's name.
@@ -369,6 +390,8 @@ impl SourceRecord {
         let now = Utc::now();
         Self {
             id: reference.id(),
+            miner: None,
+            miner_key: None,
             source: reference.source.clone(),
             account: reference.account.clone(),
             locator: reference.locator.clone(),
@@ -396,6 +419,12 @@ impl SourceRecord {
 /// of it. The memory that makes a re-mine a no-op and an edit a minimal supersession.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceDocumentRecord {
+    /// Confirmed retirement is distinct from a live empty document or a skipped read.
+    #[serde(default)]
+    pub retired_at: Option<DateTime<Utc>>,
+    /// Stable provider explanation for an explicit retirement, never an API error body.
+    #[serde(default)]
+    pub retirement_reason: Option<String>,
     /// The source the document belongs to.
     pub source: SourceId,
     /// The document's identity within its source.

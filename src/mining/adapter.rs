@@ -31,6 +31,32 @@ pub struct Discovery {
     pub exhausted: bool,
     /// Candidates excluded before paging by the adapter's own filters, when it can count them (zero otherwise).
     pub filtered: usize,
+    /// Optional page checkpoint, committed only after every candidate succeeded.
+    /// Also permits empty pages to advance without inventing a document.
+    pub cursor_after: Option<Cursor>,
+}
+
+pub use crate::domain::KnownDocument;
+
+/// A provider's explicit decision about one previously ingested document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reconciliation {
+    /// The document remains current; no body is needed.
+    Unchanged,
+    /// Acquire it again using this opaque handle and the known external ID.
+    Refresh(String),
+    /// Confirmed deletion, lost sharing or scope exclusion, not a transient error.
+    Retire(String),
+}
+
+/// Acquisition distinguishes an intentional skip from confirmed removal.
+pub enum Acquisition {
+    /// A live document to normalize and ingest.
+    Document(crate::domain::RawDocument),
+    /// Nothing to ingest; existing content is left current.
+    Skip,
+    /// Retire this candidate's previously ingested chunks, preserving history.
+    Retire(String),
 }
 
 /// One kind of source. Implementations are stateless apart from configuration, and every method may run on any
@@ -44,6 +70,33 @@ pub struct Discovery {
 /// component loaded at run time (docs/adr/026); the strings it returns are borrowed from the adapter rather than
 /// `'static` so that a loaded source can own its name.
 pub trait SourceAdapter: Send + Sync {
+    /// Opt into Core-owned inventory reconciliation before discovery, including full runs.
+    fn reconciles(&self) -> bool {
+        false
+    }
+
+    /// Recheck a bounded inventory item using the run's current scope and credential.
+    fn reconcile(
+        &self,
+        _source: &SourceRef,
+        _known: &KnownDocument,
+    ) -> impl Future<Output = Result<Reconciliation>> + Send {
+        async { Ok(Reconciliation::Unchanged) }
+    }
+
+    /// Explicit acquisition outcome; legacy adapters keep their skip semantics.
+    fn acquire(
+        &self,
+        source: &SourceRef,
+        candidate: &Candidate,
+    ) -> impl Future<Output = Result<Acquisition>> + Send {
+        async {
+            Ok(self
+                .read(source, candidate)
+                .await?
+                .map_or(Acquisition::Skip, Acquisition::Document))
+        }
+    }
     /// The adapter's name, as users give it (`memcastle mine <name>`) and as it is stored on the source.
     fn name(&self) -> &str;
 

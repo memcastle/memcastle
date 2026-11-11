@@ -18,16 +18,20 @@ use crate::error::{Error, Result};
 use super::SurrealStore;
 
 /// The projection every source read shares.
-const SOURCE_COLUMNS: &str = "record::id(id) AS id, source, account, locator, credential, cursor, last_job, \
+const SOURCE_COLUMNS: &str = "record::id(id) AS id, source, account, miner, miner_key, locator, credential, cursor, last_job, \
      last_run_at, <string>created_at AS created_at, <string>updated_at AS updated_at";
 
 /// The projection every source document read shares.
-const DOCUMENT_COLUMNS: &str = "source, external_id, revision, raw, raw_hash, title, metadata, occurred_at, chunks, \
+const DOCUMENT_COLUMNS: &str = "source, external_id, revision, raw, raw_hash, title, metadata, occurred_at, chunks, retired_at, retirement_reason, \
      <string>acquired_at AS acquired_at, job";
 
 /// A `source` row as stored, before `{}` is turned back into "none".
 #[derive(Deserialize)]
 struct SourceRow {
+    #[serde(default)]
+    miner: Option<String>,
+    #[serde(default)]
+    miner_key: Option<String>,
     id: SourceId,
     source: String,
     #[serde(default)]
@@ -57,6 +61,8 @@ impl SourceRow {
             ),
         };
         Ok(SourceRecord {
+            miner: self.miner,
+            miner_key: self.miner_key,
             id: self.id,
             source: self.source,
             account: self.account,
@@ -89,6 +95,145 @@ fn from_stored_cursor(stored: Value) -> Cursor {
 }
 
 impl SurrealStore {
+    /// Display ownership is explicit; an API view must not guess which of two
+    /// miners sharing a provider locator owns an opaque hashed source identity.
+    pub(crate) async fn record_source_miner(
+        &self,
+        source: SourceId,
+        miner: &str,
+        key: &str,
+    ) -> Result<()> {
+        self.checked_mining(
+            self.mining_query(
+                "UPDATE type::record('source', $source) SET miner = $miner, miner_key = $key",
+            )
+            .bind(("source", source.to_string()))
+            .bind(("miner", miner.to_string()))
+            .bind(("key", key.to_string()))
+            .await?,
+        )?;
+        Ok(())
+    }
+    /// Register before acquisition, not after filing: a crash before the first
+    /// document record must not leave a mined ID absent from reconciliation.
+    pub(crate) async fn register_source_document(
+        &self,
+        source: SourceId,
+        external_id: &str,
+    ) -> Result<()> {
+        super::retrying_on_conflict(|| async {
+            self.checked_mining(self.mining_query("UPSERT type::record('source_inventory', $key) SET source = $source, external_id = $external")
+                .bind(("key", SourceDocumentRecord::key(source, external_id))).bind(("source", source.to_string())).bind(("external", external_id.to_string())).await?)?;
+            Ok(())
+        }).await
+    }
+
+    /// Metadata-only keyset page. Merge pending registrations with historical
+    /// document records so upgrading does not require an inventory backfill.
+    pub(crate) async fn source_inventory_page(
+        &self,
+        source: SourceId,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<crate::domain::KnownDocument>> {
+        #[derive(Deserialize)]
+        struct Row {
+            external_id: String,
+            #[serde(default)]
+            revision: String,
+            #[serde(default)]
+            metadata: Value,
+            #[serde(default)]
+            retired_at: Option<DateTime<Utc>>,
+        }
+        let limit = limit.clamp(1, 256);
+        let mut response = self.db.query(
+            "SELECT external_id, retired_at FROM source_inventory WHERE source = $source AND ($after = NONE OR external_id > $after) ORDER BY external_id LIMIT $limit; \
+             SELECT external_id, revision, metadata, retired_at FROM source_document WHERE source = $source AND ($after = NONE OR external_id > $after) ORDER BY external_id LIMIT $limit"
+        ).bind(("source", source.to_string())).bind(("after", after.map(str::to_string))).bind(("limit", limit)).await?;
+        let pending: Vec<Row> = super::take_rows(&mut response, 0)?;
+        let documents: Vec<Row> = super::take_rows(&mut response, 1)?;
+        let mut merged = std::collections::BTreeMap::new();
+        for (rows, pending) in [(pending, true), (documents, false)] {
+            for row in rows {
+                merged.insert(
+                    row.external_id.clone(),
+                    crate::domain::KnownDocument {
+                        external_id: row.external_id,
+                        revision: row.revision,
+                        metadata: row.metadata,
+                        pending,
+                        retired: row.retired_at.is_some(),
+                    },
+                );
+            }
+        }
+        Ok(merged.into_values().take(limit).collect())
+    }
+
+    /// The inventory walk survives document limits independently of the provider cursor.
+    pub(crate) async fn source_reconciliation_state(
+        &self,
+        source: SourceId,
+    ) -> Result<Option<Value>> {
+        #[derive(Deserialize)]
+        struct Row {
+            state: Value,
+        }
+        let mut response = self
+            .db
+            .query("SELECT state FROM type::record('source_reconciliation', $source)")
+            .bind(("source", source.to_string()))
+            .await?;
+        let mut rows: Vec<Row> = super::take_rows(&mut response, 0)?;
+        Ok(rows.pop().map(|row| row.state))
+    }
+
+    /// Both progress positions commit together, always after the corresponding
+    /// document. A job checkpoint may lag this write safely after a crash.
+    pub(crate) async fn save_source_reconciliation_progress(
+        &self,
+        source: SourceId,
+        cursor: &Cursor,
+        state: &Value,
+        job: JobId,
+    ) -> Result<()> {
+        super::retrying_on_conflict(|| async {
+            self.checked_mining(self.mining_query(
+                "BEGIN TRANSACTION; \
+                 UPDATE type::record('source', $source) SET cursor = $cursor, last_job = $job, last_run_at = $at, updated_at = <datetime>$at; \
+                 UPSERT type::record('source_reconciliation', $source) SET state = $state; \
+                 COMMIT TRANSACTION;"
+            ).bind(("source", source.to_string())).bind(("cursor", to_stored_cursor(cursor))).bind(("state", state.clone())).bind(("job", job.to_string())).bind(("at", super::stored(Utc::now()))).await?)?;
+            Ok(())
+        }).await
+    }
+
+    /// Explicit retirement closes all current origin chunks, including a drawer
+    /// filed before a crash prevented its source_document record from being saved.
+    /// Returning None from read never calls this method.
+    pub(crate) async fn retire_source_document(
+        &self,
+        source: SourceId,
+        external_id: &str,
+        reason: &str,
+    ) -> Result<u64> {
+        super::retrying_on_conflict(|| async {
+            let mut response = self.checked_mining(self.mining_query(
+                "BEGIN TRANSACTION; \
+                 LET $closed = (UPDATE drawer SET valid_to = $at, updated_at = <datetime>$at, name = NONE \
+                     WHERE source.origin.source_id = $source AND source.origin.document = $external AND !valid_to RETURN record::id(id) AS id); \
+                 UPDATE type::record('source_document', $key) SET chunks = [], raw = NONE, retired_at = retired_at ?? $at, retirement_reason = $reason; \
+                 UPSERT type::record('source_inventory', $key) SET source = $source, external_id = $external, retired_at = retired_at ?? $at, retirement_reason = $reason; \
+                 RETURN array::len($closed); \
+                 COMMIT TRANSACTION;"
+            ).bind(("source", source.to_string())).bind(("external", external_id.to_string())).bind(("key", SourceDocumentRecord::key(source, external_id))).bind(("reason", reason.to_string())).bind(("at", super::stored(Utc::now()))).await?)?;
+            // The SDK includes COMMIT's empty result. RETURN is the preceding
+            // statement, irrespective of how many guard statements were prepended.
+            let count: Option<u64> = response.take(response.num_statements() - 2)?;
+            count.ok_or_else(|| Error::store_malformed("retirement returned no closed-chunk count"))
+        }).await
+    }
     /// Whether this source ID has ever been mined, even when its old package was removed.
     pub async fn has_mined_source_name(&self, name: &str) -> Result<bool> {
         let mut response = self
@@ -182,8 +327,8 @@ impl SurrealStore {
         job: JobId,
         at: DateTime<Utc>,
     ) -> Result<()> {
-        self.db
-            .query(
+        self.checked_mining(
+            self.mining_query(
                 "UPDATE type::record('source', $id) SET cursor = $cursor, last_job = $job, \
                  last_run_at = $at, updated_at = <datetime>$at",
             )
@@ -191,8 +336,8 @@ impl SurrealStore {
             .bind(("cursor", to_stored_cursor(cursor)))
             .bind(("job", job.to_string()))
             .bind(("at", super::stored(at)))
-            .await?
-            .check()?;
+            .await?,
+        )?;
         Ok(())
     }
 
@@ -216,12 +361,12 @@ impl SurrealStore {
     /// Store `document`, replacing whatever was recorded for the same document before.
     pub async fn save_source_document(&self, document: &SourceDocumentRecord) -> Result<()> {
         let chunks: Vec<ChunkRef> = document.chunks.clone();
-        self.db
-            .query(
-                "UPSERT type::record('source_document', $key) SET \
+        self.checked_mining(self.mining_query(
+                "BEGIN TRANSACTION; UPSERT type::record('source_document', $key) SET \
                  source = $source, external_id = $external_id, revision = $revision, raw = $raw, \
                  raw_hash = $raw_hash, title = $title, metadata = $metadata, occurred_at = $occurred_at, \
-                 chunks = $chunks, acquired_at = <datetime>$acquired_at, job = $job",
+                   chunks = $chunks, retired_at = $retired_at, retirement_reason = $retirement_reason, acquired_at = <datetime>$acquired_at, job = $job; \
+                 UPDATE type::record('source_inventory', $key) SET retired_at = $retired_at, retirement_reason = $retirement_reason; COMMIT TRANSACTION;",
             )
             .bind((
                 "key",
@@ -243,10 +388,11 @@ impl SurrealStore {
             ))
             .bind(("occurred_at", document.occurred_at.map(super::stored)))
             .bind(("chunks", super::bindable(&chunks)?))
+            .bind(("retired_at", document.retired_at.map(super::stored)))
+            .bind(("retirement_reason", document.retirement_reason.clone()))
             .bind(("acquired_at", super::stored(document.acquired_at)))
             .bind(("job", document.job.map(|job| job.to_string())))
-            .await?
-            .check()?;
+            .await?)?;
         Ok(())
     }
 
@@ -296,6 +442,8 @@ mod tests {
 
     fn document(source: SourceId, external_id: &str, revision: &str) -> SourceDocumentRecord {
         SourceDocumentRecord {
+            retired_at: None,
+            retirement_reason: None,
             source,
             external_id: external_id.into(),
             revision: revision.into(),
@@ -490,6 +638,46 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn inventory_pages_merge_pending_registrations_and_old_document_rows_without_bodies() {
+        let store = store().await;
+        let source = reference("/inventory").id();
+        store.register_source_document(source, "a").await.unwrap();
+        store.register_source_document(source, "b").await.unwrap();
+        store
+            .save_source_document(&document(source, "b", "revision-b"))
+            .await
+            .unwrap();
+        store
+            .save_source_document(&document(source, "c", "revision-c"))
+            .await
+            .unwrap();
+        let first = store.source_inventory_page(source, None, 2).await.unwrap();
+        assert_eq!(
+            first
+                .iter()
+                .map(|known| known.external_id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert!(first[0].pending);
+        assert!(!first[1].pending);
+        assert_eq!(first[1].revision, "revision-b");
+        let second = store
+            .source_inventory_page(source, Some("b"), 2)
+            .await
+            .unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].external_id, "c");
+        assert!(
+            store
+                .source_inventory_page(reference("/other").id(), None, 2)
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 }

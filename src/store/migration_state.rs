@@ -267,7 +267,10 @@ mod tests {
         // `SurrealStore`'s only field is private to this crate, but this
         // module is inside `store`, so it can still be constructed
         // directly — the point is deliberately skipping `sync_schema`.
-        let store = SurrealStore { db };
+        let store = SurrealStore {
+            db,
+            mining_fence: None,
+        };
         assert_eq!(
             store.migration_version().await.expect("version"),
             0,

@@ -1152,35 +1152,6 @@ impl AppServices {
                 Err(reason) => (MinerState::Unavailable, Some(reason)),
             }
         };
-        // The record the adapter keeps the cursor on: same source and the miner's locator (a directory's is
-        // canonicalised when it is mined, so a symlinked locator still finds it).
-        let record = miner
-            .locator
-            .as_deref()
-            .filter(|_| {
-                miner.mapping.is_none()
-                    && miner.wing.is_none()
-                    && miner.room.is_none()
-                    && miner
-                        .source_config
-                        .as_deref()
-                        .is_none_or(|id| id == miner.source)
-            })
-            .and_then(|locator| {
-                let canonical = (miner.source == "directory")
-                    .then(|| std::fs::canonicalize(locator).ok())
-                    .flatten()
-                    .map(|p| p.to_string_lossy().into_owned());
-                sources.iter().find(|s| {
-                    s.source == miner.source
-                        && (s.locator == locator
-                            || canonical.as_deref() == Some(s.locator.as_str()))
-                })
-            });
-        let documents = match record {
-            Some(record) => self.store.count_source_documents(record.id).await?,
-            None => 0,
-        };
         let config = self
             .source_config(
                 miner.source_config.as_deref().unwrap_or(&miner.source),
@@ -1188,6 +1159,58 @@ impl AppServices {
             )
             .await
             .ok();
+        let key = config
+            .as_ref()
+            .and_then(|config| miner_source_view_key(miner, config));
+        let reconciles = self
+            .store
+            .get_source_package(&miner.source)
+            .await?
+            .is_some_and(|package| package.manifest.compatibility.reconciliation.is_some());
+        // The record the adapter keeps the cursor on: same source and the miner's locator (a directory's is
+        // canonicalised when it is mined, so a symlinked locator still finds it).
+        let record = sources
+            .iter()
+            .filter(|source| {
+                source.source == miner.source
+                    && source.miner.as_deref() == Some(miner.name.as_str())
+                    && source.miner_key.as_ref() == key.as_ref()
+                    && key.is_some()
+            })
+            .max_by_key(|source| source.last_run_at)
+            .or_else(|| {
+                if reconciles {
+                    return None;
+                }
+                miner
+                    .locator
+                    .as_deref()
+                    .filter(|_| {
+                        miner.mapping.is_none()
+                            && miner.wing.is_none()
+                            && miner.room.is_none()
+                            && miner
+                                .source_config
+                                .as_deref()
+                                .is_none_or(|id| id == miner.source)
+                    })
+                    .and_then(|locator| {
+                        let canonical = (miner.source == "directory")
+                            .then(|| std::fs::canonicalize(locator).ok())
+                            .flatten()
+                            .map(|p| p.to_string_lossy().into_owned());
+                        sources.iter().find(|s| {
+                            s.miner.is_none()
+                                && s.source == miner.source
+                                && (s.locator == locator
+                                    || canonical.as_deref() == Some(s.locator.as_str()))
+                        })
+                    })
+            });
+        let documents = match record {
+            Some(record) => self.store.count_source_documents(record.id).await?,
+            None => 0,
+        };
         let requirement = self.oauth_requirement(&miner.source).await;
         let effective = miner.credential.as_ref().or_else(|| {
             config
@@ -1253,6 +1276,69 @@ impl AppServices {
             last_run_at: record.and_then(|r| r.last_run_at),
             documents,
         })
+    }
+}
+
+/// Status cannot execute a provider's identify call or guess the meaning of its
+/// options. Match an exact previously resolved request, rather than attributing
+/// another account, locator or destination's records to the current definition.
+fn miner_source_view_key(
+    miner: &MinerDefinition,
+    config: &crate::domain::SourceConfiguration,
+) -> Option<String> {
+    let mut options = config.options().ok()?;
+    options.extend(miner.options().ok()?);
+    crate::domain::MiningPreset {
+        miner: Some(miner.name.clone()),
+        configuration: Some(config.id.clone()),
+        room: miner.room.clone(),
+        mapping: miner.mapping.clone(),
+        ..Default::default()
+    }
+    .source_view_key(miner.locator.as_deref(), miner.wing.as_deref(), &options)
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_miner_view_key_tracks_its_exact_input_destination_and_configuration() {
+        let miner: MinerDefinition = serde_json::from_value(
+            json!({"name":"knowledge","source":"fixture","locator":"workspace-a","wing":"docs"}),
+        )
+        .unwrap();
+        let config: crate::domain::SourceConfiguration = serde_json::from_value(
+            json!({"id":"fixture","source":"fixture","options":{"account":"team-a"}}),
+        )
+        .unwrap();
+        let original = miner_source_view_key(&miner, &config);
+        assert!(original.is_some());
+        let mut changed = miner.clone();
+        changed.locator = Some("workspace-b".into());
+        assert_ne!(miner_source_view_key(&changed, &config), original);
+        changed = miner.clone();
+        changed.wing = Some("other".into());
+        assert_ne!(miner_source_view_key(&changed, &config), original);
+        changed = miner.clone();
+        changed.room = Some("other".into());
+        assert_ne!(miner_source_view_key(&changed, &config), original);
+        let mut other = config.clone();
+        other.id = "other-config".into();
+        assert_ne!(miner_source_view_key(&miner, &other), original);
+        other = config.clone();
+        other.options.insert("account".into(), json!("team-b"));
+        assert_ne!(miner_source_view_key(&miner, &other), original);
+        assert_eq!(
+            miner_source_view_key(&miner, &config),
+            original,
+            "reverting must select the earlier state rather than the most recently mined different destination"
+        );
+        changed = miner.clone();
+        changed.max_documents = Some(1);
+        changed.enabled = false;
+        assert_eq!(miner_source_view_key(&changed, &config), original);
     }
 }
 

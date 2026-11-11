@@ -69,9 +69,9 @@ pub use search::{
 };
 pub use secret::Secret;
 pub use source::{
-    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, OptionBreadth, OptionKind,
-    OptionSpec, Options, RawDocument, Segment, SourceCapabilities, SourceDocumentRecord,
-    SourceRecord, SourceRef, is_option_key, parse_since, unknown_option,
+    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, KnownDocument, OptionBreadth,
+    OptionKind, OptionSpec, Options, RawDocument, Segment, SourceCapabilities,
+    SourceDocumentRecord, SourceRecord, SourceRef, is_option_key, parse_since, unknown_option,
 };
 pub use source_config::{SourceConfiguration, validate_source_configs};
 pub use source_index::{

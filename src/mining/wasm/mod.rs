@@ -10,6 +10,7 @@
 
 mod host;
 mod process;
+mod reconciliation;
 
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
@@ -90,6 +91,8 @@ struct Inner {
     tokens: Option<Arc<dyn AccessTokens>>,
     engine: &'static Engine,
     pre: SourcePre<HostState>,
+    raw_pre: wasmtime::component::InstancePre<HostState>,
+    reconciliation: Option<reconciliation::Extension>,
     memory_bytes: usize,
     timeout: Duration,
     /// Asked of the component once at load: it is constant, and the contract returns `&str`.
@@ -177,14 +180,19 @@ impl WasmAdapter {
             .map_err(|e| incompatible(format!("{e:#}")))?;
         Source::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |state| state)
             .map_err(|e| incompatible(format!("{e:#}")))?;
-        let pre = linker
+        let raw_pre = linker
             .instantiate_pre(&component)
-            .and_then(SourcePre::new)
-            .map_err(|e| {
-                incompatible(format!(
-                    "it does not fit the `memcastle:source` contract this MemCastle implements: {e:#}"
-                ))
-            })?;
+            .map_err(|error| incompatible(format!("cannot link source: {error:#}")))?;
+        let reconciliation = reconciliation::Extension::load(
+            &component,
+            manifest.compatibility.reconciliation.as_deref(),
+        )
+        .map_err(incompatible)?;
+        let pre = SourcePre::new(raw_pre.clone()).map_err(|e| {
+            incompatible(format!(
+                "it does not fit the `memcastle:source` contract this MemCastle implements: {e:#}"
+            ))
+        })?;
 
         // What the source asks for, never more than the host allows.
         let ceiling_mib = u64::from(mining.source_memory_mib);
@@ -211,6 +219,8 @@ impl WasmAdapter {
             tokens,
             engine,
             pre,
+            raw_pre,
+            reconciliation,
             memory_bytes: usize::try_from(memory_mib * 1024 * 1024).unwrap_or(usize::MAX),
             timeout,
             default_room: String::new(),
@@ -218,6 +228,7 @@ impl WasmAdapter {
         inner.default_room = inner.call(false, None, |store, guest| {
             guest.call_default_room(store).map(Ok)
         })?;
+        inner.validate_reconciliation()?;
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -249,6 +260,23 @@ impl Inner {
         f: impl FnOnce(
             &mut Store<HostState>,
             &host::exports::memcastle::source::adapter::Guest,
+        ) -> wasmtime::Result<std::result::Result<R, wit::SourceError>>,
+    ) -> Result<R> {
+        self.invoke(granted, locator, |store| {
+            self.pre
+                .instantiate(&mut *store)
+                .and_then(|instance| f(store, instance.memcastle_source_adapter()))
+        })
+    }
+
+    /// Optional interfaces share precisely the same sandbox, credential grants,
+    /// time limits and failure mapping as the original six adapter functions.
+    fn invoke<R>(
+        &self,
+        granted: bool,
+        locator: Option<&str>,
+        f: impl FnOnce(
+            &mut Store<HostState>,
         ) -> wasmtime::Result<std::result::Result<R, wit::SourceError>>,
     ) -> Result<R> {
         let none = Permissions::default();
@@ -289,10 +317,7 @@ impl Inner {
         let ticks = (self.timeout.as_millis() / EPOCH_TICK.as_millis()).max(1) + 1;
         store.set_epoch_deadline(u64::try_from(ticks).unwrap_or(u64::MAX));
 
-        let outcome = self
-            .pre
-            .instantiate(&mut store)
-            .and_then(|instance| f(&mut store, instance.memcastle_source_adapter()));
+        let outcome = f(&mut store);
         let denied = store.data().denied.clone();
         let credential = store.data_mut().credential_failure.take();
         let failure = match outcome {
@@ -401,6 +426,37 @@ fn raw_to_wit(raw: &RawDocument) -> wit::RawDocument {
 }
 
 impl SourceAdapter for WasmAdapter {
+    fn reconciles(&self) -> bool {
+        self.inner.reconciliation.is_some()
+    }
+
+    async fn reconcile(
+        &self,
+        source: &SourceRef,
+        known: &super::adapter::KnownDocument,
+    ) -> Result<super::adapter::Reconciliation> {
+        let inner = self.inner.clone();
+        let source = source.clone();
+        let known = known.clone();
+        run_blocking(move || inner.reconcile_document(&source, &known)).await
+    }
+
+    async fn acquire(
+        &self,
+        source: &SourceRef,
+        candidate: &Candidate,
+    ) -> Result<super::adapter::Acquisition> {
+        if !self.reconciles() {
+            return Ok(self.read(source, candidate).await?.map_or(
+                super::adapter::Acquisition::Skip,
+                super::adapter::Acquisition::Document,
+            ));
+        }
+        let inner = self.inner.clone();
+        let source = source.clone();
+        let candidate = candidate.clone();
+        run_blocking(move || inner.acquire_document(&source, &candidate)).await
+    }
     fn name(&self) -> &str {
         &self.inner.name
     }
@@ -453,6 +509,12 @@ impl SourceAdapter for WasmAdapter {
         cursor: &Cursor,
         limit: usize,
     ) -> Result<Discovery> {
+        if self.reconciles() {
+            let inner = self.inner.clone();
+            let source = source.clone();
+            let cursor = cursor.clone();
+            return run_blocking(move || inner.discover_reconciled(&source, &cursor, limit)).await;
+        }
         let inner = self.inner.clone();
         let source = source.clone();
         let cursor = cursor.to_string();
@@ -483,6 +545,7 @@ impl SourceAdapter for WasmAdapter {
                 candidates,
                 exhausted: found.exhausted,
                 filtered: 0,
+                cursor_after: None,
             })
         })
         .await

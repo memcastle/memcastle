@@ -104,7 +104,8 @@ interface host {
     access-token: func() -> result<string, string>;
 
     /// The selected env/file credential for this mining job, when `[permissions] credential = true` was consented.
-    /// Only identify, discover and read may request it. It is not placed in WASI's environment or a host-run process.
+    /// Only acquisition calls (identify, discover, read, and the extension's reconcile/acquire) may request it.
+    /// Normalize never receives it. It is not placed in WASI's environment or a host-run process.
     source-credential: func() -> result<string, string>;
 }
 
@@ -137,4 +138,33 @@ interface adapter {
 world source {
     import host;
     export adapter;
+}
+
+// Optional extension, selected by compatibility.reconciliation = "0.1.0".
+// The original source world and its six functions remain unchanged.
+interface reconciliation {
+    use types.{source-ref, candidate, raw-document, source-error};
+    record known-document {
+        pending: bool,
+        retired: bool,
+        external-id: string,
+        revision: string,
+        metadata: string,
+    }
+    variant decision { unchanged, refresh(string), retire(string) }
+    variant acquisition { document(raw-document), skip, retire(string) }
+    record discovery-page {
+        candidates: list<candidate>,
+        exhausted: bool,
+        cursor-after: option<string>,
+    }
+    reconcile: func(source: source-ref, known: known-document) -> result<decision, source-error>;
+    discover: func(source: source-ref, cursor: string, limit: u32) -> result<discovery-page, source-error>;
+    acquire: func(source: source-ref, candidate: candidate) -> result<acquisition, source-error>;
+}
+
+world reconciled-source {
+    import host;
+    export adapter;
+    export reconciliation;
 }

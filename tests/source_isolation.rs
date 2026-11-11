@@ -184,6 +184,10 @@ fn the_pipeline_is_the_only_writer_of_source_records() {
                 "save_source_cursor",
                 "save_source_document",
                 "get_or_create_source",
+                "register_source_document",
+                "save_source_reconciliation_progress",
+                "retire_source_document",
+                "record_source_miner",
             ] {
                 assert!(
                     !source.contains(writer),

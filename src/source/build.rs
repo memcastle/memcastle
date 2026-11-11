@@ -154,14 +154,26 @@ impl Project {
         };
         let component = self.read_component()?;
         let manifest = self.manifest.clone();
+        let fixture_credential = test
+            .fixture_credential
+            .then(|| crate::domain::Secret::new("memcastle-source-test-credential"));
         let mining = mining.clone();
-        let adapter =
-            tokio::task::spawn_blocking(move || WasmAdapter::load(&manifest, &component, &mining))
-                .await
-                .map_err(|e| Error::SourceFailed {
-                    name: self.manifest.source.name.clone(),
-                    message: e.to_string(),
-                })??;
+        let adapter = tokio::task::spawn_blocking(move || {
+            WasmAdapter::load_with_credential(
+                &manifest,
+                &component,
+                &mining,
+                None,
+                None,
+                fixture_credential,
+                None,
+            )
+        })
+        .await
+        .map_err(|e| Error::SourceFailed {
+            name: self.manifest.source.name.clone(),
+            message: e.to_string(),
+        })??;
         conformance::run_all(&adapter, &self.dir.join(&test.fixtures)).await
     }
 

@@ -33,7 +33,11 @@ pub struct Case {
     /// What it checks, in a sentence.
     pub description: String,
     /// The tree to mine, relative to the case's directory.
+    #[serde(default)]
     pub locator: String,
+    /// An API locator passed verbatim; no local directory is required.
+    #[serde(default)]
+    pub opaque_locator: Option<String>,
     /// The options of the run (`since`, ...), when the case is about one.
     #[serde(default)]
     pub options: Options,
@@ -108,7 +112,11 @@ pub fn load_cases(dir: &Path) -> Result<Vec<(Case, PathBuf)>> {
         let case: Case = serde_json::from_str(&text).map_err(|e| Error::SourceManifestInvalid {
             message: format!("{}: {e}", file.display()),
         })?;
-        let tree = entry.path().join(&case.locator);
+        let tree = if case.opaque_locator.is_some() {
+            entry.path()
+        } else {
+            entry.path().join(&case.locator)
+        };
         let tree =
             std::fs::canonicalize(&tree).map_err(|e| Error::io(tree.display().to_string(), e))?;
         cases.push((case, tree));
@@ -154,7 +162,10 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
         fail("the description is more than one line".to_string());
     }
 
-    let locator = tree.display().to_string();
+    let locator = case
+        .opaque_locator
+        .clone()
+        .unwrap_or_else(|| tree.display().to_string());
     let source = match adapter.identify(Some(&locator), &case.options) {
         Ok(source) => source,
         Err(error) => {
@@ -206,9 +217,12 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
 
     let mut produced = Vec::new();
     for candidate in &candidates {
-        let first = match adapter.read(&source, candidate).await {
-            Ok(Some(raw)) => raw,
-            Ok(None) => continue,
+        let first = match adapter.acquire(&source, candidate).await {
+            Ok(crate::mining::adapter::Acquisition::Document(raw)) => raw,
+            Ok(
+                crate::mining::adapter::Acquisition::Skip
+                | crate::mining::adapter::Acquisition::Retire(_),
+            ) => continue,
             Err(error) => {
                 fail(format!("read({}) failed: {error}", candidate.external_id));
                 continue;
@@ -220,8 +234,9 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
                 candidate.external_id, first.external_id
             ));
         }
-        match adapter.read(&source, candidate).await {
-            Ok(Some(second)) if second.revision == first.revision => {}
+        match adapter.acquire(&source, candidate).await {
+            Ok(crate::mining::adapter::Acquisition::Document(second))
+                if second.revision == first.revision => {}
             _ => fail(format!(
                 "reading {} twice gave different revisions",
                 candidate.external_id
@@ -305,9 +320,14 @@ async fn discover_all<A: SourceAdapter>(
                 ));
             }
         }
+        let previous = cursor.clone();
         if let Some(last) = page.candidates.last() {
             cursor = last.cursor_after.clone();
-        } else if !page.exhausted {
+        }
+        if let Some(next) = &page.cursor_after {
+            cursor = next.clone();
+        }
+        if page.candidates.is_empty() && !page.exhausted && cursor == previous {
             fail("a page was empty but not exhausted, so paging cannot make progress".to_string());
             return None;
         }
@@ -369,6 +389,7 @@ mod tests {
 
     fn case(dir: &Path, expected_ids: &[&str]) -> Case {
         Case {
+            opaque_locator: None,
             name: "t".into(),
             description: "t".into(),
             locator: dir.display().to_string(),
@@ -541,6 +562,7 @@ mod tests {
                 candidates: vec![],
                 exhausted: true,
                 filtered: 0,
+                cursor_after: None,
             };
             match self.fault {
                 Fault::AcceptsAForeignCursor if foreign => Ok(none),
@@ -555,6 +577,7 @@ mod tests {
                     candidates: vec![],
                     exhausted: false,
                     filtered: 0,
+                    cursor_after: None,
                 }),
                 Fault::PageOverTheLimit if !foreign => {
                     self.inner.discover(source, cursor, limit + 5).await
@@ -573,6 +596,7 @@ mod tests {
                     }],
                     exhausted: false,
                     filtered: 0,
+                    cursor_after: None,
                 }),
                 Fault::TailNotEmpty if !foreign && !cursor.is_null() => {
                     Ok(crate::mining::adapter::Discovery {
@@ -583,6 +607,7 @@ mod tests {
                         }],
                         exhausted: false,
                         filtered: 0,
+                        cursor_after: None,
                     })
                 }
                 _ => self.inner.discover(source, cursor, limit).await,

@@ -201,3 +201,6 @@ The history is the value.
 - [ADR-051](051-embedding-provider-modules.md) — independently selectable embedding modules run as bounded Wasm
   components under the existing plugin lifecycle and named embedding profiles
   (builds on ADR-049 and ADR-050)
+- [ADR-053](053-source-reconciliation.md) — an optional source extension uses Core-owned inventory, explicit retirement
+  and progress-only checkpoints; database-backed source admission and transactional fencing serialize mining writers
+  (builds on ADR-006, ADR-023, ADR-026 and ADR-037)
