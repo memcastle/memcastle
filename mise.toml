@@ -347,9 +347,11 @@ run = "packaging/integrations/build.sh target/bundled-integrations"
 
 [tasks."web:check"]
 description = "Typecheck, test and build the web UI, then check its package and serve it from a real daemon"
-# bun installs and runs the scripts and node is what vite and vue-tsc run on; both are declared here and not in `[tools]`
-# for the same reason as `integrations:check`.
-tools = { bun = "1", node = "24" }
+# Bun runs the package scripts; Node runs Vite and vue-tsc. Keep these task-specific
+# requests aligned with the versions recorded in mise.lock.
+# Task tool setup can resolve prefixes again; exact requests keep it on the
+# existing lockfile versions instead of probing not-yet-published platform builds.
+tools = { bun = "1.4.4", node = "24.22.2" }
 # The suite and the bundle test start a real `memcastle serve`, so the debug binary must exist and be current.
 depends = ["build"]
 run = """
@@ -375,7 +377,7 @@ bun run test:daemon
 [tasks."web:build"]
 description = "Build the web UI into web/dist, which is all development mode needs"
 # After this, `memcastle serve --assets-dir "$PWD"` with `web.enable` serves the dashboard as built in this checkout.
-tools = { bun = "1", node = "24" }
+tools = { bun = "1.4.4", node = "24.22.2" }
 sources = [
   "packaging/web/build.sh",
   "web/package.json",
@@ -394,7 +396,7 @@ run = "packaging/web/build.sh"
 [tasks."web:dev"]
 description = "Run the dashboard's dev server (hot reload) against the running daemon"
 # The page is the dev server's and `/api` is proxied to the daemon, found through its registry file or MEMCASTLE_URL.
-tools = { bun = "1", node = "24" }
+tools = { bun = "1.4.4", node = "24.22.2" }
 dir = "web"
 run = "bun install --frozen-lockfile && bun run dev"
 
@@ -402,7 +404,7 @@ run = "bun install --frozen-lockfile && bun run dev"
 description = "Lay out the dashboard that ships with releases in target/bundled-web"
 # The script `publish-release.yaml` runs: what a release bundles is what a developer can build and serve from
 # (`memcastle serve --assets-dir target/bundled-web`).
-tools = { bun = "1", node = "24" }
+tools = { bun = "1.4.4", node = "24.22.2" }
 sources = [
   "packaging/web/build.sh",
   "web/package.json",
