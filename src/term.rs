@@ -69,76 +69,6 @@ pub fn terminal_json_color() -> bool {
     stdout_is_terminal() && stdout_color()
 }
 
-/// Highlight serialized JSON without touching its bytes or confusing an escaped quote for a delimiter.
-#[must_use]
-pub fn highlight_json(text: &str, painter: Painter) -> String {
-    if !painter.is_colored() {
-        return text.to_owned();
-    }
-    let bytes = text.as_bytes();
-    let mut output = String::with_capacity(text.len());
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let start = offset;
-        let style = match bytes[offset] {
-            b'"' => {
-                offset += 1;
-                while offset < bytes.len() {
-                    if bytes[offset] == b'\\' {
-                        offset += 2;
-                    } else if bytes[offset] == b'"' {
-                        offset += 1;
-                        break;
-                    } else {
-                        offset += 1;
-                    }
-                }
-                let is_key = bytes[offset..]
-                    .iter()
-                    .copied()
-                    .find(|byte| !byte.is_ascii_whitespace())
-                    == Some(b':');
-                if is_key {
-                    Style::new().cyan()
-                } else {
-                    Style::new().green()
-                }
-            }
-            b'-' | b'0'..=b'9' => {
-                offset += 1;
-                while offset < bytes.len()
-                    && matches!(
-                        bytes[offset],
-                        b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
-                    )
-                {
-                    offset += 1;
-                }
-                Style::new().yellow()
-            }
-            b't' | b'f' | b'n' => {
-                offset += 1;
-                while offset < bytes.len() && bytes[offset].is_ascii_alphabetic() {
-                    offset += 1;
-                }
-                Style::new().magenta()
-            }
-            b'{' | b'}' | b'[' | b']' | b':' | b',' => {
-                offset += 1;
-                Style::new().dim()
-            }
-            _ => {
-                // An unstyled Unicode character is still a whole UTF-8 scalar, not one byte of a slice.
-                offset += text[offset..].chars().next().unwrap().len_utf8();
-                output.push_str(&text[start..offset]);
-                continue;
-            }
-        };
-        output.push_str(&painter.paint(style, &text[start..offset]));
-    }
-    output
-}
-
 /// Whether `--json` was given. Set once at startup; see [`set_json`].
 static JSON_FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
@@ -560,23 +490,6 @@ mod tests {
         assert!(color_for_env(true, false, None, Some("xterm")));
         assert!(!is_pretty(true, true));
         assert!(!is_pretty(false, false));
-    }
-
-    #[test]
-    fn highlighted_json_keeps_the_original_data_and_escapes() {
-        let text = serde_json::to_string_pretty(&serde_json::json!({
-            "key\"with\\backslash": ["unicode é 😀 and \"escaped\"", -12.5e+3, true, false, null, {"a": 0}]
-        })).unwrap();
-        assert_eq!(highlight_json(&text, Painter::PLAIN), text);
-        let highlighted = highlight_json(&text, Painter::forced());
-        assert!(highlighted.contains('\u{1b}'));
-        assert!(highlighted.contains("é 😀"));
-        assert!(text.contains("true"));
-        assert_eq!(console::strip_ansi_codes(&highlighted), text);
-        assert_eq!(
-            console::strip_ansi_codes(&highlight_json("-12.5e+3", Painter::forced())),
-            "-12.5e+3"
-        );
     }
 
     #[test]

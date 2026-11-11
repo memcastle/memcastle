@@ -241,7 +241,7 @@ async fn a_generated_token_survives_a_restart_and_then_gates_every_cli_command()
     let ok = sandbox.run(Some(&token), &["status"]).await;
     assert!(ok.status.success(), "{}", text(&ok.stderr));
     assert!(
-        text(&ok.stdout).contains("\"auth_enabled\": true"),
+        text(&ok.stdout).contains("\"auth_enabled\":true"),
         "{}",
         text(&ok.stdout)
     );
@@ -281,7 +281,7 @@ async fn a_generated_token_survives_a_restart_and_then_gates_every_cli_command()
     // 6. Revocation ends the token at once.
     let revoked = sandbox.run(Some(&rotated), &["auth", "revoke"]).await;
     assert!(revoked.status.success(), "{}", text(&revoked.stderr));
-    assert!(text(&revoked.stdout).contains("\"revoked\": true"));
+    assert!(text(&revoked.stdout).contains("\"revoked\":true"));
     assert!(
         !sandbox
             .run(Some(&rotated), &["status"])
@@ -359,7 +359,7 @@ async fn an_environment_secret_is_accepted_and_written_nowhere() {
         !text(&with_secret.stdout).contains(SECRET),
         "status must never print the secret"
     );
-    assert!(text(&with_secret.stdout).contains("\"auth_enabled\": true"));
+    assert!(text(&with_secret.stdout).contains("\"auth_enabled\":true"));
 
     sandbox.stop(&mut daemon, Some(SECRET)).await;
 

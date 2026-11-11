@@ -813,8 +813,12 @@ async fn every_command_with_a_data_answer_prints_json_with_no_escape_codes_in_a_
             .expect("run memcastle");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(!stdout.contains('\u{1b}'), "{args:?}: {stdout:?}");
-        serde_json::from_str::<serde_json::Value>(&stdout)
+        let value = serde_json::from_str::<serde_json::Value>(&stdout)
             .unwrap_or_else(|error| panic!("{args:?} is not JSON ({error}): {stdout}"));
+        assert_eq!(
+            stdout,
+            format!("{}\n", serde_json::to_string(&value).unwrap())
+        );
     }
 
     // `mine` is the command that started this: it used to be the one that printed JSON in a terminal.

@@ -483,18 +483,28 @@ fn cmd_completions(args: &CompletionsArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Print `value` as pretty JSON, highlighting only on a coloured terminal — or fail loudly. A serialization error used
+/// Print destination-aware JSON — or fail loudly. A serialization error used
 /// to print an empty line and exit 0, which a script reads as "no results".
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
     Progress::clear();
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|source| Error::serialization("the command's output", source))?;
-    if term::terminal_json_color() {
-        println!("{}", term::highlight_json(&text, Painter::for_stdout()));
+    // Explicit modes retain our presence-based NO_COLOR and FORCE_COLOR precedence;
+    // the library independently guarantees that pipes never receive ANSI styles.
+    let color = if term::terminal_json_color() {
+        console_json::ColorMode::Always
     } else {
-        println!("{text}");
-    }
-    Ok(())
+        console_json::ColorMode::Never
+    };
+    console_json::write_json_stdout_with_options(
+        value,
+        console_json::JsonOptions::default().color(color),
+    )
+    .map_err(|error| match error {
+        console_json::Error::Render(source) => Error::serialization("the command's output", source),
+        // The library's error enum is extensible; future failures retain the CLI diagnostic too.
+        other => Error::serialization("the command's output", other),
+    })?;
+    use std::io::Write;
+    writeln!(std::io::stdout()).map_err(|source| Error::io("standard output", source))
 }
 
 /// Report on the daemon, and exit with what the report means: 0 healthy,
@@ -1455,17 +1465,11 @@ async fn cmd_source(
             match command {
                 cli::SourceConfigCommand::List => {
                     let views = daemon.list_source_configs().await?;
-                    print_for_terminal_or_json(
-                        |_, _| serde_json::to_string_pretty(&views).unwrap_or_default(),
-                        &views,
-                    )
+                    print_json(&views)
                 }
                 cli::SourceConfigCommand::Get { id } => {
                     let view = daemon.show_source_config(&id).await?;
-                    print_for_terminal_or_json(
-                        |_, _| serde_json::to_string_pretty(&view).unwrap_or_default(),
-                        &view,
-                    )
+                    print_json(&view)
                 }
                 cli::SourceConfigCommand::Auth { id } => cmd_source_config_auth(config, &id).await,
                 cli::SourceConfigCommand::Set {
@@ -1502,10 +1506,7 @@ async fn cmd_source(
                             credential_oauth.then_some(memcastle::domain::CredentialRef::Oauth)
                         });
                     let view = client(config, None).set_source_config(&id, &patch).await?;
-                    print_for_terminal_or_json(
-                        |_, _| serde_json::to_string_pretty(&view).unwrap_or_default(),
-                        &view,
-                    )
+                    print_json(&view)
                 }
                 cli::SourceConfigCommand::Remove { id } => {
                     client(config, None).remove_source_config(&id).await?;
@@ -2436,14 +2437,17 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
         !term::pretty(),
         Painter::for_stdout(),
     )?;
-    if !term::pretty() && term::terminal_json_color() {
-        Progress::clear();
-        println!("{}", term::highlight_json(&text, Painter::for_stdout()));
-    } else {
-        Progress::clear();
+    Progress::clear();
+    if term::pretty() {
         println!("{text}");
+        Ok(())
+    } else {
+        // The local integration API already serialized its report: passing the string
+        // directly would quote the document instead of rendering the report's data.
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|source| Error::serialization("the command's output", source))?;
+        print_json(&value)
     }
-    Ok(())
 }
 
 /// Print a job that was just submitted: its card and how to follow it on a terminal, the job as JSON otherwise.
@@ -2922,6 +2926,32 @@ fn init_tracing(filter: String, format: memcastle::config::LogFormat) {
 mod progress_tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn a_json_serialization_failure_retains_the_command_output_diagnostic() {
+        struct Fails;
+        impl serde::Serialize for Fails {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                _: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom(
+                    "deliberate serialization failure",
+                ))
+            }
+        }
+        let error = print_json(&Fails).unwrap_err();
+        assert!(matches!(error, Error::Serialization { .. }));
+        assert!(
+            error.to_string().contains("the command's output"),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("deliberate serialization failure")
+        );
+    }
 
     #[test]
     fn every_wait_is_named_for_the_action_and_interactive_consoles_stay_undecorated() {

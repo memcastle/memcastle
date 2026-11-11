@@ -63,8 +63,17 @@ fn machine() -> Machine {
 }
 
 fn json(output: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(output)
-        .unwrap_or_else(|e| panic!("not JSON ({e}): {}", String::from_utf8_lossy(output)))
+    let value: serde_json::Value = serde_json::from_slice(output)
+        .unwrap_or_else(|e| panic!("not JSON ({e}): {}", String::from_utf8_lossy(output)));
+    assert_eq!(
+        output,
+        format!("{}\n", serde_json::to_string(&value).unwrap()).as_bytes()
+    );
+    assert!(
+        value.is_object(),
+        "an integration report must not be a quoted document"
+    );
+    value
 }
 
 #[test]
@@ -175,14 +184,14 @@ fn the_lifecycle_installs_updates_and_removes_every_agent_from_a_development_che
         .args(["integration", "update", "pi", "--assets-dir", assets])
         .assert()
         .success()
-        .stdout(contains("\"action\": \"updated\""));
+        .stdout(contains("\"action\":\"updated\""));
 
     machine
         .memcastle()
         .args(["integration", "remove", "pi"])
         .assert()
         .success()
-        .stdout(contains("\"action\": \"removed\""));
+        .stdout(contains("\"action\":\"removed\""));
     machine
         .memcastle()
         .args(["integration", "remove", "opencode"])
