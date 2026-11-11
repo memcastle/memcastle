@@ -54,6 +54,14 @@
       "modules": [
         { "id": "slack", "type": "source" }
       ]
+    },
+    {
+      "id": "notion",
+      "description": "Notion content source",
+      "repository": "memcastle/memcastle-notion",
+      "modules": [
+        { "id": "notion", "type": "source" }
+      ]
     }
   ]
 }
