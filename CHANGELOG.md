@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/memcastle/memcastle/compare/0.5.2..0.6.0) - 2026-11-11
+
+### 💫 Features
+
+- **docs** Generate a browsable plugin catalogue ([#380](https://github.com/memcastle/memcastle/issues/380)) - ([5772b58](https://github.com/memcastle/memcastle/commit/5772b582a7445b0099925b3fea09f853f79011a3))
+- **mining** Add durable source reconciliation ([#378](https://github.com/memcastle/memcastle/issues/378)) - ([c311d09](https://github.com/memcastle/memcastle/commit/c311d09d839afea2e652e8f31e088ebc9792a0f5))
+- **plugins** Add Notion to the plugin registry ([#377](https://github.com/memcastle/memcastle/issues/377)) - ([1f60482](https://github.com/memcastle/memcastle/commit/1f60482d8a1b014b19396b392655291c8a0eab16))
+
+### 🐛 Bug Fixes
+
+- **release** Install Bun before packaging the web UI ([#362](https://github.com/memcastle/memcastle/issues/362)) - ([7961732](https://github.com/memcastle/memcastle/commit/796173201358aa4422560ea7bd35bdce1c0e8fc3))
+
+### 🏗️ Build
+
+- **deps** Update mise.lock - ([6bad0d0](https://github.com/memcastle/memcastle/commit/6bad0d005cdeb3f300947265bdb781e1615ac1a1))
+- **deps** Bump surrealdb from 3.3.3 to 3.3.4 ([#372](https://github.com/memcastle/memcastle/issues/372)) - ([3ddff58](https://github.com/memcastle/memcastle/commit/3ddff58081812dcefdb3370bacf359859753d393))
+- **deps** Bump the web-dependencies group in /web with 6 updates ([#371](https://github.com/memcastle/memcastle/issues/371)) - ([b24e621](https://github.com/memcastle/memcastle/commit/b24e6216cad70c1195a0d83961d102d6d459977e))
+- **deps** Bump the rust-dependencies group with 7 updates ([#367](https://github.com/memcastle/memcastle/issues/367)) - ([f3ecbdb](https://github.com/memcastle/memcastle/commit/f3ecbdbf8bdeede283947695ad941dd2ef157758))
+- **deps** Bump the web-dependencies group in /web with 4 updates ([#364](https://github.com/memcastle/memcastle/issues/364)) - ([9cb887c](https://github.com/memcastle/memcastle/commit/9cb887c8241fbfc0578e102817eb41902279973b))
+- **deps** Bump the rust-dependencies group with 4 updates ([#365](https://github.com/memcastle/memcastle/issues/365)) - ([ed403eb](https://github.com/memcastle/memcastle/commit/ed403eba916597d9859344a07e353152e8c86006))
+- **deps-dev** Bump the web-dependencies group in /web with 2 updates ([#366](https://github.com/memcastle/memcastle/issues/366)) - ([a1743db](https://github.com/memcastle/memcastle/commit/a1743db5a5ba86fa5749d1fe1d7db51faae88049))
+- **template** Update rust template and enable Mr Boxington - ([d26347f](https://github.com/memcastle/memcastle/commit/d26347f5d31907884c9e241f80006c94d2edf206))
+
+### Tpl
+
+- Render rust at main - ([528f693](https://github.com/memcastle/memcastle/commit/528f693f992121521bf45274f448db8d8493879e))
+
 ## [0.5.2](https://github.com/memcastle/memcastle/compare/0.5.1..0.5.2) - 2026-10-21
 
 ### 🐛 Bug Fixes
