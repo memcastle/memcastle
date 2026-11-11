@@ -974,6 +974,7 @@ mod tests {
                 },
                 exhausted: true,
                 filtered: 0,
+                cursor_after: None,
             })
         }
 

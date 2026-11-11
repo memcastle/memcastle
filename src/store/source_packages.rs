@@ -167,6 +167,7 @@ mod tests {
                     repository: None,
                 },
                 compatibility: Compatibility {
+                    reconciliation: None,
                     contract: "0.4".into(),
                     memcastle: ">=0.1".into(),
                 },

@@ -36,8 +36,11 @@ use crate::events::{Action, Event};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
 
-use super::adapter::SourceAdapter;
+use super::adapter::{Acquisition, Discovery, Reconciliation, SourceAdapter};
 use super::chunk::chunk;
+
+#[cfg(test)]
+mod reconciliation_tests;
 
 /// What one mining run was asked to do.
 pub struct Request<'a> {
@@ -83,6 +86,52 @@ pub struct Stats {
     pub similar: u64,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ScanPhase {
+    #[default]
+    Inventory,
+    Discovery,
+    Complete,
+}
+
+/// Core-owned progress is separate from the adapter cursor: --full can reset
+/// discovery without discarding the IDs required to reconcile inaccessible content.
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct Scan {
+    options: String,
+    phase: ScanPhase,
+    after: Option<String>,
+}
+
+async fn save_progress(
+    store: &SurrealStore,
+    source: crate::domain::SourceId,
+    cursor: &crate::domain::Cursor,
+    scan: Option<&Scan>,
+    job: crate::domain::JobId,
+) -> Result<()> {
+    match scan {
+        Some(scan) => {
+            store
+                .save_source_reconciliation_progress(
+                    source,
+                    cursor,
+                    &serde_json::to_value(scan).map_err(|error| {
+                        crate::Error::serialization("reconciliation progress", error)
+                    })?,
+                    job,
+                )
+                .await
+        }
+        None => {
+            store
+                .save_source_cursor(source, cursor, job, Utc::now())
+                .await
+        }
+    }
+}
+
 /// Mine one source with `adapter`, checking in with `ctx` between documents so the job can be paused, resumed or
 /// cancelled.
 ///
@@ -96,13 +145,13 @@ pub async fn mine<A: SourceAdapter>(
     request: Request<'_>,
 ) -> Result<JobOutcome> {
     let store = ctx.store();
-    let settings = ctx.mining();
     let reference = adapter.identify(request.locator, request.options)?;
     let default_wing = adapter.default_wing(&reference);
     let wing_name = request.wing.unwrap_or(&default_wing).to_string();
     let mut storage_reference = reference.clone();
     if let Some(preset) = request.preset
-        && (preset.room.is_some()
+        && ((adapter.reconciles() && preset.miner.is_some())
+            || preset.room.is_some()
             || (preset.miner.is_some() && wing_name != default_wing)
             || preset.mapping.is_some()
             || preset
@@ -112,20 +161,23 @@ pub async fn mine<A: SourceAdapter>(
     {
         // The adapter keeps its own identity for acquisition; the palace gives different presets independent
         // document records/cursors, so a second destination cannot be mistaken for already-filed content.
-        storage_reference.account = Some(format!(
-            "preset:{}",
-            sha256_hex(
-                format!(
-                    "{}\0{}\0{}\0{}\0{}",
-                    reference.account.as_deref().unwrap_or(""),
-                    preset.configuration.as_deref().unwrap_or(""),
-                    wing_name,
-                    preset.room.as_deref().unwrap_or(""),
-                    serde_json::to_string(&preset.mapping).unwrap_or_default()
-                )
-                .as_bytes()
-            )
-        ));
+        let mut identity = format!(
+            "{}\0{}\0{}\0{}\0{}",
+            reference.account.as_deref().unwrap_or(""),
+            preset.configuration.as_deref().unwrap_or(""),
+            wing_name,
+            preset.room.as_deref().unwrap_or(""),
+            serde_json::to_string(&preset.mapping).unwrap_or_default()
+        );
+        // Legacy components retain their exact existing identities. Reconcilers
+        // opt into per-miner state, without hashing mutable filter options.
+        if adapter.reconciles()
+            && let Some(miner) = preset.miner.as_deref()
+        {
+            identity.push('\0');
+            identity.push_str(miner);
+        }
+        storage_reference.account = Some(format!("preset:{}", sha256_hex(identity.as_bytes())));
     }
 
     // A name that would create a wing is checked here, whoever chose it: an adapter's default (an installed source's
@@ -137,6 +189,73 @@ pub async fn mine<A: SourceAdapter>(
     }
     // After the check, so a refused wing leaves no source record behind.
     let source = store.get_or_create_source(&storage_reference, None).await?;
+    let scoped_store = loop {
+        if let Some(outcome) = ctx.stop_requested() {
+            return Ok(outcome);
+        }
+        if let Some(store) = store
+            .claim_mining_source(source.id, job, ctx.lease_owner())
+            .await?
+        {
+            break store;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    };
+    // Read progress only after admission: a waiting run must not start from the
+    // cursor it observed before the previous writer committed.
+    let result = async {
+        let source = scoped_store
+            .get_source(source.id)
+            .await?
+            .ok_or_else(|| crate::Error::store_malformed("a claimed mining source disappeared"))?;
+        mine_locked(
+            adapter,
+            ctx,
+            job,
+            request,
+            &reference,
+            &scoped_store,
+            source,
+            wing_name,
+            wing_is_new,
+        )
+        .await
+    }
+    .await;
+    let released = scoped_store.release_mining_source().await;
+    match result {
+        Err(error) => Err(error),
+        Ok(outcome) => {
+            released?;
+            Ok(outcome)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn mine_locked<A: SourceAdapter>(
+    adapter: &A,
+    ctx: &JobContext,
+    job: &mut Job,
+    request: Request<'_>,
+    reference: &crate::domain::SourceRef,
+    store: &SurrealStore,
+    source: SourceRecord,
+    wing_name: String,
+    wing_is_new: bool,
+) -> Result<JobOutcome> {
+    let settings = ctx.mining();
+    if adapter.reconciles()
+        && let Some(miner) = request.preset.and_then(|preset| preset.miner.as_deref())
+    {
+        let key = request
+            .preset
+            .and_then(|preset| {
+                preset.source_view_key(request.locator, request.wing, request.options)
+            })
+            .expect("a named preset has a view key");
+        store.record_source_miner(source.id, miner, &key).await?;
+    }
     let wing = store.get_or_create_wing(&wing_name, None).await?;
     if wing_is_new {
         ctx.events().publish(Event::wing(Action::Created, wing.id));
@@ -154,6 +273,45 @@ pub async fn mine<A: SourceAdapter>(
         None if request.full => serde_json::Value::Null,
         None => source.cursor.clone(),
     };
+    let mut scan = if adapter.reconciles() {
+        let fingerprint = sha256_hex(
+            serde_json::to_string(&reference.options)
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        let stored = store.source_reconciliation_state(source.id).await?;
+        let mut scan: Scan = stored
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| {
+                crate::Error::store_malformed(format!("invalid reconciliation state: {error}"))
+            })?
+            .unwrap_or_default();
+        // The source positions are authoritative under its write fence. The job
+        // checkpoint can lag them if the daemon crashed immediately after commit.
+        cursor = source.cursor.clone();
+        if scan.options != fingerprint
+            || (request.full
+                && job
+                    .checkpoint
+                    .get("reconciliation_started")
+                    .and_then(serde_json::Value::as_bool)
+                    != Some(true))
+        {
+            scan = Scan {
+                options: fingerprint,
+                ..Scan::default()
+            };
+            cursor = serde_json::Value::Null;
+        } else if scan.phase == ScanPhase::Complete {
+            scan.phase = ScanPhase::Inventory;
+            scan.after = None;
+        }
+        save_progress(store, source.id, &cursor, Some(&scan), job.id).await?;
+        Some(scan)
+    } else {
+        None
+    };
 
     let cap = request
         .preset
@@ -162,15 +320,61 @@ pub async fn mine<A: SourceAdapter>(
     let cap = if cap == 0 { usize::MAX } else { cap };
     let mut truncated: bool;
     loop {
+        if let Some(outcome) = ctx.stop_requested() {
+            return Ok(outcome);
+        }
         let remaining = cap.saturating_sub(usize::try_from(stats.documents).unwrap_or(usize::MAX));
         if remaining == 0 {
             truncated = true;
             break;
         }
         // Every adapter sees only a bounded page even for an unlimited job; the checkpoint is durable between pages.
-        let discovery = adapter
-            .discover(&reference, &cursor, remaining.min(256))
-            .await?;
+        let mut reconciliation_id = None;
+        let mut reconciliation_read = None;
+        let mut reconciliation_unchanged = false;
+        let discovery = if let Some(scan) = scan
+            .as_mut()
+            .filter(|scan| scan.phase == ScanPhase::Inventory)
+        {
+            let mut known = store
+                .source_inventory_page(source.id, scan.after.as_deref(), 1)
+                .await?;
+            if let Some(known) = known.pop() {
+                reconciliation_id = Some(known.external_id.clone());
+                let handle = match adapter.reconcile(reference, &known).await? {
+                    Reconciliation::Unchanged => {
+                        reconciliation_read = Some(Acquisition::Skip);
+                        reconciliation_unchanged = true;
+                        String::new()
+                    }
+                    Reconciliation::Refresh(handle) => handle,
+                    Reconciliation::Retire(reason) => {
+                        reconciliation_read = Some(Acquisition::Retire(reason));
+                        String::new()
+                    }
+                };
+                Discovery {
+                    candidates: vec![crate::domain::Candidate {
+                        external_id: known.external_id,
+                        cursor_after: cursor.clone(),
+                        handle,
+                    }],
+                    exhausted: false,
+                    ..Discovery::default()
+                }
+            } else {
+                scan.phase = ScanPhase::Discovery;
+                save_progress(store, source.id, &cursor, Some(scan), job.id).await?;
+                continue;
+            }
+        } else {
+            adapter
+                .discover(reference, &cursor, remaining.min(256))
+                .await?
+        };
+        if discovery.candidates.len() > remaining.min(256) {
+            return Err(crate::Error::server("source exceeded the discovery limit"));
+        }
         if stats.documents == 0 {
             // A source may rescan the same tree on every page; count its exclusions once per job.
             stats.filtered = u64::try_from(discovery.filtered).unwrap_or(u64::MAX);
@@ -179,7 +383,13 @@ pub async fn mine<A: SourceAdapter>(
         truncated = !exhausted;
         let base = stats.documents;
         let total = base + discovery.candidates.len() as u64;
-        if discovery.candidates.is_empty() && !exhausted {
+        if discovery.candidates.is_empty()
+            && !exhausted
+            && discovery
+                .cursor_after
+                .as_ref()
+                .is_none_or(|next| next == &cursor)
+        {
             return Err(crate::Error::server(
                 "the source returned an empty nonterminal discovery page; it cannot advance the cursor",
             ));
@@ -206,7 +416,23 @@ pub async fn mine<A: SourceAdapter>(
                 return Ok(JobOutcome::Paused);
             }
             while next < discovery.candidates.len() && next < position + 2 {
-                reads.push_back(adapter.read(&reference, &discovery.candidates[next]));
+                let candidate = &discovery.candidates[next];
+                if adapter.reconciles() {
+                    store
+                        .register_source_document(source.id, &candidate.external_id)
+                        .await?;
+                }
+                let outcome = if next == 0 {
+                    reconciliation_read.take()
+                } else {
+                    None
+                };
+                reads.push_back(async move {
+                    match outcome {
+                        Some(outcome) => Ok(outcome),
+                        None => adapter.acquire(reference, candidate).await,
+                    }
+                });
                 next += 1;
             }
             let read = reads.next().await.expect("one read for every candidate");
@@ -222,13 +448,25 @@ pub async fn mine<A: SourceAdapter>(
             // run would otherwise publish thousands of events a minute for a client that re-reads once anyway.
             let drawers_before = stats.created + stats.superseded + stats.retired;
             match read? {
-                None => stats.skipped += 1,
-                Some(raw) => {
+                Acquisition::Skip if reconciliation_unchanged => stats.unchanged += 1,
+                Acquisition::Skip => stats.skipped += 1,
+                Acquisition::Retire(reason) => {
+                    stats.retired += store
+                        .retire_source_document(source.id, &candidate.external_id, &reason)
+                        .await?;
+                }
+                Acquisition::Document(raw) => {
+                    if raw.external_id != candidate.external_id {
+                        return Err(crate::Error::server(
+                            "source acquisition returned a different external ID",
+                        ));
+                    }
                     let existing = store
                         .get_source_document(source.id, &raw.external_id)
                         .await?;
                     if existing.as_ref().is_some_and(|known| {
-                        known.revision == raw.revision
+                        known.retired_at.is_none()
+                            && known.revision == raw.revision
                             && known.metadata == raw.metadata
                             && known.occurred_at == raw.occurred_at
                     }) {
@@ -298,9 +536,19 @@ pub async fn mine<A: SourceAdapter>(
                 ctx.events().publish(Event::drawers_changed());
             }
 
-            store
-                .save_source_cursor(source.id, &candidate.cursor_after, job.id, Utc::now())
-                .await?;
+            if let Some(id) = &reconciliation_id
+                && let Some(scan) = &mut scan
+            {
+                scan.after = Some(id.clone());
+            }
+            save_progress(
+                store,
+                source.id,
+                &candidate.cursor_after,
+                scan.as_ref(),
+                job.id,
+            )
+            .await?;
             let progress = JobProgress {
                 current: u32::try_from(stats.documents).unwrap_or(u32::MAX),
                 total: Some(u32::try_from(total).unwrap_or(u32::MAX)),
@@ -317,10 +565,29 @@ pub async fn mine<A: SourceAdapter>(
             ctx.checkpoint(
                 job,
                 progress,
-                json!({ "cursor": candidate.cursor_after, "stats": stats }),
+                json!({ "cursor": candidate.cursor_after, "stats": stats, "reconciliation_started": scan.is_some() }),
             )
             .await?;
             cursor = candidate.cursor_after.clone();
+        }
+        let page_progress = discovery.cursor_after.is_some();
+        if let Some(next) = discovery.cursor_after {
+            cursor = next;
+        }
+        if exhausted && let Some(scan) = &mut scan {
+            scan.phase = ScanPhase::Complete;
+        }
+        // Page progress never commits past a failed or paused candidate, including
+        // an empty filtered page and a terminal page with no documents.
+        if reconciliation_id.is_none() && (scan.is_some() || page_progress) {
+            save_progress(store, source.id, &cursor, scan.as_ref(), job.id).await?;
+            let progress = job.progress.clone();
+            ctx.checkpoint(
+                job,
+                progress,
+                json!({"cursor":cursor,"stats":stats,"reconciliation_started":scan.is_some()}),
+            )
+            .await?;
         }
         if exhausted {
             break;
@@ -498,6 +765,8 @@ async fn ingest(
     }
 
     Ok(SourceDocumentRecord {
+        retired_at: None,
+        retirement_reason: None,
         source: ctx.source.id,
         external_id: raw.external_id.clone(),
         revision: raw.revision.clone(),
@@ -575,6 +844,7 @@ mod tests {
                     .collect(),
                 exhausted: true,
                 filtered: 0,
+                cursor_after: None,
             })
         }
 

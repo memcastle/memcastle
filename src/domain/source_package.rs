@@ -160,6 +160,10 @@ pub struct Compatibility {
     pub contract: String,
     /// The MemCastle versions it runs on, as a semver requirement (`">=0.3, <0.4"`).
     pub memcastle: String,
+    /// Optional reconciliation extension. Older hosts reject this unknown key,
+    /// rather than silently running a reconciler with legacy skip semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconciliation: Option<String>,
 }
 
 /// What a source asks the host for. Deliberately small: the host offers no write access, no ambient environment and
@@ -476,6 +480,10 @@ pub struct BuildSection {
 pub struct TestSection {
     /// The directory of conformance cases, relative to the package's directory.
     pub fixtures: String,
+    /// Give offline fixtures a fixed synthetic selected credential, never a
+    /// developer's real environment, file, or OAuth token.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fixture_credential: bool,
 }
 
 /// The `(major, minor)` of a contract version written as `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`.

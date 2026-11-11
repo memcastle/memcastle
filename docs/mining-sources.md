@@ -66,6 +66,8 @@ See [Deduplication](deduplication.md).
 A source is identified by `(source, account, locator)`: the adapter's name, the account on it if it has accounts, and the
 part of it that is read (a directory, a sessions folder, a channel).
 Two jobs that name the same place share one source, and therefore one cursor.
+An opt-in reconciling source additionally partitions named miners, even when their account, locator and destination match.
+Its mutable filters do not change that identity, so narrowing a miner can retire its previous content safely.
 
 MemCastle keeps, for each source:
 
@@ -95,7 +97,10 @@ how the source identifies itself, and keeps an older drawer's preference criteri
   The old text stays as history (`valid_to`), and a search for "as of" an earlier date still finds it.
   Appending to a transcript changes only its last chunk.
 - A document that got shorter closes the chunks past its new end, so stale text is not searchable as if it were current.
-- A document that vanished from the source is not noticed: deletions are not propagated.
+- Legacy sources do not propagate deletion merely because a document vanished from discovery.
+  Sources implementing the [reconciliation extension](writing-sources.md#reconciliation-extension) recheck Core's durable
+  inventory and explicitly retire confirmed deletions, revoked sharing and out-of-scope content.
+  `--full` resets discovery without deleting that inventory, and a skipped read still preserves existing content.
 - A job that is paused, interrupted or crashed resumes from its own checkpoint and files nothing twice.
 
 ### Chunking
@@ -113,6 +118,13 @@ By default jobs are unlimited (`mining.max_documents = 0`) but discover in bound
 Set a positive `mining.max_documents` to limit every job, or a positive `max_documents` on one miner to override it.
 If the source has more, the job completes with `"truncated": true`, its progress message says to run it again, and the
 next job continues from the cursor.
+For reconciling sources the core-owned inventory walk also continues across limited jobs.
+Each inventory check counts as a handled document; progress-only discovery pages do not consume that limit.
+
+Mining jobs serialize per effective source through a database-backed admission lock tied to the durable job lease.
+The source cursor is read after admission, and canonical writes check ownership in the same transaction as the mutation.
+This also protects a remote palace shared by multiple daemons: an expired worker cannot overwrite a successor's state.
+Waiting jobs honor pause and cancellation, and different effective sources remain independently runnable.
 
 ## Using it
 

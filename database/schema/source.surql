@@ -14,6 +14,8 @@ DEFINE TABLE IF NOT EXISTS source SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS source ON TABLE source TYPE string;
 -- `option<string>`: local sources have no account.
 DEFINE FIELD IF NOT EXISTS account ON TABLE source TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS miner ON TABLE source TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS miner_key ON TABLE source TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS locator ON TABLE source TYPE string;
 -- A *reference* to a credential (`{type: "env", name: ...}`), never the secret:
 -- nothing in this table may hold one (invariant 6). `{}` means none, because an
@@ -48,3 +50,27 @@ DEFINE FIELD IF NOT EXISTS acquired_at ON TABLE source_document TYPE datetime;
 DEFINE FIELD IF NOT EXISTS job ON TABLE source_document TYPE option<string>;
 -- Backs "how many documents does this source have".
 DEFINE INDEX IF NOT EXISTS source_document_source_idx ON TABLE source_document FIELDS source;
+DEFINE FIELD IF NOT EXISTS retired_at ON TABLE source_document TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retirement_reason ON TABLE source_document TYPE option<string>;
+
+-- Independent of the provider cursor, including --full and interrupted first ingestion.
+DEFINE TABLE IF NOT EXISTS source_inventory SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS source ON TABLE source_inventory TYPE string;
+DEFINE FIELD IF NOT EXISTS external_id ON TABLE source_inventory TYPE string;
+DEFINE FIELD IF NOT EXISTS retired_at ON TABLE source_inventory TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retirement_reason ON TABLE source_inventory TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS source_inventory_page ON TABLE source_inventory FIELDS source, external_id;
+DEFINE INDEX IF NOT EXISTS source_document_page ON TABLE source_document FIELDS source, external_id;
+
+-- Core's bounded inventory walk, separate from the adapter's discovery cursor.
+DEFINE TABLE IF NOT EXISTS source_reconciliation SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS state ON TABLE source_reconciliation TYPE object FLEXIBLE;
+
+-- Admission and write fencing share this record, so a takeover conflicts with an
+-- in-flight old write even under snapshot isolation. Its lifetime follows the job lease.
+DEFINE TABLE IF NOT EXISTS source_mining_lock SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS job ON TABLE source_mining_lock TYPE string;
+DEFINE FIELD IF NOT EXISTS worker ON TABLE source_mining_lock TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS attempt ON TABLE source_mining_lock TYPE int;
+DEFINE FIELD IF NOT EXISTS token ON TABLE source_mining_lock TYPE string;
+DEFINE FIELD IF NOT EXISTS serial ON TABLE source_mining_lock TYPE int;

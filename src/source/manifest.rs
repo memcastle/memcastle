@@ -70,6 +70,16 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
     if let Err(reason) = contract_version(&manifest.compatibility.contract) {
         return Err(invalid(format!("compatibility.contract: {reason}")));
     }
+    if manifest
+        .compatibility
+        .reconciliation
+        .as_deref()
+        .is_some_and(|version| version != "0.1.0")
+    {
+        return Err(invalid(
+            "compatibility.reconciliation must be `0.1.0` when declared",
+        ));
+    }
     for (key, option) in &manifest.options {
         // The key is typed on a command line next to paths, so the CLI tells the two apart by this very rule.
         if !crate::domain::is_option_key(key) {
@@ -518,5 +528,35 @@ read = ["locator"]
             .map(|trigger| trigger.kind.as_str())
             .collect();
         assert_eq!(kinds, ["schedule", "poll", "webhook", "watch"]);
+    }
+
+    #[test]
+    fn reconciliation_is_explicit_and_an_unknown_extension_version_is_refused() {
+        assert!(
+            parse(GOOD, &[])
+                .unwrap()
+                .compatibility
+                .reconciliation
+                .is_none()
+        );
+        let declared = GOOD.replace(
+            "contract = \"0.4\"",
+            "contract = \"0.4\"\nreconciliation = \"0.1.0\"",
+        );
+        assert_eq!(
+            parse(&declared, &[])
+                .unwrap()
+                .compatibility
+                .reconciliation
+                .as_deref(),
+            Some("0.1.0")
+        );
+        let invalid = declared.replace("reconciliation = \"0.1.0\"", "reconciliation = \"9.0.0\"");
+        assert!(
+            parse(&invalid, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("compatibility.reconciliation")
+        );
     }
 }

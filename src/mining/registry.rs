@@ -44,6 +44,34 @@ pub enum AnySource {
 }
 
 impl SourceAdapter for AnySource {
+    fn reconciles(&self) -> bool {
+        match self {
+            Self::Directory(adapter) => adapter.reconciles(),
+            Self::Wasm(adapter) => adapter.reconciles(),
+        }
+    }
+
+    async fn reconcile(
+        &self,
+        source: &SourceRef,
+        known: &super::adapter::KnownDocument,
+    ) -> Result<super::adapter::Reconciliation> {
+        match self {
+            Self::Directory(adapter) => adapter.reconcile(source, known).await,
+            Self::Wasm(adapter) => adapter.reconcile(source, known).await,
+        }
+    }
+
+    async fn acquire(
+        &self,
+        source: &SourceRef,
+        candidate: &crate::domain::Candidate,
+    ) -> Result<super::adapter::Acquisition> {
+        match self {
+            Self::Directory(adapter) => adapter.acquire(source, candidate).await,
+            Self::Wasm(adapter) => adapter.acquire(source, candidate).await,
+        }
+    }
     fn name(&self) -> &str {
         match self {
             Self::Directory(a) => a.name(),
@@ -586,6 +614,7 @@ mod tests {
                     repository: None,
                 },
                 compatibility: Compatibility {
+                    reconciliation: None,
                     contract: contract.to_string(),
                     memcastle: ">=0.1".to_string(),
                 },

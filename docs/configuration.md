@@ -982,6 +982,12 @@ Existing definitions are edited at their originating file; files are checked for
 They are managed from the file, from [`memcastle miner`](cli.md#miner) and, read-only, from MCP
 ([ADR-037](adr/037-persistent-miner-configuration.md)).
 
+For a source opting into the [reconciliation extension](writing-sources.md#reconciliation-extension), the miner name is
+also part of its effective storage identity, along with its source configuration and destination.
+Two such miners can share one credential and locator while retaining independent cursors, inventories and retirement.
+Keep names stable through scope/filter edits; renaming one selects a new history, while its old history remains retained.
+Legacy source components preserve their existing identity and sharing rules.
+
 ```toml
 [[miners]]
 name = "signal-personal"          # unique: lowercase letters, digits, `-` and `_`; `reload` is reserved

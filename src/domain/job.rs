@@ -139,6 +139,34 @@ pub struct MiningPreset {
 }
 
 impl MiningPreset {
+    /// A conservative display key for the exact source selectors that produced a
+    /// stored state. This is not its storage identity: options may change without
+    /// discarding inventory. No credential, schedule or document limit contributes.
+    #[must_use]
+    pub fn source_view_key(
+        &self,
+        locator: Option<&str>,
+        wing: Option<&str>,
+        options: &Options,
+    ) -> Option<String> {
+        let miner = self.miner.as_deref()?;
+        Some(super::sha256_hex(
+            serde_json::json!([
+                miner,
+                self.configuration,
+                locator,
+                wing,
+                self.room,
+                self.mapping,
+                options
+            ])
+            .to_string()
+            .as_bytes(),
+        ))
+    }
+}
+
+impl MiningPreset {
     /// Remove the private reference from a response copy, not the durable job.
     pub fn redact_credential(&mut self) {
         self.credential = None;

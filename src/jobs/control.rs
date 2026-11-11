@@ -224,6 +224,11 @@ impl JobContext {
         self.job_id
     }
 
+    /// The durable lease identity used by source-level transactional fencing.
+    pub(crate) fn lease_owner(&self) -> Option<&str> {
+        self.lease_owner.as_deref()
+    }
+
     /// The store this job runs against — handlers reach it through their
     /// context rather than taking it as a separate argument, so every handler
     /// has the same `run(ctx, job, params)` shape.

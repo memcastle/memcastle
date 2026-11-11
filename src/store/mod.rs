@@ -62,6 +62,7 @@ mod plugins;
 mod renames;
 mod resolution;
 mod retrieval;
+mod source_mining;
 mod source_packages;
 mod sources;
 #[cfg(test)]
@@ -422,6 +423,9 @@ pub const EMBEDDED_DATABASE: &str = "palace";
 #[derive(Clone)]
 pub struct SurrealStore {
     db: Surreal<Any>,
+    /// Only the mining pipeline receives this scoped clone; ordinary administrative
+    /// writes keep their existing authority and never inherit a worker's fence.
+    mining_fence: Option<source_mining::Fence>,
 }
 
 impl SurrealStore {
@@ -462,7 +466,10 @@ impl SurrealStore {
         };
         db.use_ns(namespace).use_db(database).await?;
 
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            mining_fence: None,
+        })
     }
 
     /// A new session over this store's own database, for the admin endpoint
@@ -557,7 +564,10 @@ impl SurrealStore {
     pub(crate) async fn connect_memory_for_tests() -> Self {
         let db = any::connect("memory").await.expect("connect");
         db.use_ns("test").use_db("test").await.expect("use ns/db");
-        let store = Self { db };
+        let store = Self {
+            db,
+            mining_fence: None,
+        };
         store.sync_schema().await.expect("sync_schema");
         store
     }
