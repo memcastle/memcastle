@@ -9,19 +9,13 @@ permissions:
 
 jobs:
   probe:
-    name: Coverage (${{ matrix.mode }})
+    name: MemCastle Windows coverage
     runs-on: windows-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [native, mbx]
+    timeout-minutes: 45
     env:
+      CARGO_TERM_COLOR: always
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link
       CARGO_INCREMENTAL: "0"
-      MBX_TARGET_VIEWS: "0"
-      MBX_CACHE_LINKS: "0"
-      MBX_DISABLE: ${{ matrix.mode == 'native' && '1' || '0' }}
       LLVM_PROFILE_FILE_NAME: '%m-%b.profraw'
       LLVM_PROFILE_VERBOSE: "1"
       RUSTFLAGS: -C link-arg=/build-id
@@ -33,35 +27,12 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-      # Match the failing run's target junction and native temporary paths.
       - uses: ./.github/actions/setup-windows
-      - name: Create dependency-free probe
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path .coverage-probe/src -Force
-          @'
-          [package]
-          name = "coverage_probe"
-          version = "0.0.0"
-          edition = "2024"
-
-          [workspace]
-
-          [profile.dev]
-          debug = "line-tables-only"
-          '@ | Set-Content .coverage-probe/Cargo.toml
-          @'
-          #[test]
-          fn print_profile_destination() {
-              eprintln!("LLVM_PROFILE_FILE={:?}", std::env::var_os("LLVM_PROFILE_FILE"));
-              eprintln!("cwd={:?}", std::env::current_dir());
-          }
-          '@ | Set-Content .coverage-probe/src/lib.rs
-          # Exercise the same ReFS junction as MemCastle rather than the system drive.
-          New-Item -ItemType Junction -Path .coverage-probe/target -Target "$env:GITHUB_WORKSPACE/target"
-      - name: Run coverage
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: tests-windows-v1
+      - name: Build and run representative tests with visible runtime output
         shell: bash
-        working-directory: .coverage-probe
         run: |
           rustc -vV
           command -v cargo
@@ -69,11 +40,52 @@ jobs:
           lld-link --version
           cargo llvm-cov show-env
           cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --no-report --success-output immediate
-          cargo llvm-cov report --lcov --output-path lcov.info
-      - name: Locate raw profiles
+          targets=(--lib --bin memcastle --test in_process)
+          for file in tests/*.rs; do
+            name="${file#tests/}"
+            name="${name%.rs}"
+            case "$name" in
+              wasm_*|persistence|mcp_smoke|auth_lifecycle) ;;
+              *) targets+=(--test "$name") ;;
+            esac
+          done
+          # Compile the same targets, but expose output from both a standalone and a full application test.
+          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}" \
+            -E 'binary(source_isolation) or test(server::health_endpoint_reports_ok)' --success-output immediate
+      - name: Inspect profiles and executables before the full test run
         if: always()
         shell: pwsh
         run: |
-          Get-ChildItem -Path .coverage-probe, target, $env:TEMP -Recurse -Filter '*.profraw' -ErrorAction Continue |
-            Select-Object FullName, Length
+          $profiles = @(Get-ChildItem target -Recurse -Filter '*.profraw' -ErrorAction Continue)
+          Write-Output "RAW_PROFILE_COUNT=$($profiles.Count)"
+          $profiles | Select-Object FullName, Length
+          $binaries = Get-ChildItem target/llvm-cov-target/debug/deps -Filter '*.exe' |
+            Where-Object { $_.Name -match '^(source_isolation|in_process)-' }
+          foreach ($binary in $binaries) {
+            Write-Output "BINARY=$($binary.FullName)"
+            llvm-readobj --sections $binary.FullName | Select-String '\.lprf|\.lcov'
+          }
+      - name: Run the complete basic suite
+        shell: bash
+        run: |
+          targets=(--lib --bin memcastle --test in_process)
+          for file in tests/*.rs; do
+            name="${file#tests/}"
+            name="${name%.rs}"
+            case "$name" in
+              wasm_*|persistence|mcp_smoke|auth_lifecycle) ;;
+              *) targets+=(--test "$name") ;;
+            esac
+          done
+          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}"
+      - name: Locate profiles after the full suite
+        if: always()
+        shell: pwsh
+        run: |
+          $profiles = @(Get-ChildItem target -Recurse -Filter '*.profraw' -ErrorAction Continue)
+          Write-Output "RAW_PROFILE_COUNT=$($profiles.Count)"
+          $profiles | Select-Object FullName, Length
+          Get-ChildItem target/llvm-cov-target -Force
+      - name: Generate coverage report
+        shell: bash
+        run: cargo llvm-cov report --lcov --output-path lcov.info
