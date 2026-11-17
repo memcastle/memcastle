@@ -415,7 +415,8 @@ to choose checks relevant to the change and report any skipped checks in your ha
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl)
 and are updated with `git tpl update`.
 Files carrying template-owned content end with a `# --- project-specific ...` marker
-(`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it, never above.
+(`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it.
+Global mise tools instead go between the begin/end project-specific tools markers inside `[tools]`.
 
 Changing template-owned content here fixes it in one repository.
 Changing it in the template fixes it in all of them —
