@@ -134,10 +134,10 @@ jobs:
 
       - name: Run tests (with coverage)
         env:
-          # %m signatures can collide; %b separates builds, but LLVM cannot read build IDs on macOS.
-          LLVM_PROFILE_FILE_NAME: ${{ runner.os == 'macOS' && '%m.profraw' || '%m-%b.profraw' }}
-          # %b requires a build ID in each instrumented binary; Darwin keeps its native linker settings.
-          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C link-arg=/build-id' || runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
+          # %b separates builds on Linux; macOS cannot read it and Windows requires lld-link's build ID.
+          LLVM_PROFILE_FILE_NAME: ${{ runner.os == 'Linux' && '%m-%b.profraw' || '%m.profraw' }}
+          # Only Linux uses %b, so other platforms keep their native linker settings.
+          RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
         run: |
           # --no-report retains cached profiles unless they are explicitly cleaned first.
           cargo llvm-cov clean --workspace
