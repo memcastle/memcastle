@@ -32,6 +32,11 @@ workflow inputs and compatibility policy.
   Mise also installs `wasm32-wasip2` for the reference sources and WebAssembly tests.
 - The remaining tools (nextest, prek, ast-grep, typos, ...) via `mise` — run `mise install` once.
 
+The source-conformance and WebAssembly CI jobs pin Rust 1.99.1 while the host uses Wasmtime 41.
+Rust 1.100 emits WASI imports that this runtime does not implement, so moving those jobs to a newer compiler
+requires validating its generated components against the host first.
+Other CI jobs continue to exercise the current stable compiler.
+
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
 so the storage engine itself needs no C/C++ toolchain.
 (A transitive TLS dependency, `aws-lc-sys`, may use `cmake` on some targets; that is unrelated to storage.)
