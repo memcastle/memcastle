@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   build:
-    name: 🏗️ Build
+    name: 📝 Build documentation
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -51,7 +51,7 @@ jobs:
         run: mise run docs:build
 
   publish:
-    name: 🚀 Publish
+    name: 🌐 Publish documentation
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

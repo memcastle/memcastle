@@ -353,6 +353,6 @@ compiling the libgit2 dependency from source.
 
 Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml` —
 end with a `# --- project-specific ...` marker (`project-specific tasks` in `mise.toml`, `project-specific hooks` in `prek.toml`).
-Add below it;
+Add below it, or put global mise tools between the begin/end project-specific tools markers inside `[tools]`.
 Git's 3-way merge then preserves your additions across updates.
 A fix that belongs to every project belongs in the template, not here.

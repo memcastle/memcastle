@@ -28,9 +28,6 @@ idiomatic_version_file_enable_tools = []
 rust = { version = "stable", components = ["rustfmt", "clippy"], targets = ["wasm32-wasip2"], mr_boxington = true }
 mr-boxington = "latest"
 actionlint = "latest"
-# The project-owned architecture hook runs in CI's lint job, so `mise install`
-# must install the same pinned ast-grep binary on developer machines and CI.
-"aqua:ast-grep/ast-grep" = "latest"
 # actionlint silently skips its shellcheck integration when the binary is
 # absent, so without this a local run is NOT the CI run. Runners ship it.
 #
@@ -60,9 +57,16 @@ cargo-binstall = "latest"
 "cargo:git-tpl" = "latest"
 # Zensical runs through `uvx`, so uv is the only thing the docs build needs.
 uv = "latest"
-bun = "latest"
 # cargo-insta is declared on the task that uses it instead of here — see the
 # note in the header.
+
+# --- begin project-specific tools ---
+# Add project-wide tools here; tools needed by only one task belong on that task.
+# The project-owned architecture hook runs in CI's lint job, so `mise install`
+# must install the same pinned ast-grep binary on developer machines and CI.
+"aqua:ast-grep/ast-grep" = "latest"
+bun = "latest"
+# --- end project-specific tools ---
 
 [env]
 # Use local assets and the dashboard during development; daemon/installer suites unset MEMCASTLE_* first.
@@ -211,9 +215,9 @@ run = "gh ship validate"
 # --- Template ---------------------------------------------------------------
 #
 # This project is rendered from rust.tpl. `git tpl update` advances
-# refs/tpl/<id> and touches nothing else — not HEAD, not the index, not the
-# worktree — so running it is always safe and never a decision. The changes
-# arrive only when you merge:
+# refs/tpl/<id> without changing HEAD or the index. It may save migrated
+# answers in .config/git.tpl.toml as an unstaged edit. Rendered files reach
+# the worktree only when you merge:
 #
 #   mise run tpl:check       # has it moved?
 #   mise run tpl:update      # bring the rendered ref up to date
@@ -226,7 +230,7 @@ run = "gh ship validate"
 # release archives and mise installs them directly.
 
 [tasks."tpl:update"]
-description = "Re-render the template into refs/tpl/<id> (leaves the worktree alone)"
+description = "Advance refs/tpl/<id>; may save migrated answers without merging rendered files"
 # `raw_args` so `--ref`, `--dirty` and `--answer` reach git-tpl.
 raw_args = true
 run = "git tpl update"
@@ -255,8 +259,8 @@ git tpl diff --exit-code --stat
 
 # --- project-specific tasks --------------------------------------------------
 #
-# Add your own tasks below this line. The template owns everything above it and
-# will keep updating it; everything here is yours, and Git's 3-way merge
+# Add your own tasks below this line and global tools between the tools markers.
+# Outside those regions the template keeps updating content; Git's 3-way merge
 # preserves it across `git tpl update`.
 #
 # Open any multi-line `run` block with `#!/usr/bin/env bash`. Without one mise
