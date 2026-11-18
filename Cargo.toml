@@ -19,7 +19,6 @@ license = "MIT"
 # on, the PKGBUILD's `# Maintainer:` line.
 description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 repository = "https://github.com/noirbizarre/memcastle"
-homepage = "https://noirbizarre.github.io/memcastle/"
 documentation = "https://noirbizarre.github.io/memcastle/"
 readme = "README.md"
 keywords = ["mcp", "memory", "agent", "search", "daemon"]
