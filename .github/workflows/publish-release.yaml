@@ -104,7 +104,6 @@ jobs:
       # Published binaries must not restore shared compiler outputs.
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           backend: local
 
       # `cross` is only needed on the Linux legs, so it is installed

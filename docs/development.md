@@ -483,7 +483,7 @@ or a user-visible behaviour updates the page that describes it, in the same comm
   GitHub and the site both render them; stick to flowcharts, sequence, state, class and entity-relationship diagrams,
   and keep them small enough to read on a phone.
 - **Prose style.** One sentence per line, wrapped at a clause boundary if a sentence would pass 120 columns
-  (`mise run lint:md` enforces the width on `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`).
+  (`mise run lint:md` enforces the width on all project Markdown except the generated root `CHANGELOG.md`).
   `mise run spell` runs `typos`; a legitimate new term goes into `typos.toml`'s `extend-words`.
 
 ## This repository is generated from a template

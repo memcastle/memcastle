@@ -351,8 +351,7 @@ The name should say what would be broken if it failed.
 **Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
 when it would otherwise exceed the 120-column limit `.config/rumdl.toml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
-The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`);
-`PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
+The Markdown lint checks all project Markdown except the generated root `CHANGELOG.md`.
 
 **Documentation ships with the behaviour.**
 A change to a CLI flag, a setting, an environment variable, an MCP tool, a REST route or any other user-visible behaviour
@@ -414,8 +413,7 @@ to choose checks relevant to the change and report any skipped checks in your ha
 
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl)
 and are updated with `git tpl update`.
-Files carrying template-owned content end with a `# --- project-specific ...` marker
-(`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it.
+Files carrying template-owned content have project-specific section markers: add below them.
 Global mise tools instead go between the begin/end project-specific tools markers inside `[tools]`.
 
 Changing template-owned content here fixes it in one repository.
