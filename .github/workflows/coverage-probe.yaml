@@ -9,11 +9,14 @@ permissions:
 
 jobs:
   probe:
-    name: MemCastle Windows coverage
+    name: Root coverage (${{ matrix.invocation }})
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        invocation: [wrapped, direct]
     env:
-      CARGO_TERM_COLOR: always
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link
       CARGO_INCREMENTAL: "0"
       LLVM_PROFILE_FILE_NAME: '%m-%b.profraw'
@@ -28,64 +31,57 @@ jobs:
         with:
           cache: true
       - uses: ./.github/actions/setup-windows
+      - name: Replace the manifest only in this disposable runner
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .coverage-probe -Force
+          @'
+          [package]
+          name = "memcastle"
+          version = "0.0.0"
+          edition = "2024"
+          autobins = false
+          autotests = false
+          autoexamples = false
+          autobenches = false
+
+          [lib]
+          path = ".coverage-probe/lib.rs"
+
+          [workspace]
+
+          [profile.dev]
+          debug = "line-tables-only"
+          '@ | Set-Content Cargo.toml
+          @'
+          #[test]
+          fn print_profile_destination() {
+              eprintln!("LLVM_PROFILE_FILE={:?}", std::env::var_os("LLVM_PROFILE_FILE"));
+              eprintln!("cwd={:?}", std::env::current_dir());
+          }
+          '@ | Set-Content .coverage-probe/lib.rs
       - uses: jdx/mr-boxington-action@v1
         with:
-          cache-generation: tests-windows-v1
-      - name: Build and run representative tests with visible runtime output
+          cache-generation: probe-pr389-root
+      - name: Compare Cargo entry points
         shell: bash
+        env:
+          INVOCATION: ${{ matrix.invocation }}
         run: |
-          rustc -vV
-          command -v cargo
-          command -v lld-link
-          lld-link --version
-          cargo llvm-cov show-env
-          cargo llvm-cov clean --workspace
-          targets=(--lib --bin memcastle --test in_process)
-          for file in tests/*.rs; do
-            name="${file#tests/}"
-            name="${name%.rs}"
-            case "$name" in
-              wasm_*|persistence|mcp_smoke|auth_lifecycle) ;;
-              *) targets+=(--test "$name") ;;
-            esac
-          done
-          # Compile the same targets, but expose output from both a standalone and a full application test.
-          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}" \
-            -E 'binary(source_isolation) or test(server::health_endpoint_reports_ok)' --success-output immediate
-      - name: Inspect profiles and executables before the full test run
+          if [[ "$INVOCATION" == wrapped ]]; then
+            command=(cargo llvm-cov)
+          else
+            command=(cargo-llvm-cov llvm-cov)
+          fi
+          "${command[@]}" show-env
+          "${command[@]}" clean --workspace
+          "${command[@]}" nextest --no-report --success-output immediate
+          "${command[@]}" report --lcov --output-path lcov.info
+      - name: Inspect generated files and the Cargo wrapper
         if: always()
         shell: pwsh
         run: |
-          $profiles = @(Get-ChildItem target -Recurse -Filter '*.profraw' -ErrorAction Continue)
-          Write-Output "RAW_PROFILE_COUNT=$($profiles.Count)"
-          $profiles | Select-Object FullName, Length
-          $binaries = Get-ChildItem target/llvm-cov-target/debug/deps -Filter '*.exe' |
-            Where-Object { $_.Name -match '^(source_isolation|in_process)-' }
-          foreach ($binary in $binaries) {
-            Write-Output "BINARY=$($binary.FullName)"
-            llvm-readobj --sections $binary.FullName | Select-String '\.lprf|\.lcov'
-          }
-      - name: Run the complete basic suite
-        shell: bash
-        run: |
-          targets=(--lib --bin memcastle --test in_process)
-          for file in tests/*.rs; do
-            name="${file#tests/}"
-            name="${name%.rs}"
-            case "$name" in
-              wasm_*|persistence|mcp_smoke|auth_lifecycle) ;;
-              *) targets+=(--test "$name") ;;
-            esac
-          done
-          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}"
-      - name: Locate profiles after the full suite
-        if: always()
-        shell: pwsh
-        run: |
-          $profiles = @(Get-ChildItem target -Recurse -Filter '*.profraw' -ErrorAction Continue)
-          Write-Output "RAW_PROFILE_COUNT=$($profiles.Count)"
-          $profiles | Select-Object FullName, Length
-          Get-ChildItem target/llvm-cov-target -Force
-      - name: Generate coverage report
-        shell: bash
-        run: cargo llvm-cov report --lcov --output-path lcov.info
+          Get-ChildItem target -Recurse -Filter '*.profraw' | Select-Object FullName, Length
+          Get-ChildItem target -Directory
+          $wrapper = Join-Path $env:LOCALAPPDATA 'mise/command-wrappers/bin/cargo'
+          if (Test-Path $wrapper) { Get-Content $wrapper }
