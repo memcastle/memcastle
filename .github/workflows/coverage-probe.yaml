@@ -60,6 +60,8 @@ jobs:
               eprintln!("cwd={:?}", std::env::current_dir());
           }
           '@ | Set-Content .coverage-probe/lib.rs
+          # Project filters name binaries removed by the dependency-free manifest.
+          '[profile.default]' | Set-Content .config/nextest.toml
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: probe-pr389-root
