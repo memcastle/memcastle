@@ -126,8 +126,10 @@ The choice lasts for the tab.
 ## Developing the dashboard
 
 The source is `web/` (Vue 3 and [OpenVue](https://openvue.dev), with Vite and TypeScript), its own bun package.
-It needs bun and node.
-`mise install` provisions both and installs the frontend dependencies with the frozen lockfile.
+It uses Bun for dependency installation, typechecking, Vite and Vitest.
+`mise install` provisions Bun and installs the frontend dependencies with the frozen lockfile.
+`web/bunfig.toml` forces package scripts to use Bun even when a tool has a Node shebang.
+Coverage uses Istanbul instrumentation because Bun runs on JavaScriptCore.
 
 ```sh
 mise run web:build                      # web/ -> web/dist

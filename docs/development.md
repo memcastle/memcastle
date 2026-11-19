@@ -25,7 +25,7 @@ workflow inputs and compatibility policy.
 
 ## Prerequisites
 
-- Node and Bun for `web/`, installed globally by mise; the Rust build needs neither.
+- Bun for `web/`, installed globally by mise; the Rust build does not need it.
 - Rust via `rustup`, with mise 2026.9.2+ providing native Mr Boxington wrapping for Cargo builds.
   `rust-toolchain.toml` and mise declare the stable channel; explicit `RUSTUP_TOOLCHAIN` selections still win.
   Mise also installs `wasm32-wasip2` for the reference sources and WebAssembly tests.

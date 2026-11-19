@@ -34,6 +34,7 @@ export default defineConfig(async ({ command }) => ({
     // The daemon suite spawns a real `memcastle serve`; it runs under `bun test` (see package.json).
     exclude: ["test/daemon/**", "node_modules/**"],
     // Only read with `--coverage` (`bun run test:cover`): lcov is what Codecov ingests.
-    coverage: { provider: "v8", reporter: ["lcov", "text-summary"], include: ["src/**"], reportsDirectory: "coverage" },
+    // Bun uses JavaScriptCore, so coverage must use instrumentation rather than V8's profiler.
+    coverage: { provider: "istanbul", reporter: ["lcov", "text-summary"], include: ["src/**"], reportsDirectory: "coverage" },
   },
 }))

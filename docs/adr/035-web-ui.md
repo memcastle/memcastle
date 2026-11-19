@@ -147,7 +147,8 @@ Five decisions follow, and each has an alternative that is easier for one of the
 - A fourth tree, `web/`, sits under the assets root beside `sources/`, `integrations/` and `skills/`.
   A release gains `memcastle_<version>_web.tar.gz`, deb and rpm carry `/usr/share/memcastle/web`,
   and the AUR and Homebrew recipes fetch the new asset.
-- Building a release needs Node as well as Bun, and the CI packaging job checks installed `web/index.html`.
+- Building a release needs only Bun, and the CI packaging job checks installed `web/index.html`.
+  Package scripts force the Bun runtime, and coverage uses Istanbul instrumentation rather than V8's profiler.
 - There are two public paths on a daemon with authentication on and the dashboard enabled, and they are tested as such:
   the liveness probe and the static shell.
 - `/api/config` and `/api/graph` are part of the REST contract and documented in `docs/mcp-and-api.md`;

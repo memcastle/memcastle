@@ -40,7 +40,6 @@ uv = "latest"
 # must install the same pinned ast-grep binary on developer machines and CI.
 "aqua:ast-grep/ast-grep" = "latest"
 bun = "latest"
-node = "24"
 # --- end project-specific tools ---
 
 [env]
@@ -311,6 +310,7 @@ description = "Build the web UI into web/dist, which is all development mode nee
 sources = [
   "package.json",
   "bun.lock",
+  "bunfig.toml",
   "vite.config.ts",
   "dev/**", # The Vite configuration imports the development daemon plugin.
   "tsconfig.json",

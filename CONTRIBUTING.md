@@ -142,8 +142,8 @@ Use `mise exec -- cargo build` directly for one-off profile/target options.
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
 | `mise run web:check` | Build and test the web UI, including checkout and installed-prefix serving |
-| `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs bun and node) |
-| `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs bun and node) |
+| `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs Bun) |
+| `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs Bun) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |
@@ -272,8 +272,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 The release is built to be reproducible, and two things keep it that way.
 The Rust toolchain, `cross` and the runner images are pinned to exact versions,
 so moving any of them is an edit to the workflow and not something that happens between two releases.
-The publish job installs Bun and Node at the versions recorded in `mise.lock`,
-so the web UI packages with the same tool versions used in local checks.
+The publish job installs the Bun version recorded in `mise.lock`,
+so the web UI packages with the same runtime used in local checks.
 Build paths are remapped to fixed names, and the tarballs have a fixed order, timestamps and ownership.
 CI does not rebuild the release to check this, because two LTO release builds are too slow for a pull request.
 Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.

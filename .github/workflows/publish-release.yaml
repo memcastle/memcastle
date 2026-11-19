@@ -305,8 +305,8 @@ jobs:
             echo 'WEB_INSTALL_DIR=web/dist' >> "$GITHUB_ENV"
           fi
 
-      # Use the tagged lockfile's tool versions, including during recovery.
-      - name: Read frontend tool versions
+      # Bun was already locked in releases that predate the current frontend setup.
+      - name: Read the Bun version
         id: frontend
         run: |
           python3 - <<'PY'
@@ -314,12 +314,8 @@ jobs:
           with open("mise.lock", "rb") as lock:
               tools = tomllib.load(lock)["tools"]
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              for tool in ("node", "bun"):
-                  print(f"{tool}={tools[tool][0]['version']}", file=output)
+              print(f"bun={tools['bun'][0]['version']}", file=output)
           PY
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ steps.frontend.outputs.node }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ steps.frontend.outputs.bun }}
@@ -327,7 +323,8 @@ jobs:
         working-directory: web
         run: |
           bun install --frozen-lockfile
-          bun run build
+          # Older tagged checkouts have no bunfig.toml forcing Bun for Node-shebang tools.
+          bun run --bun build
 
       # The native-package layout (docs/adr/013): the executable under `bin/`,
       # the documentation under `share/doc/memcastle/`, empty sources and integrations
