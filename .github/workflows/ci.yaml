@@ -38,8 +38,6 @@ jobs:
   lint:
     name: 🕵️ Lint
     runs-on: ubuntu-latest
-    env:
-      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,prek,actionlint,aqua:koalaman/shellcheck,typos,aqua:ast-grep/ast-grep,git-cliff
     steps:
       - uses: actions/checkout@v7
 
@@ -59,7 +57,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       # Includes Cargo downloads and target outputs; do not duplicate rust-cache.
       # Workload generations scope fallback restores too, unlike key suffixes.
@@ -91,8 +88,6 @@ jobs:
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
     runs-on: ${{ matrix.os.runner }}
-    env:
-      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,cargo:cargo-nextest,cargo:cargo-llvm-cov
     strategy:
       fail-fast: false
       matrix:
@@ -122,7 +117,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       # Bootstrap tools first: mise installs on C: with a same-volume temporary rename.
       # Storage still precedes Cargo caches so their post hooks run before drive teardown.
@@ -192,8 +186,6 @@ jobs:
   slow:
     name: 🐢 Process and retrieval tests
     runs-on: ubuntu-latest
-    env:
-      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,cargo:cargo-nextest,cargo:cargo-llvm-cov
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -203,7 +195,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: slow-v1
@@ -229,7 +220,6 @@ jobs:
     name: 🧬 WebAssembly tests
     runs-on: ubuntu-latest
     env:
-      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,cargo:cargo-nextest,cargo:cargo-llvm-cov
       # Rust 1.100's WASI imports exceed Wasmtime 41's contract; keep fixture builds on the last green compiler.
       RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
@@ -244,7 +234,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       - uses: jdx/mr-boxington-action@v1
         with:
@@ -278,7 +267,6 @@ jobs:
     name: 🧩 Source (${{ matrix.source }})
     runs-on: ubuntu-latest
     env:
-      MISE_ENABLE_TOOLS: rust,mr-boxington
       # Match the component compiler used by the Wasm suite, including Cargo spawned by source tooling.
       RUSTUP_TOOLCHAIN: "1.99.1"
     strategy:
@@ -295,7 +283,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       - uses: jdx/mr-boxington-action@v1
         with:
@@ -358,8 +345,6 @@ jobs:
   web:
     name: 🏰 Web UI
     runs-on: ubuntu-latest
-    env:
-      MISE_ENABLE_TOOLS: rust,mr-boxington,bun
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -368,7 +353,6 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
-          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       - uses: jdx/mr-boxington-action@v1
         with:
@@ -471,12 +455,10 @@ jobs:
         id: msrv
         run: |
           # A root package's explicit version wins; an inherited version comes from the workspace.
-          version="$(yq -p toml -o json '.' Cargo.toml | jq -er '
-            .package."rust-version" as $package |
-            (if $package == null or $package == {workspace: true}
-              then .workspace.package."rust-version" else $package end) |
-            select(type == "string" and length > 0)
-          ')"
+          version="$(yq -p toml -o yaml -er '
+            ((.package."rust-version" | select(tag == "!!str")) // .workspace.package."rust-version") |
+            select(tag == "!!str" and . != "")
+          ' Cargo.toml)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
