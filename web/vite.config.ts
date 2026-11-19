@@ -35,6 +35,12 @@ export default defineConfig(async ({ command }) => ({
     exclude: ["test/daemon/**", "node_modules/**"],
     // Only read with `--coverage` (`bun run test:cover`): lcov is what Codecov ingests.
     // Bun uses JavaScriptCore, so coverage must use instrumentation rather than V8's profiler.
-    coverage: { provider: "istanbul", reporter: ["lcov", "text-summary"], include: ["src/**"], reportsDirectory: "coverage" },
+    coverage: {
+      provider: "istanbul",
+      // Emit repository-relative paths locally too, rather than repairing reports in CI.
+      reporter: [["lcov", { projectRoot: fileURLToPath(new URL("..", import.meta.url)) }], "text-summary"],
+      include: ["src/**"],
+      reportsDirectory: "coverage",
+    },
   },
 }))

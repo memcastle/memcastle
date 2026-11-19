@@ -8,8 +8,8 @@
 name = "memcastle"
 version = "0.5.2"
 edition = "2024"
-# The MSRV. Checked by the MSRV job in ci.yaml, which greps this very line — keep it
-# a plain literal. `rust-toolchain.toml` separately pins the channel to develop
+# The MSRV. Read as TOML by the MSRV job in ci.yaml.
+# `rust-toolchain.toml` separately pins the channel to develop
 # against; the two answer different questions.
 rust-version = "1.90"
 license = "MIT"
@@ -95,7 +95,6 @@ strip = true
 [features]
 # Separate genuinely expensive process-boundary and retrieval-baseline checks from the cross-platform basic suite.
 slow-tests = []
-provider-tests = []
 
 [[test]]
 name = "persistence"

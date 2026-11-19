@@ -23,6 +23,7 @@ permissions:
 
 env:
   MISE_NO_HOOKS: "1"
+  MISE_ENABLE_TOOLS: git-cliff
 
 jobs:
   prepare:
@@ -52,7 +53,6 @@ jobs:
           # Full history *and* tags: git-cliff derives the next version from
           # the last tag, and a shallow clone has neither.
           fetch-depth: 0
-          fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
 
       - uses: dtolnay/rust-toolchain@stable
@@ -62,6 +62,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v1-${{ env.MISE_ENABLE_TOOLS }}
       # Use the published extension to sign the next release's commit.
       - name: Install gh-ship
         run: gh extension install noirbizarre/gh-ship

@@ -251,15 +251,14 @@ jobs:
           set -euo pipefail
           test -n "$RUN_ID"
           [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.type')" = commit
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" |
+            jq -er 'select(.object.type == "commit") | .object.sha')"
           run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
-          test "$(jq -r '.head_sha' <<< "$run")" = "$ref"
-          test "$(jq -r '.head_branch' <<< "$run")" = "$TAG"
-          test "$(jq -r '.event' <<< "$run")" = workflow_dispatch
-          test "$(jq -r '.conclusion' <<< "$run")" = failure
-          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | .draft")"
-          test "$release" = true
+          jq -e --arg sha "$ref" --arg tag "$TAG" '
+            .head_sha == $sha and .head_branch == $tag and
+            .event == "workflow_dispatch" and .conclusion == "failure"
+          ' <<< "$run" >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" | jq -e '.draft == true' >/dev/null
           jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")"
           test "$(jq '[.jobs[] | select(.name | startswith("🏗️")) | select(.conclusion == "success")] | length' <<< "$jobs")" -eq 5
           artifacts="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100")"
@@ -354,9 +353,9 @@ jobs:
               --transform="s|^\\(LICENSE\\|README.md\\)$|${name}/share/doc/memcastle/\\1|" \
               --transform="s|^skills|${name}/share/memcastle/skills|" \
               --transform="s|^web/dist|${name}/share/memcastle/${WEB_INSTALL_DIR}|" \
-              -cf - -C "$empty" "$name" -C "$PWD" \
-              "dist/memcastle_${TAG}_${asset}" LICENSE README.md skills/*/ web/dist \
-              | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
+              -I 'gzip -n -9' -cf "dist/memcastle_${TAG}_${asset}.tar.gz" \
+              -C "$empty" "$name" -C "$PWD" \
+              "dist/memcastle_${TAG}_${asset}" LICENSE README.md skills/*/ web/dist
           done
 
           # The dashboard on its own (docs/adr/035), for the same reason: the AUR package and the Homebrew formula
@@ -366,8 +365,8 @@ jobs:
           tar --sort=name --format=gnu --mtime="@${epoch}" \
             --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' \
             --transform="s|^web/dist|${name}/${WEB_INSTALL_DIR}|" \
-            -cf - -C "$empty" "$name" -C "$PWD" web/dist \
-            | gzip -n -9 > "dist/memcastle_${TAG}_web.tar.gz"
+            -I 'gzip -n -9' -cf "dist/memcastle_${TAG}_web.tar.gz" \
+            -C "$empty" "$name" -C "$PWD" web/dist
 
       - name: Package the shared skills for AUR and Homebrew
         run: bash "$PACKAGING_ROOT/skills/archive.sh" . dist "$TAG"
@@ -428,8 +427,7 @@ jobs:
       # The SBOM is attached to the executables and tarballs it describes, not
       # to itself or to the checksums file.
       - name: List the artifacts the bill of materials describes
-        working-directory: dist
-        run: sha256sum -- memcastle_* > ../sbom-subjects
+        run: awk '$2 ~ /^memcastle_/' dist/SHA256SUMS > sbom-subjects
       - uses: actions/attest-sbom@v4
         with:
           subject-checksums: sbom-subjects

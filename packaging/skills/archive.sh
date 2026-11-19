@@ -37,5 +37,5 @@ name="memcastle-skills-$tag"
 # Fixed metadata and a path transform preserve the release layout without copying the inputs.
 tar -C "$assets" --sort=name --format=gnu --mtime="@$epoch" \
   --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' \
-  --transform="s|^|$name/|" -cf - "${members[@]}" \
-  | gzip -n -9 > "$dist/memcastle_${tag}_skills.tar.gz"
+  --transform="s|^|$name/|" -I 'gzip -n -9' \
+  -cf "$dist/memcastle_${tag}_skills.tar.gz" "${members[@]}"

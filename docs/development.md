@@ -139,7 +139,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
   The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.
   The WebAssembly suite runs in CI on Linux only, in its own `wasm` job with its own Codecov flag,
   and its `sources` job explicitly tests the `directory` reference source with `mise run sources:test -- directory`.
-  That job runs conformance, plus any source-owned `core-tests.rs` cases not expressible as conformance.
+  That job runs the reference source's conformance fixtures through the public source tooling.
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
   Those that start the daemon inside the test process are modules of one binary, `tests/in_process/main.rs`:
   each `tests/` binary links the whole server, about 600 MB with debug info, so sixteen of them were most of what
@@ -273,10 +273,10 @@ mise run test -- --filter-expr 'test(job)'
 
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
-The web TypeScript suite reports coverage too: with `COVERAGE=1`, `mise run web:check` runs its `test:cover` script,
+The web TypeScript suite reports coverage too: with `COVERAGE=1`, `mise run web:check` adds Vitest's `--coverage` flag,
 which writes lcov under `web/coverage/`; CI uploads it to Codecov under the `web` flag.
 Standalone agent plugins run their own client suites in their provider repositories.
-`.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web, integrations)
+`.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web)
 by path, so the Codecov page shows each area whatever flag covered it.
 Each component reflects the merged execution coverage from every reporting suite.
 Its required status permits the same 0.5% fluctuation as the project status,
@@ -290,8 +290,8 @@ independent plugin modules without testing any provider's discovery rules or cal
 The mock is a test fixture, not a releasable source: it lives outside `sources/` and is built only by the generic tests.
 `tests/source_isolation.rs` guards against reintroducing a concrete provider fixture into those tests.
 
-Each real WebAssembly source's own `mise run sources:test -- <name>` CI leg runs its conformance fixtures and source-owned
-behavior tests; `sources/directory/` retains the directory conformance cases.
+Each reference WebAssembly source's `mise run sources:test -- <name>` CI leg runs its conformance fixtures;
+`sources:check` discovers the projects and invokes the same task for each.
 Core's built-in directory adapter has its separate native conformance test.
 Scaffolding and sandbox tests (`tests/wasm_projects.rs`), OAuth tests (`tests/wasm_oauth.rs`) and the release bundle test
 use purpose-built components because their behavior is what those tests verify.

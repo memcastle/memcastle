@@ -3,8 +3,9 @@
 # Tool versions are resolved to exact builds in `mise.lock`, which is committed.
 # CI installs from these two files, so local runs and CI runs use identical tool versions.
 #
-# Tools no CI job needs are declared on their own task rather than in `[tools]`,
-# because `mise install` — what CI runs — installs `[tools]` only.
+# Tools no CI job needs are declared on their own task rather than in `[tools]`.
+# CI enables each job's required tools with MISE_ENABLE_TOOLS; local `mise install`
+# installs the project-wide toolset.
 # It matters as cargo-binstall has no prebuilt artifact for some cargo tools,
 # so a global entry would make every CI job compile them from source.
 [settings]
@@ -294,12 +295,11 @@ run = """
 #!/usr/bin/env bash
 set -euo pipefail
 # Development overrides must not make the installed-prefix test read assets from the checkout.
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
-export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 # The bundle tests consume the same build as the frontend's real-daemon tests, without rebuilding it.
 cargo test --test web_bundle -- --ignored
 cd web
-bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)"
+bun run test ${COVERAGE:+--coverage}
 # Against a real daemon, serving the build made above.
 bun run test:daemon
 """
@@ -334,20 +334,13 @@ dir = "web"
 description = "Build and conformance-test every reference WebAssembly source under sources/"
 # `memcastle source build` is what a source author runs, so this is also the proof that it works on the reference
 # sources. It needs the `wasm32-wasip2` target, which rust-toolchain.toml requests.
-depends = ["build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 for manifest in sources/*/memcastle-source.toml; do
   source="$(dirname "$manifest")"
   echo "==> $source"
-  # A source that wraps a program ships a stand-in for it in `fixtures/bin`, which its cases need
-  # first on the PATH because the real program needs data no fixture can carry.
-  PATH="$PWD/$source/fixtures/bin:$PATH" ./target/debug/memcastle source test "$source"
-  name="${source#sources/}"
-  if [[ -f "$source/core-tests.rs" ]]; then
-    cargo nextest run --features provider-tests --test "source_$name"
-  fi
+  mise run sources:test -- "${source#sources/}"
 done
 """
 
@@ -361,9 +354,6 @@ run = """
 set -euo pipefail
 # The stand-in for a wrapped program, when the source ships one (see `sources:check`).
 PATH="$PWD/sources/${usage_name?}/fixtures/bin:$PATH" ./target/debug/memcastle source test "sources/${usage_name?}"
-if [[ -f "sources/${usage_name?}/core-tests.rs" ]]; then
-  cargo nextest run --features provider-tests --test "source_${usage_name?}"
-fi
 """
 
 # The retrieval evaluation (docs/retrieval-evaluation.md). Explicit report-writing tasks stay outside `check` and `ci`;
@@ -378,7 +368,7 @@ description = "Measure retrieval quality and latency on the bundled dataset: pri
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_run)'
 """
 
@@ -389,7 +379,7 @@ description = "Re-measure the bundled dataset and rewrite the committed baseline
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 # Timings are not part of a baseline, so there is nothing to repeat.
 EVAL_UPDATE_BASELINE=1 EVAL_REPETITIONS=0 \\
   cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_run)'
@@ -402,13 +392,8 @@ arg "<base>" help="The report to compare against, such as tests/fixtures/retriev
 arg "<new>" help="The report to judge, such as target/eval/report.json"
 arg "[threshold]" help="The largest drop in any metric that is tolerated" default="0.02"
 '''
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
-EVAL_BASE="${usage_base?}" EVAL_NEW="${usage_new?}" EVAL_THRESHOLD="${usage_threshold:-0.02}" EVAL_FAIL_ON_REGRESSION=1 \\
-  cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_compare)'
-"""
+env = { EVAL_FAIL_ON_REGRESSION = "1" }
+run = '''EVAL_BASE="${usage_base?}" EVAL_NEW="${usage_new?}" EVAL_THRESHOLD="${usage_threshold:-0.02}" cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_compare)' '''
 
 [tasks."eval:longmemeval"]
 description = "Measure session retrieval on a downloaded LongMemEval file: mise run eval:longmemeval -- <file.json>"
@@ -418,7 +403,7 @@ usage = 'arg "<file>" help="A LongMemEval JSON file, such as longmemeval_s.json"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 EVAL_LONGMEMEVAL="$(realpath "${usage_file?}")" \\
   cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_longmemeval)'
 """

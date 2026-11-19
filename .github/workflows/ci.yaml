@@ -38,6 +38,8 @@ jobs:
   lint:
     name: 🕵️ Lint
     runs-on: ubuntu-latest
+    env:
+      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,prek,actionlint,aqua:koalaman/shellcheck,typos,aqua:ast-grep/ast-grep,git-cliff
     steps:
       - uses: actions/checkout@v7
 
@@ -57,6 +59,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       # Includes Cargo downloads and target outputs; do not duplicate rust-cache.
       # Workload generations scope fallback restores too, unlike key suffixes.
@@ -88,6 +91,8 @@ jobs:
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
     runs-on: ${{ matrix.os.runner }}
+    env:
+      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,cargo:cargo-nextest,cargo:cargo-llvm-cov
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +122,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       # Bootstrap tools first: mise installs on C: with a same-volume temporary rename.
       # Storage still precedes Cargo caches so their post hooks run before drive teardown.
@@ -140,8 +146,6 @@ jobs:
           # %b requires a build ID in each instrumented binary; Darwin keeps its native linker settings.
           RUSTFLAGS: ${{ runner.os == 'Windows' && '-C link-arg=/build-id' || runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
         run: |
-          # --no-report retains cached profiles unless they are explicitly cleaned first.
-          cargo llvm-cov clean --workspace
           # nextest's filter skips execution, not linking; select only basic Cargo targets too.
           targets=(--lib --bin memcastle --test in_process)
           for file in tests/*.rs; do
@@ -152,8 +156,7 @@ jobs:
               *) targets+=(--test "$name") ;;
             esac
           done
-          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}"
-          cargo llvm-cov report --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
 
       # Debug runs need raw inputs even when a corrupt profile prevents generating lcov.info.
       - name: Upload coverage artifacts
@@ -189,6 +192,8 @@ jobs:
   slow:
     name: 🐢 Process and retrieval tests
     runs-on: ubuntu-latest
+    env:
+      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,cargo:cargo-nextest,cargo:cargo-llvm-cov
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -198,14 +203,12 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: slow-v1
       - name: Run slow tests (with coverage)
-        run: |
-          cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --profile ci-slow --no-report --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
-          cargo llvm-cov report --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --profile ci-slow --lcov --output-path lcov.info --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -226,6 +229,7 @@ jobs:
     name: 🧬 WebAssembly tests
     runs-on: ubuntu-latest
     env:
+      MISE_ENABLE_TOOLS: rust,mr-boxington,cargo-binstall,cargo:cargo-nextest,cargo:cargo-llvm-cov
       # Rust 1.100's WASI imports exceed Wasmtime 41's contract; keep fixture builds on the last green compiler.
       RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
@@ -240,6 +244,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       - uses: jdx/mr-boxington-action@v1
         with:
@@ -251,10 +256,7 @@ jobs:
       # linked, instrumented, only for the profile's filter to skip it. Cargo still builds the `memcastle` binary these
       # tests start.
       - name: Run tests (with coverage)
-        run: |
-          cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --profile ci-wasm --no-report --test 'wasm_*'
-          cargo llvm-cov report --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --profile ci-wasm --lcov --output-path lcov.info --test 'wasm_*'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -276,6 +278,7 @@ jobs:
     name: 🧩 Source (${{ matrix.source }})
     runs-on: ubuntu-latest
     env:
+      MISE_ENABLE_TOOLS: rust,mr-boxington
       # Match the component compiler used by the Wasm suite, including Cargo spawned by source tooling.
       RUSTUP_TOOLCHAIN: "1.99.1"
     strategy:
@@ -292,6 +295,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       - uses: jdx/mr-boxington-action@v1
         with:
@@ -321,19 +325,15 @@ jobs:
           version: 1.28.0
           cache-generation: example-plugin-v1
 
-      - name: Check Core release selection tooling
-        run: python3 -m unittest discover -s packaging/plugins
+      - name: Test the Core setup action
+        run: python3 -m unittest discover -s packaging/actions
 
       - name: Build and package the example plugin
         run: |
           python3 plugins/example/scripts/package.py
           python3 -m unittest discover -s plugins/example/tests
-          git diff --exit-code -- plugins/example/plugin.toml || {
-            echo "::error::packaging must not change plugin.toml"
-            exit 1
-          }
-          git diff --exit-code -- plugins/example/manifest.toml || {
-            echo "::error::packaging must not change the checked-in manifest.toml"
+          git diff --exit-code -- plugins/example/plugin.toml plugins/example/manifest.toml || {
+            echo "::error::packaging must not change the plugin descriptor or checked-in manifest"
             exit 1
           }
           (cd plugins/example/dist && for checksum in *.sha256sum; do sha256sum --check "$checksum"; done)
@@ -358,6 +358,8 @@ jobs:
   web:
     name: 🏰 Web UI
     runs-on: ubuntu-latest
+    env:
+      MISE_ENABLE_TOOLS: rust,mr-boxington,bun
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -366,6 +368,7 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+          cache_key_prefix: mise-v2-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       - uses: jdx/mr-boxington-action@v1
         with:
@@ -379,19 +382,9 @@ jobs:
       # Cargo builds the daemon with the integration tests; the frontend consumes that same binary afterward.
       - name: Build and test the dashboard
         env:
-          # Makes the task run `test:cover`, which writes lcov beside each package.
+          # Adds Vitest's coverage flag; the reporter writes repository-relative LCOV paths.
           COVERAGE: "1"
         run: mise run web:check
-
-      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
-      # apart from the daemon's own `src/`. Prefixing them makes each file unique.
-      - name: Make the web coverage paths relative to the repository
-        if: ${{ !cancelled() }}
-        run: |
-          for report in web/coverage/lcov.info; do
-            package="$(dirname "$(dirname "$report")")"
-            sed -i "s|^SF:|SF:$package/|" "$report"
-          done
 
       - name: Upload web coverage to Codecov
         if: ${{ !cancelled() }}
@@ -477,7 +470,13 @@ jobs:
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
-          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          # A root package's explicit version wins; an inherited version comes from the workspace.
+          version="$(yq -p toml -o json '.' Cargo.toml | jq -er '
+            .package."rust-version" as $package |
+            (if $package == null or $package == {workspace: true}
+              then .workspace.package."rust-version" else $package end) |
+            select(type == "string" and length > 0)
+          ')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master

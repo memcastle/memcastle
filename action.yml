@@ -7,7 +7,7 @@ inputs:
 outputs:
   binary:
     description: Absolute path to the verified memcastle executable
-    value: ${{ steps.path.outputs.binary }}
+    value: ${{ steps.download.outputs.binary }}
   core_sha:
     description: Core source SHA for development, or the resolved exact stable version
     value: ${{ steps.download.outputs.core_sha }}
@@ -28,14 +28,14 @@ runs:
         selected="$VERSION"
         if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
           # Only release trees require discovery; exact tags fail naturally on download.
-          selected="$(gh api --paginate 'repos/memcastle/memcastle/releases?per_page=100' \
-            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-            | awk -v tree="$VERSION" '
-                /^[0-9]+\.[0-9]+\.[0-9]+$/ {
-                  split($0, version, "."); split(tree, requested, ".");
-                  if (version[1] == requested[1] && (index(tree, ".") == 0 || version[2] == requested[2])) print
-                }' | sort -V | tail -n 1)"
-          [[ -n "$selected" ]] || { echo "::error::no published Core release matches $VERSION"; exit 1; }
+          selected="$(gh api --paginate --slurp 'repos/memcastle/memcastle/releases?per_page=100' |
+            jq -er --arg tree "$VERSION" '
+              ($tree | split(".") | map(tonumber)) as $requested |
+              [.[][] | select(.draft == false and .prerelease == false) | .tag_name |
+                select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) |
+                select((split(".") | map(tonumber) | .[0:($requested | length)]) == $requested)] |
+              max_by(split(".") | map(tonumber)) // error("no published Core release matches " + $tree)
+            ')"
         fi
         if [[ "$selected" == development ]]; then
           metadata="$(gh api repos/memcastle/memcastle/releases/tags/development)"
@@ -51,8 +51,9 @@ runs:
           name="memcastle_${selected}_linux-amd64"
         fi
         dest="$(mktemp -d "$RUNNER_TEMP/memcastle-XXXXXXXX")"
-        gh release download "$selected" --repo memcastle/memcastle --pattern "$name" --dir "$dest"
-        gh release download "$selected" --repo memcastle/memcastle --pattern SHA256SUMS --dir "$dest"
+        gh release download "$selected" --repo memcastle/memcastle --pattern "$name" --pattern SHA256SUMS --dir "$dest"
+        # gh matches the union of patterns, so one missing asset alone need not fail the download.
+        test -s "$dest/$name" && test -s "$dest/SHA256SUMS"
         # A release may have other checksums; only the selected binary is trusted.
         (cd "$dest" && awk -v name="$name" '$2 == name { print }' SHA256SUMS | sha256sum --check --status)
         if [[ "$selected" == development ]]; then
@@ -62,21 +63,10 @@ runs:
             echo '::error::development release changed during download'; exit 1;
           }
         fi
-        chmod +x "$dest/$name"
-        echo "binary=$dest/$name" >> "$GITHUB_OUTPUT"
+        mv "$dest/$name" "$dest/memcastle"
+        chmod +x "$dest/memcastle"
+        echo "$dest" >> "$GITHUB_PATH"
+        echo "MEMCASTLE_BIN=$dest/memcastle" >> "$GITHUB_ENV"
+        echo "binary=$dest/memcastle" >> "$GITHUB_OUTPUT"
         echo "core_sha=$sha" >> "$GITHUB_OUTPUT"
         echo "version=$selected" >> "$GITHUB_OUTPUT"
-    - name: Put verified binary on PATH
-      id: path
-      shell: bash
-      env:
-        BINARY: ${{ steps.download.outputs.binary }}
-      run: |
-        set -euo pipefail
-        directory="$RUNNER_TEMP/memcastle-${{ steps.download.outputs.core_sha }}/bin"
-        mkdir -p "$directory"
-        ln -sfn "$BINARY" "$directory/memcastle"
-        echo "$directory" >> "$GITHUB_PATH"
-        # Pi's integration tests require an explicit executable path, even when memcastle is on PATH.
-        echo "MEMCASTLE_BIN=$BINARY" >> "$GITHUB_ENV"
-        echo "binary=$directory/memcastle" >> "$GITHUB_OUTPUT"
