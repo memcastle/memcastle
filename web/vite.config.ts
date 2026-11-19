@@ -3,7 +3,7 @@ import { fileURLToPath, URL } from "node:url"
 import { defineConfig } from "vite"
 import { discoverDaemon } from "./dev/daemon.ts"
 
-// The daemon serves this build under `/ui/` (assets resolve to `web/dist`, in a worktree as in a package), so every
+// The daemon serves this build under `/ui/` (web/dist in a checkout, web in a package), so every
 // URL in the build is relative to that prefix. `src/api/client.ts` calls `/api` on the same origin and nothing else.
 export default defineConfig(async ({ command }) => ({
   base: "/ui/",

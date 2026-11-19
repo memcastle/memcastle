@@ -3,6 +3,8 @@
 ## Status
 
 Accepted.
+Pi integration implementation and packaging now live in the standalone provider plugin repository.
+The Core integration packaging script and bundle-test references below are historical and have been removed.
 Amends [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) for the Pi integration:
 OpenCode keeps `@modelcontextprotocol/sdk`.
 Builds on [ADR-019](019-shared-integration-contract.md) and [ADR-034](034-agent-integration-distribution.md).

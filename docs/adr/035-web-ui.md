@@ -29,23 +29,24 @@ Five decisions follow, and each has an alternative that is easier for one of the
 
 ## Decision
 
-- **The canonical name is `web`, and the layout is the same in a checkout and in a package.**
+- **The canonical name is `web`; build destinations are not installation paths.**
   The source is `web/` (a bun package), the build is `web/dist/`, and a package installs it at
-  `<prefix>/share/memcastle/web/dist/`.
-  The daemon asks `Assets::find("web/dist/<path>")`, so development is `--assets-dir <checkout>` after
-  `mise run web:build`, exactly as for integrations (ADR-034), and a package is found through the executable's prefix
-  with no flag.
+  `<prefix>/share/memcastle/web/`.
+  The daemon asks `Assets::find_web(<path>)`, which selects `web/dist/` for a checkout identified by `web/package.json`
+  and `web/` for installed assets or an unpacked package supplied through `--assets-dir`.
+  Development is `--assets-dir <checkout>` after `mise run web:build`; installed assets need no flag.
+  A missing checkout build never falls back to the source `web/index.html` or another installation.
   There is one lookup, one data root and no `web_dir` setting.
-  `web/dist/` is ignored by git and produced by `packaging/web/build.sh`, the script the release and `mise run web:package`
-  both run.
+  `web/dist/` is ignored by git and produced by the package's `bun run build`, also used by `mise run web:build`.
+  Packages and archives consume its contents directly, without an intermediate asset tree.
 - **It is opt-in: `web.enable` (`MEMCASTLE_WEB_ENABLE`), false by default.**
   A daemon that was not asked for a UI answers no `/ui`: the routes are not merged, so the authentication layer
   answers an anonymous request with 401 and an authenticated one with 404, as for any path that does not exist.
   There is no CLI flag: `daemon start` already passes the environment and the file on.
 - **Enabled but not installed is a 503 with the remedy, never a failed start.**
-  `Assets::EMBEDDED` gains one entry, `web/dist/index.html`: a small page saying the dashboard was enabled and its files
+  `Assets::EMBEDDED` holds `web/index.html`: a small page saying the dashboard was enabled and its files
   were not found, with the three ways to fix that.
-  A built `web/dist/index.html` in the chosen directory outranks it (the rule of ADR-013), so the page exists exactly when
+  A built index in the selected dashboard directory outranks it (the rule of ADR-013), so the page exists exactly when
   the files do not.
   The REST API and MCP are unaffected, and the startup log warns.
   Embedding the dashboard itself stays rejected (ADR-013): it would bloat a headless binary and tie every UI fix to a
@@ -102,11 +103,11 @@ Five decisions follow, and each has an alternative that is easier for one of the
   The `web-http-only` hook fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path or `/api/db`
   under `web/` (Markdown, `node_modules` and `dist` excepted): invariant 11.
 - **Tests cover discovery, packaging, integration and the missing build.**
-  `src/assets` tests prove a packaged layout and a worktree resolve `web/dist/index.html` through the same lookup and that
+  `src/assets` tests prove installed `web/index.html` and checkout `web/dist/index.html` use the same resolver and that
   without it the embedded page stands in.
   `tests/in_process/web.rs` and `auth.rs` prove the opt-in, the headers, the traversal refusals, the public shell, and that
   every `/api` route stays guarded.
-  `tests/web_bundle.rs` runs the release's script, checks what the package holds,
+  `tests/web_bundle.rs` consumes the existing build, checks that sources and dependencies do not ship,
   and serves it from an installed prefix and from the checkout.
   `web/test` holds the client, the login and the route guard (vitest) and runs the same client against a real daemon (bun).
   `mise run web:check` runs all of it and is in `check`; CI has a job for it and the packaging job lists the file.
@@ -146,7 +147,7 @@ Five decisions follow, and each has an alternative that is easier for one of the
 - A fourth tree, `web/`, sits under the assets root beside `sources/`, `integrations/` and `skills/`.
   A release gains `memcastle_<version>_web.tar.gz`, deb and rpm carry `/usr/share/memcastle/web`,
   and the AUR and Homebrew recipes fetch the new asset.
-- Building a release needs node as well as bun, and the CI packaging job lists `web/dist/index.html`.
+- Building a release needs Node as well as Bun, and the CI packaging job checks installed `web/index.html`.
 - There are two public paths on a daemon with authentication on and the dashboard enabled, and they are tested as such:
   the liveness probe and the static shell.
 - `/api/config` and `/api/graph` are part of the REST contract and documented in `docs/mcp-and-api.md`;

@@ -7,7 +7,7 @@ The daemon serves its build under `/ui` when `web.enable` is set; see [docs/web.
 ```sh
 mise run web:build   # build into web/dist, then `memcastle serve --assets-dir "$PWD"` with web.enable
 mise run web:dev     # dev server with hot reload, proxying /api to the running daemon (MEMCASTLE_URL to override)
-mise run web:check   # typecheck, test, build, package, and serve from a real daemon
+mise run web:check   # build, test, and verify checkout and installed-prefix serving
 ```
 
 Layout: `src/api` is the typed client (the only place that calls `fetch`), `src/session.ts` the token and memory mode,

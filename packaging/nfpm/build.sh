@@ -4,8 +4,7 @@
 # Usage: packaging/nfpm/build.sh <version> <dist-dir>
 #
 # Reads  <dist-dir>/memcastle_<version>_linux-{amd64,arm64}
-# Reads  $SOURCES_DIR (optional bundle), $INTEGRATIONS_DIR (packaging/integrations/build.sh) and
-#        $WEB_DIR (packaging/web/build.sh), if set
+# Reads  $SKILLS_DIR and $WEB_DIST_DIR (default: skills/ and web/dist/)
 # Runs   the amd64 binary once, to print its shell completion scripts
 # Writes <dist-dir>/memcastle_<version>_linux-{amd64,arm64}.{deb,rpm}
 #
@@ -31,14 +30,14 @@ export SOURCE_DATE_EPOCH
 # packages. The staged file lost its execute bit in the artifact download.
 completions="$(mktemp -d)"
 trap 'rm -rf "${completions}"' EXIT
-runner="${completions}/memcastle"
 amd64="${dist}/memcastle_${version}_linux-amd64"
 if [ ! -f "${amd64}" ]; then
   echo "error: ${amd64} is missing; stage the binaries before packaging" >&2
   exit 1
 fi
-cp "${amd64}" "${runner}"
-chmod +x "${runner}"
+chmod +x "${amd64}"
+# Resolve the path so the shell never mistakes the executable for a PATH lookup.
+runner="$(realpath "${amd64}")"
 for shell in bash zsh fish; do
   "${runner}" completions "${shell}" > "${completions}/memcastle.${shell}"
   # A binary that prints nothing would ship a package whose completion file is
@@ -50,19 +49,15 @@ for shell in bash zsh fish; do
 done
 export COMPLETIONS_DIR="${completions}"
 
-# Core has no bundled sources (docs/adr/040), but installed assets retain the empty directory for lookup.
-# A caller can still supply an optional source bundle without changing the native package layout.
-export SOURCES_DIR="${SOURCES_DIR:-${completions}/sources}"
-mkdir -p "${SOURCES_DIR}"
-
-# The agent integrations and the shared skills (docs/adr/034): `integrations/` and `skills/` built by
-# packaging/integrations/build.sh. Empty directories when the caller has none, for the same reason as above.
-export INTEGRATIONS_DIR="${INTEGRATIONS_DIR:-${completions}/integrations-tree}"
-mkdir -p "${INTEGRATIONS_DIR}/integrations" "${INTEGRATIONS_DIR}/skills"
-
-# The web UI (docs/adr/035): `web/dist/` built by packaging/web/build.sh. An empty tree when the caller has none.
-export WEB_DIR="${WEB_DIR:-${completions}/web-tree}"
-mkdir -p "${WEB_DIR}/web"
+# Package the actual inputs; an empty fallback tree would silently produce an incomplete release.
+export SKILLS_DIR="${SKILLS_DIR:-skills}"
+export WEB_DIST_DIR="${WEB_DIST_DIR:-web/dist}"
+# Recovery may package an older binary that still requires the former nested layout.
+export WEB_INSTALL_DIR="${WEB_INSTALL_DIR:-web}"
+if [ ! -f "${WEB_DIST_DIR}/index.html" ]; then
+  echo "error: ${WEB_DIST_DIR}/index.html is missing; run mise run web:build before packaging" >&2
+  exit 1
+fi
 
 for asset in linux-amd64 linux-arm64; do
   binary="${dist}/memcastle_${version}_${asset}"
@@ -74,16 +69,11 @@ for asset in linux-amd64 linux-arm64; do
   fi
   export VERSION="${version}"
   export BINARY="${binary}"
+  # nfpm accepts Go architecture names and translates them for each package format.
+  export NFPM_ARCH="${asset#linux-}"
   for format in deb rpm; do
-    # deb and rpm name the same architectures differently.
-    case "${format}-${asset}" in
-      deb-linux-amd64) NFPM_ARCH=amd64 ;;
-      deb-linux-arm64) NFPM_ARCH=arm64 ;;
-      rpm-linux-amd64) NFPM_ARCH=x86_64 ;;
-      rpm-linux-arm64) NFPM_ARCH=aarch64 ;;
-    esac
-    export NFPM_ARCH
-    nfpm package --config packaging/nfpm/nfpm.yaml --packager "${format}" \
+    # Recovery runs repaired tooling beside tagged sources; its config must come from the same revision as the script.
+    nfpm package --config "$(dirname "$0")/nfpm.yaml" --packager "${format}" \
       --target "${dist}/memcastle_${version}_${asset}.${format}"
   done
 done

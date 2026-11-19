@@ -10,6 +10,8 @@ distributed as one bundled file, still tested from its sources).
 [ADR-035](035-web-ui.md) adds `web/` as a further tree under the same root.
 After provider integrations moved to plugins, Core's separate archive carries only shared skills as
 `memcastle_<version>_skills.tar.gz`; the integrations archive described below is historical.
+Core integration build scripts, tasks and bundle tests described below have been removed.
+Shared skills are packaged directly from their source directories.
 
 ## Context
 

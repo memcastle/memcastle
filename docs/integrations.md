@@ -210,10 +210,9 @@ are looking at.
 ### Developing MemCastle
 
 To develop an integration, build the archive from its provider checkout and install that plugin into a disposable palace.
-Core's checkout still holds the shared skills and source-packaging assets:
+Core's checkout holds the shared skills; integration files come from provider plugins:
 
 ```sh
-mise run integrations:package  # package the shared skills
 memcastle integration list --assets-dir "$PWD"
 ```
 
@@ -221,9 +220,9 @@ memcastle integration list --assets-dir "$PWD"
 In this repository `mise.toml` sets it to the Core checkout during development.
 Run the command from another directory to use installed assets, and see
 [Development](development.md#running-the-daemon-locally) for what else it sets.
-`mise run integrations:check` unsets it and checks that Core packages no agent integration.
+Core packages shared skills directly and carries no agent integration assets.
 
-`mise run integrations:package` lays out the shared skills under `target/bundled-integrations` for a release.
+Release packages consume `skills/*/` directly, without a separate integration build or asset-staging step.
 
 The bundled mining sources use the same root: with `--assets-dir` pointing at a root whose `sources/` holds a
 `source.wasm` and a `memcastle-source.toml` in each directory, the daemon offers those as the
@@ -312,7 +311,7 @@ except `validation_failed`.
 
 | Code | What happened | What to do |
 |---|---|---|
-| `memcastle::integration::assets_missing` | No assets root: a standalone binary, or a checkout whose bundles are not built, or a package missing files, such as a skill the manifest names. | Install MemCastle from a package, or pass `--assets-dir` and run `mise run integrations:build` first. |
+| `memcastle::integration::assets_missing` | No assets root, or an integration is missing a file its manifest names. | Install or reinstall the provider plugin that supplies the integration; pass its assets directory with `--assets-dir` if needed. |
 | `memcastle::integration::not_found` | No integration of that name is shipped under the assets root. | `memcastle integration list` shows the names, and the assets root it looked in. |
 | `memcastle::integration::manifest_invalid` | A `memcastle-integration.toml` breaks a rule. The message names the key. | Fix the manifest (or reinstall the package, if you did not write it). |
 | `memcastle::integration::incompatible` | Your MemCastle or your agent is outside the range the integration declares. The message names both versions. | Upgrade the one that is too old, or use a MemCastle that ships a matching integration. |

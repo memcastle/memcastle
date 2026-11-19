@@ -68,13 +68,10 @@ jobs:
           if [[ '${{ matrix.smoke }}' == true ]]; then
             'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' --version
           fi
-          mkdir -p dist
-          cp 'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' \
-            'dist/memcastle_${{ matrix.asset }}${{ matrix.ext }}'
       - uses: actions/upload-artifact@v7
         with:
           name: development-${{ matrix.asset }}
-          path: dist/*
+          path: target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}
           if-no-files-found: error
 
   publish:
@@ -99,9 +96,10 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          pattern: development-*
-          merge-multiple: true
+          name: development-linux-amd64
           path: dist
+      - name: Name the development binary
+        run: mv dist/memcastle dist/memcastle_linux-amd64
       - name: Publish a complete, current revision
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}

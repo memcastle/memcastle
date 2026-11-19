@@ -49,8 +49,6 @@ ignore:
   - "tests/**"
   - "web/test/**"
   - "web/dist/**"
-  - "integrations/*/test/**"
-  - "integrations/*/dist/**"
 
 # A view by area, whatever the flag: each component aggregates the files under its paths across every report.
 component_management:
@@ -88,9 +86,6 @@ component_management:
       statuses:
         - type: project
           informational: true
-    - component_id: integrations
-      name: Agent integrations
-      paths: [integrations/*/src/**]
 
 # Refresh the PR comment even when the merged coverage has not changed.
 comment:

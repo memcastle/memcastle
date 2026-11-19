@@ -3,7 +3,7 @@
 //!
 //! The dashboard is opt-in, served from the runtime assets, and the one thing the authentication layer lets through
 //! without a token, so these tests hold all three: a disabled daemon answers no `/ui`, an enabled one serves exactly
-//! `web/dist`, and nothing but the static files is ever open.
+//! the selected dashboard directory, and nothing but the static files is ever open.
 
 use crate::common;
 
@@ -18,9 +18,9 @@ const SECRET: &str = "mc_a_shared_secret_for_the_dashboard_tests_01";
 const INDEX: &str =
     "<!doctype html><title>MemCastle</title><script src=\"/ui/assets/app-abc123.js\"></script>";
 
-/// A tree shaped like a Vite build, under `root/web/dist`, plus a file outside it that must never be served.
+/// An installed dashboard, plus a file outside it that must never be served.
 fn built_dashboard(root: &Path) {
-    let dist = root.join("web/dist");
+    let dist = root.join("web");
     std::fs::create_dir_all(dist.join("assets")).unwrap();
     std::fs::write(dist.join("index.html"), INDEX).unwrap();
     std::fs::write(dist.join("assets/app-abc123.js"), "console.log('app')").unwrap();
@@ -201,7 +201,7 @@ async fn no_path_leaves_the_dashboard_directory() {
         let body = response.text().await.unwrap();
         assert!(
             !body.contains("outside the dashboard") && !body.contains("root:"),
-            "{path} served a file from outside web/dist: {body}"
+            "{path} served a file from outside the dashboard: {body}"
         );
     }
     daemon.shutdown().await;
@@ -209,8 +209,11 @@ async fn no_path_leaves_the_dashboard_directory() {
 
 #[tokio::test]
 async fn an_enabled_dashboard_without_a_build_says_so_and_the_daemon_still_works() {
-    // Assets exist but carry no `web/` tree: the state of a checkout where nobody ran `mise run web:build`.
+    // A checkout's source index exists before a build and must never count as the dashboard.
     let assets = tempfile::tempdir().unwrap();
+    std::fs::create_dir(assets.path().join("web")).unwrap();
+    std::fs::write(assets.path().join("web/package.json"), "{}").unwrap();
+    std::fs::write(assets.path().join("web/index.html"), "source index").unwrap();
     let daemon = dashboard(assets.path(), false).await;
 
     let page = get(&daemon, "/ui/").await;
@@ -229,6 +232,10 @@ async fn an_enabled_dashboard_without_a_build_says_so_and_the_daemon_still_works
     );
     assert_eq!(route.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(file.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        get(&daemon, "/ui/package.json").await.status(),
+        StatusCode::NOT_FOUND
+    );
     assert_eq!(health.status(), StatusCode::OK);
     assert_eq!(config["web"], json!({"enabled": true, "built": false}));
     daemon.shutdown().await;

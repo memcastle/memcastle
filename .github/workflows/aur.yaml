@@ -144,7 +144,7 @@ jobs:
           # Shared skills must be found from the binary's own prefix with no flag.
           test -f /usr/share/memcastle/skills/wake-up/SKILL.md
           # And the dashboard, at the path a checkout has too.
-          test -f /usr/share/memcastle/web/dist/index.html
+          test -f /usr/share/memcastle/web/index.html
           memcastle integration list --json | grep -q '"assets_source": "installed"'
 
       - name: Generate .SRCINFO

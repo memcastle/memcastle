@@ -6,10 +6,12 @@ The toolchain is managed by [mise](https://mise.jdx.dev/);
 every tool is pinned to an exact build in `mise.lock`, so a local run and a CI run use the same versions.
 
 ```bash
-mise install          # the tools and Git hooks
+mise install          # the tools, Git hooks and frontend dependencies
 ```
 
 Mise's postinstall hook installs both `pre-commit` and `commit-msg` hooks.
+It also installs frontend dependencies in `web/` with the frozen Bun lockfile.
+CI sets `MISE_NO_HOOKS=1` and installs those dependencies explicitly only in frontend jobs.
 Prek installs Commitizen and its Emotional plugin in an isolated Python environment
 for commit-message validation.
 
@@ -139,14 +141,9 @@ Use `mise exec -- cargo build` directly for one-off profile/target options.
 | `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
-| `mise run sources:package` | Exercise local source-bundle packaging into `target/bundled-sources`; Core releases carry no sources |
-| `mise run integrations:check` | Package the shared skills and check the checkout and release asset layouts |
-| `mise run integrations:build` | Prepare any Core-shipped declarative integrations (currently none) |
-| `mise run integrations:package` | Lay out the shared skills that ship with releases in `target/bundled-integrations` |
-| `mise run web:check` | Typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node) |
+| `mise run web:check` | Build and test the web UI, including checkout and installed-prefix serving |
 | `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs bun and node) |
 | `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs bun and node) |
-| `mise run web:package` | Lay out the dashboard that ships with releases in `target/bundled-web` (needs bun and node) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |
@@ -275,8 +272,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 The release is built to be reproducible, and two things keep it that way.
 The Rust toolchain, `cross` and the runner images are pinned to exact versions,
 so moving any of them is an edit to the workflow and not something that happens between two releases.
-The publish job also installs Bun at the version recorded in `mise.lock`, alongside Node 24,
-so the web UI packages with the same tool version used in local checks.
+The publish job installs Bun and Node at the versions recorded in `mise.lock`,
+so the web UI packages with the same tool versions used in local checks.
 Build paths are remapped to fixed names, and the tarballs have a fixed order, timestamps and ownership.
 CI does not rebuild the release to check this, because two LTO release builds are too slow for a pull request.
 Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
@@ -317,6 +314,8 @@ gh workflow run recover-release.yaml --ref main -f tag=<tag> -f run_id=<failed-p
 
 The recovery verifies that the saved binaries came from the tag, packages the tagged source with the fixed publish
 workflow, runs the package smoke tests and attestations, and uploads the assets to the existing draft.
+Packaging tooling comes from the repaired workflow revision; frontend sources and tool versions come from the tag.
+Recovery retains the nested dashboard layout when required by an older binary.
 It never publishes the draft automatically: check that every expected asset, `SHA256SUMS`, and the attestations are
 present and valid, then make the existing release public with `gh release edit <tag> --draft=false`.
 If a platform build failed or its artifact expired, repair the build and use the normal release process instead.

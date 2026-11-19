@@ -43,19 +43,18 @@ const SYSTEM_SHARE_DIRS: &[&str] = &["/usr/local/share/memcastle", "/usr/share/m
 #[cfg(not(unix))]
 const SYSTEM_SHARE_DIRS: &[&str] = &[];
 
-/// The directory under the assets root holding the built dashboard.
-///
-/// The same relative path in a packaged installation (`<prefix>/share/memcastle/web/dist`) and in a worktree
-/// (`<checkout>/web/dist`), so one lookup serves both (docs/adr/035).
-pub const WEB_DIST_DIR: &str = "web/dist";
-/// The dashboard's entry point, relative to the assets root.
-pub const WEB_INDEX: &str = "web/dist/index.html";
+/// Installed dashboard assets omit the build tool's output-directory name.
+const WEB_DIR: &str = "web";
+/// A checkout keeps its build separate from frontend source files.
+const CHECKOUT_WEB_DIR: &str = "web/dist";
+/// The installed dashboard's entry point, relative to the assets root.
+pub const WEB_INDEX: &str = "web/index.html";
 
 /// Assets compiled into the binary, as `(relative path, bytes)`.
 ///
 /// The only version-coupled runtime data (the schema and the data migrations) is embedded by other means and is
 /// not a file asset. What is here is the page served in place of the dashboard when it is enabled but its build is
-/// absent: a built `web/dist/index.html` found in the chosen directory always outranks it, and it is the one
+/// absent: a built dashboard found in the chosen directory always outranks it, and it is the one
 /// embedded asset because a page that names the remedy must exist precisely when the real files do not.
 const EMBEDDED: &[(&str, &[u8])] = &[(WEB_INDEX, include_bytes!("web-unavailable.html"))];
 
@@ -145,6 +144,7 @@ pub enum Asset {
 #[derive(Debug, Clone)]
 pub struct Assets {
     source: AssetSource,
+    web_dir: &'static str,
 }
 
 impl Assets {
@@ -163,6 +163,12 @@ impl Assets {
             }
             return Ok(Self {
                 source: AssetSource::Override(dir.to_path_buf()),
+                // The source index also exists before a checkout is built; never serve it as the dashboard.
+                web_dir: if dir.join("web/package.json").is_file() {
+                    CHECKOUT_WEB_DIR
+                } else {
+                    WEB_DIR
+                },
             });
         }
         // Only the first existing directory is used, not a merge of several:
@@ -173,7 +179,10 @@ impl Assets {
             .into_iter()
             .find(|dir| dir.is_dir())
             .map_or(AssetSource::Embedded, AssetSource::Installed);
-        Ok(Self { source })
+        Ok(Self {
+            source,
+            web_dir: WEB_DIR,
+        })
     }
 
     /// Resolve against the running process's own layout.
@@ -206,7 +215,26 @@ impl Assets {
     /// Whether a built dashboard is present, as opposed to the embedded "not installed" page.
     #[must_use]
     pub fn web_is_built(&self) -> bool {
-        matches!(self.find(WEB_INDEX), Some(Asset::File(_)))
+        matches!(self.find_web("index.html"), Some(Asset::File(_)))
+    }
+
+    /// Find a file relative to the selected dashboard directory, never mixing checkout and installed layouts.
+    #[must_use]
+    pub fn find_web(&self, relative: &str) -> Option<Asset> {
+        // Validate before prefixing: an absolute request must not become a valid relative asset path.
+        if relative.is_empty()
+            || !Path::new(relative)
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+        {
+            return None;
+        }
+        self.find(&format!("{}/{relative}", self.web_dir))
+            .or_else(|| {
+                // A missing checkout build needs the same remedy page as an incomplete installation.
+                (relative == "index.html")
+                    .then_some(Asset::Embedded(include_bytes!("web-unavailable.html")))
+            })
     }
 
     /// Find one asset by its path relative to the asset root.
@@ -446,10 +474,18 @@ mod tests {
         assert_eq!(assets.find(""), None);
     }
 
-    /// Write a built dashboard (`web/dist/index.html`) under `root`.
+    /// Write an installed dashboard under `root`.
     fn build_web(root: &Path) {
-        std::fs::create_dir_all(root.join(WEB_DIST_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(WEB_DIR)).unwrap();
         std::fs::write(root.join(WEB_INDEX), "<html>built</html>").unwrap();
+    }
+
+    /// A checkout has a source index as well as the built one, so falling back to web/ would expose sources.
+    fn build_checkout(root: &Path) {
+        std::fs::create_dir_all(root.join(CHECKOUT_WEB_DIR)).unwrap();
+        std::fs::write(root.join("web/package.json"), "{}").unwrap();
+        std::fs::write(root.join("web/index.html"), "source index").unwrap();
+        std::fs::write(root.join("web/dist/index.html"), "built").unwrap();
     }
 
     #[test]
@@ -461,7 +497,7 @@ mod tests {
         let assets = Assets::resolve(None, &search(Some(bin))).unwrap();
 
         assert_eq!(
-            assets.find(WEB_INDEX),
+            assets.find_web("index.html"),
             Some(Asset::File(share.join(WEB_INDEX)))
         );
         assert!(assets.web_is_built());
@@ -470,15 +506,16 @@ mod tests {
     #[test]
     fn a_worktree_resolves_the_dashboard_through_the_same_lookup_as_a_package() {
         let checkout = tempfile::tempdir().unwrap();
-        build_web(checkout.path());
+        build_checkout(checkout.path());
 
         let assets = Assets::resolve(Some(checkout.path()), &search(None)).unwrap();
 
         assert_eq!(
-            assets.find(WEB_INDEX),
-            Some(Asset::File(checkout.path().join(WEB_INDEX)))
+            assets.find_web("index.html"),
+            Some(Asset::File(checkout.path().join("web/dist/index.html")))
         );
         assert!(assets.web_is_built());
+        assert_eq!(assets.find_web("package.json"), None);
     }
 
     #[test]
@@ -487,13 +524,13 @@ mod tests {
         let (bin, share) = prefix(root.path(), true);
         build_web(&share);
         let checkout = root.path().join("checkout");
-        build_web(&checkout);
+        build_checkout(&checkout);
 
         let assets = Assets::resolve(Some(&checkout), &search(Some(bin))).unwrap();
 
         assert_eq!(
-            assets.find(WEB_INDEX),
-            Some(Asset::File(checkout.join(WEB_INDEX)))
+            assets.find_web("index.html"),
+            Some(Asset::File(checkout.join("web/dist/index.html")))
         );
     }
 
@@ -507,10 +544,34 @@ mod tests {
             Assets::resolve(None, &search(Some(bin))).unwrap(),
             Assets::resolve(None, &search(None)).unwrap(),
         ] {
-            assert!(matches!(assets.find(WEB_INDEX), Some(Asset::Embedded(_))));
+            assert!(matches!(
+                assets.find_web("index.html"),
+                Some(Asset::Embedded(_))
+            ));
             assert!(!assets.web_is_built());
         }
         assert!(share.is_dir());
+    }
+
+    #[test]
+    fn an_unbuilt_checkout_never_serves_its_source_index_or_an_installed_build() {
+        let root = tempfile::tempdir().unwrap();
+        let (bin, share) = prefix(root.path(), true);
+        build_web(&share);
+        let checkout = root.path().join("checkout");
+        std::fs::create_dir_all(checkout.join("web")).unwrap();
+        std::fs::write(checkout.join("web/package.json"), "{}").unwrap();
+        std::fs::write(checkout.join("web/index.html"), "source index").unwrap();
+        let assets = Assets::resolve(Some(&checkout), &search(Some(bin))).unwrap();
+
+        assert!(!assets.web_is_built());
+        assert!(matches!(
+            assets.find_web("index.html"),
+            Some(Asset::Embedded(_))
+        ));
+        assert_eq!(assets.find_web("package.json"), None);
+        assert_eq!(assets.find_web("../index.html"), None);
+        assert_eq!(assets.find_web("/index.html"), None);
     }
 
     #[test]

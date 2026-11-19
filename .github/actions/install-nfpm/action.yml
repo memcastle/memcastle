@@ -9,7 +9,7 @@ runs:
     - name: Install nfpm
       shell: bash
       env:
-        NFPM_VERSION: 2.47.0
+        NFPM_VERSION: 2.49.0
       run: |
         set -euo pipefail
         base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"

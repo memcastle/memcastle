@@ -40,6 +40,7 @@ uv = "latest"
 # must install the same pinned ast-grep binary on developer machines and CI.
 "aqua:ast-grep/ast-grep" = "latest"
 bun = "latest"
+node = "24"
 # --- end project-specific tools ---
 
 [env]
@@ -63,7 +64,8 @@ MBX_TARGET_VIEWS = "0"
 
 [hooks]
 postinstall = [
-  "prek install"
+  "prek install",
+  "bun install --cwd web --frozen-lockfile",
 ]
 
 # --- Everyday ---------------------------------------------------------------
@@ -139,10 +141,10 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-# `guards`, `test:wasm`, `sources:check`, `integrations:check` and `web:check` are project-specific: without them
+# `guards`, `test:wasm`, `sources:check` and `web:check` are project-specific: without them
 # `check`/`ci` pass locally while the architecture hooks (which otherwise run only on commit and in CI), the
-# WebAssembly suite, the reference sources, the integration suites and the dashboard fail later.
-depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "integrations:check", "web:check"]
+# WebAssembly suite, the reference sources and the dashboard fail later.
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "web:check"]
 
 [tasks.ci]
 description = "The local equivalent of CI's lint, test and documentation steps"
@@ -285,72 +287,19 @@ description = "Run the local checks and the additional Linux-only slow suite"
 # The template owns `check` above the project-specific marker; compose it rather than editing template content.
 depends = ["check", "test:slow"]
 
-[tasks."integrations:check"]
-description = "Package and test the Core-shipped declarative integrations"
-# The installer tests run the real binary against the package tree and checkout.
-depends = ["build"]
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-# The development defaults in `[env]` are for running the daemon by hand. A test that inherited them would install from
-# the checkout, or serve a dashboard, because of where it was run from and not because of what it asserts.
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
-export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
-# The bundles the release ships, built by the release's own script and installed from both the package tree and this
-# checkout (docs/adr/034). The ignored test runs only here, so simultaneous suites never rebuild the same `dist/`.
-packaging/integrations/build.sh target/bundled-integrations
-cargo test --test integration_bundle -- --ignored
-"""
-
-[tasks."integrations:build"]
-description = "Prepare any Core-shipped declarative integrations for development"
-sources = [
-  "packaging/integrations/build.sh",
-]
-run = "packaging/integrations/build.sh"
-
-[tasks."integrations:package"]
-description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
-# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
-# (currently only the shared skills; provider plugins own the agent assets).
-sources = [
-  "packaging/integrations/build.sh",
-  "skills/*/**",
-]
-# Rebuild when a shared skill or the package tree is absent.
-outputs = [
-  "target/bundled-integrations/skills/checkpoint-instructions/SKILL.md",
-  "target/bundled-integrations/skills/diary/SKILL.md",
-  "target/bundled-integrations/skills/memcastle-setup/SKILL.md",
-  "target/bundled-integrations/skills/search-before-answer/SKILL.md",
-  "target/bundled-integrations/skills/wake-up/SKILL.md",
-]
-run = "packaging/integrations/build.sh target/bundled-integrations"
-
 [tasks."web:check"]
-description = "Typecheck, test and build the web UI, then check its package and serve it from a real daemon"
-# Bun runs the package scripts; Node runs Vite and vue-tsc. Keep these task-specific
-# requests aligned with the versions recorded in mise.lock.
-# Task tool setup can resolve prefixes again; exact requests keep it on the
-# existing lockfile versions instead of probing not-yet-published platform builds.
-tools = { bun = "1.4.4", node = "24.22.2" }
-# The suite and the bundle test start a real `memcastle serve`, so the debug binary must exist and be current.
-depends = ["build"]
+description = "Build and test the web UI, including checkout and installed-prefix serving"
+# Cargo's integration-test build also produces the daemon; a separate build would compile a second feature graph.
+depends = ["web:build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-# See `integrations:check`: the `[env]` development defaults must not reach what is tested.
+# Development overrides must not make the installed-prefix test read assets from the checkout.
 for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
 export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
-# Builds `web/dist` (which is what development mode serves) and lays out the tree a release packages, with the
-# release's own script (docs/adr/035). The bundle test serves both, from an installed prefix and from this checkout; it
-# is `#[ignore]`d in the basic suite because it needs bun and node, which are on the PATH here.
-packaging/web/build.sh target/bundled-web
+# The bundle tests consume the same build as the frontend's real-daemon tests, without rebuilding it.
 cargo test --test web_bundle -- --ignored
 cd web
-# --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
-bun install --frozen-lockfile
-bun run typecheck
 bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)"
 # Against a real daemon, serving the build made above.
 bun run test:daemon
@@ -359,49 +308,27 @@ bun run test:daemon
 [tasks."web:build"]
 description = "Build the web UI into web/dist, which is all development mode needs"
 # After this, `memcastle serve --assets-dir "$PWD"` with `web.enable` serves the dashboard as built in this checkout.
-tools = { bun = "1.4.4", node = "24.22.2" }
 sources = [
-  "packaging/web/build.sh",
-  "web/package.json",
-  "web/bun.lock",
-  "web/vite.config.ts",
-  "web/tsconfig.json",
-  "web/env.d.ts",
-  "web/index.html",
-  "web/src/**",
-  "web/public/**",
-  "docs/images/icon.svg", # Vite's @brand alias imports this file from outside web/.
+  "package.json",
+  "bun.lock",
+  "vite.config.ts",
+  "dev/**", # The Vite configuration imports the development daemon plugin.
+  "tsconfig.json",
+  "env.d.ts",
+  "index.html",
+  "src/**",
+  "public/**",
+  "../docs/images/icon.svg", # Vite's @brand alias imports this file from outside web/.
 ]
-outputs = ["web/dist/index.html", "web/dist/assets"]
-run = "packaging/web/build.sh"
+outputs = ["dist/index.html", "dist/assets"]
+run = "bun run build"
+dir = "web"
 
 [tasks."web:dev"]
 description = "Run the dashboard's dev server (hot reload) against the running daemon"
 # The page is the dev server's and `/api` is proxied to the daemon, found through its registry file or MEMCASTLE_URL.
-tools = { bun = "1.4.4", node = "24.22.2" }
+run = "bun run dev"
 dir = "web"
-run = "bun install --frozen-lockfile && bun run dev"
-
-[tasks."web:package"]
-description = "Lay out the dashboard that ships with releases in target/bundled-web"
-# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and serve from
-# (`memcastle serve --assets-dir target/bundled-web`).
-tools = { bun = "1.4.4", node = "24.22.2" }
-sources = [
-  "packaging/web/build.sh",
-  "web/package.json",
-  "web/bun.lock",
-  "web/vite.config.ts",
-  "web/tsconfig.json",
-  "web/env.d.ts",
-  "web/index.html",
-  "web/src/**",
-  "web/public/**",
-  "docs/images/icon.svg",
-]
-# Packaging rebuilds the checkout as well as the release tree, so require both entrypoints.
-outputs = ["web/dist/index.html", "web/dist/assets", "target/bundled-web/web/dist/index.html", "target/bundled-web/web/dist/assets"]
-run = "packaging/web/build.sh target/bundled-web"
 
 [tasks."sources:check"]
 description = "Build and conformance-test every reference WebAssembly source under sources/"
@@ -424,12 +351,6 @@ for manifest in sources/*/memcastle-source.toml; do
 done
 """
 
-[tasks."sources:package"]
-description = "Exercise local source bundle packaging (empty in Core) into target/bundled-sources"
-# The runtime can still run an unpacked bundle supplied through `mining.bundled_dir`, though Core releases carry none.
-depends = ["build"]
-run = "packaging/sources/build.sh target/debug/memcastle target/bundled-sources"
-
 [tasks."sources:test"]
 description = "Build and conformance-test one reference WebAssembly source: mise run sources:test -- <name>"
 # What CI runs for each directory under sources/, one job per source.
@@ -448,7 +369,7 @@ fi
 # The retrieval evaluation (docs/retrieval-evaluation.md). Explicit report-writing tasks stay outside `check` and `ci`;
 # the committed baseline runs separately in Linux's slow test suite (`mise run test:slow`).
 # They run the `#[ignore]`d tests of `tests/in_process/retrieval_eval`, with `--no-capture` so the report reaches the
-# terminal, and with the `[env]` development defaults dropped for the reason `integrations:check` gives.
+# terminal, and with the `[env]` development defaults dropped so they cannot change the test configuration.
 
 [tasks.eval]
 description = "Measure retrieval quality and latency on the bundled dataset: prints a report, writes target/eval/report.json"

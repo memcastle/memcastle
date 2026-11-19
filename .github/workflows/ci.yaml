@@ -354,33 +354,7 @@ jobs:
           name: example-plugin-components
           path: plugins/example/modules/*/source.wasm
 
-  # The Core-shipped declarative integrations must install from a package and a checkout through the same local code.
-  # Their agent assets are checked without needing a provider's build or client test suite.
-  # This job is local to this repository; the template does not have it.
-  integrations:
-    name: 🔌 Integrations
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: rui314/setup-mold@v1
-
-      - uses: jdx/mise-action@v5
-        with:
-          cache: true
-
-      - uses: jdx/mr-boxington-action@v1
-        with:
-          cache-generation: core-build-v1
-
-      # `build` is a dependency of the task, so the installer tests have a current binary.
-      - name: Package and test the integrations
-        run: mise run integrations:check
-
-  # The web UI (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
-  # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
-  # `mise install` deliberately leaves out of [tools]. This job is local to this repository; the template does not
-  # have it.
+  # Build once, then test that output from both the checkout and an installed prefix.
   web:
     name: 🏰 Web UI
     runs-on: ubuntu-latest
@@ -397,8 +371,13 @@ jobs:
         with:
           cache-generation: core-build-v1
 
-      # `build` is a dependency of the task, so the debug binary the tests start is built first.
-      - name: Typecheck, test and package the dashboard
+      # CI skips local postinstall hooks; only this job needs frontend dependencies.
+      - name: Install frontend dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      # Cargo builds the daemon with the integration tests; the frontend consumes that same binary afterward.
+      - name: Build and test the dashboard
         env:
           # Makes the task run `test:cover`, which writes lcov beside each package.
           COVERAGE: "1"
@@ -443,13 +422,12 @@ jobs:
           STUB
           done
           # Core ships no source or integration modules; package only the real shared skills.
-          packaging/integrations/build.sh integrations-bundle
-          bash packaging/skills/archive.sh integrations-bundle dist 0.0.0
-          # And for the dashboard (packaging/web/build.sh builds the real one, which tests/web_bundle.rs checks).
-          mkdir -p web-bundle/web/dist/assets
-          echo '<!doctype html>' > web-bundle/web/dist/index.html
-          INTEGRATIONS_DIR="${PWD}/integrations-bundle" WEB_DIR="${PWD}/web-bundle" \
-            packaging/nfpm/build.sh 0.0.0 dist
+          bash packaging/skills/archive.sh . dist 0.0.0
+          # The package consumes the build destination directly; the web job checks the actual build.
+          mkdir -p web/dist/assets
+          echo '<!doctype html>' > web/dist/index.html
+          echo '/* built asset */' > web/dist/assets/app.js
+          packaging/nfpm/build.sh 0.0.0 dist
 
       - name: Check the shared skills release archive
         run: |
@@ -474,9 +452,14 @@ jobs:
                         usr/share/zsh/site-functions/_memcastle \
                         usr/share/fish/vendor_completions.d/memcastle.fish \
                         usr/share/memcastle/skills/wake-up/SKILL.md \
-                        usr/share/memcastle/web/dist/index.html; do
+                        usr/share/memcastle/web/index.html \
+                        usr/share/memcastle/web/assets/app.js; do
               grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }
             done
+            if grep -Eq '/web/dist/|/skills/README.md|node_modules|package.json|\.vue$|\.map$' contents.txt; then
+              echo '::error::Build inputs or intermediate directories leaked into the package'
+              exit 1
+            fi
             for dir in usr/share/memcastle/sources usr/share/memcastle/integrations; do
               grep -q " ./${dir}/$" contents.txt || { echo "::error::${asset}: empty ${dir} is missing"; exit 1; }
             done
@@ -567,13 +550,13 @@ jobs:
 
   development:
     name: 🧪 Publish tested development Core
-    needs: [lint, test, slow, wasm, sources, example_plugin, integrations, web, packaging, msrv]
+    needs: [lint, test, slow, wasm, sources, example_plugin, web, packaging, msrv]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.lint.result == 'success' && needs.test.result == 'success' &&
       needs.slow.result == 'success' &&
       needs.wasm.result == 'success' && needs.sources.result == 'success' &&
-      needs.example_plugin.result == 'success' && needs.integrations.result == 'success' &&
+      needs.example_plugin.result == 'success' &&
       needs.web.result == 'success' && needs.packaging.result == 'success' &&
       needs.msrv.result == 'success'
     uses: ./.github/workflows/development-release.yaml

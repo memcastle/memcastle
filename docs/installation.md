@@ -43,7 +43,7 @@ The standalone binary has no accompanying asset directory; install a provider pl
 `memcastle plugin install anthropic` makes the Claude Code integration available;
 `memcastle integration install claude-code` copies it to your home and registers it with the agent
 (see [Agent integrations](integrations.md)).
-The last package asset is the [web UI](web.md), under `share/memcastle/web/dist/`, which the daemon serves only when
+The last package asset is the [web UI](web.md), under `share/memcastle/web/`, which the daemon serves only when
 you set `web.enable`.
 
 ## Install
