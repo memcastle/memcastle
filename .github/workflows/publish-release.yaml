@@ -309,13 +309,8 @@ jobs:
       - name: Read the Bun version
         id: frontend
         run: |
-          python3 - <<'PY'
-          import os, tomllib
-          with open("mise.lock", "rb") as lock:
-              tools = tomllib.load(lock)["tools"]
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              print(f"bun={tools['bun'][0]['version']}", file=output)
-          PY
+          bun_version="$(yq -p toml -o yaml -er '.tools.bun[0].version' mise.lock)"
+          echo "bun=$bun_version" >> "$GITHUB_OUTPUT"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ steps.frontend.outputs.bun }}

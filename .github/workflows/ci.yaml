@@ -551,14 +551,7 @@ jobs:
   development:
     name: 🧪 Publish tested development Core
     needs: [lint, test, slow, wasm, sources, example_plugin, web, packaging, msrv]
-    if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.lint.result == 'success' && needs.test.result == 'success' &&
-      needs.slow.result == 'success' &&
-      needs.wasm.result == 'success' && needs.sources.result == 'success' &&
-      needs.example_plugin.result == 'success' &&
-      needs.web.result == 'success' && needs.packaging.result == 'success' &&
-      needs.msrv.result == 'success'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/development-release.yaml
     with:
       sha: ${{ github.sha }}
