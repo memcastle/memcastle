@@ -121,10 +121,6 @@ optional comprehensive check.
 
 ## Tasks
 
-Focused documentation, template and release-preparation workflows use `MISE_ENABLE_TOOLS` to limit installation.
-Their cache prefixes identify the toolset, using the workflow hash for multi-tool selections.
-Broad CI and local development keep the full configured toolset, avoiding a second list to maintain for general checks.
-
 `mise build` uses source/output freshness checks to avoid starting Cargo when nothing changed.
 Cargo handles incremental compilation whenever the task runs, with mbx caching.
 The task tracks `src/`, embedded schemas in `database/schema/`, the WIT contracts, manifests, toolchain and Cargo config,

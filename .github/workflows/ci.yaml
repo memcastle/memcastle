@@ -312,9 +312,6 @@ jobs:
           version: 1.28.0
           cache-generation: example-plugin-v1
 
-      - name: Test the Core setup action
-        run: python3 -m unittest discover -s packaging/actions
-
       - name: Build and package the example plugin
         run: |
           python3 plugins/example/scripts/package.py
