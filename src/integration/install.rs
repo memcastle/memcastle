@@ -351,7 +351,7 @@ fn plan_files(shipped: &Shipped, catalog: &Catalog) -> Result<Plan> {
             return Err(Error::IntegrationAssetsMissing {
                 message: format!(
                     "integration `{id}` exposes the skill `{}` from {whose} `skills/`, and {} holds no SKILL.md; \
-                        a package that lacks it is incomplete",
+                     a package that lacks it is incomplete",
                     skill.name,
                     from.display()
                 ),
@@ -944,7 +944,8 @@ name = "wake-up"
     }
 
     #[test]
-    fn an_agent_requirement_needs_a_readable_version_and_its_absence_accepts_any_agent() {
+    fn an_integration_with_no_agent_requirement_accepts_any_agent_and_one_with_a_requirement_needs_a_readable_version()
+     {
         let open =
             manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0").replace("agent = \">=1.0\"\n", "");
         let open = crate::integration::manifest::parse(&open).unwrap();

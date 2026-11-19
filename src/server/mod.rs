@@ -208,7 +208,7 @@ pub async fn run(config: Config) -> Result<()> {
         info!(
             web_enabled = config.web.enable,
             "authentication is enabled: every route except GET /api/health requires a bearer token; when web_enabled, \
-                GET and HEAD under /ui are public static files"
+             GET and HEAD under /ui are public static files"
         );
     } else if !config.server.bind.is_loopback() {
         // Not an error (the operator may front the daemon with something else)
@@ -217,7 +217,7 @@ pub async fn run(config: Config) -> Result<()> {
         warn!(
             bind = %config.server.bind,
             "listening beyond loopback with authentication disabled: anyone who can reach this \
-                address can read and write the palace; set auth.enabled (see docs/authentication.md)"
+             address can read and write the palace; set auth.enabled (see docs/authentication.md)"
         );
     }
     // Deliveries accepted before a crash but never queued are queued now, for the triggers that are still enabled.
@@ -272,7 +272,7 @@ pub async fn run(config: Config) -> Result<()> {
                 path = crate::api::UI_PREFIX,
                 assets = %assets.source(),
                 "web UI enabled but web/index.html (web/dist/index.html in a checkout) was not found: /ui answers a page that says how to install it \
-                    (install a package, or build it with `mise run web:build` and pass --assets-dir)"
+                 (install a package, or build it with `mise run web:build` and pass --assets-dir)"
             );
         }
     }

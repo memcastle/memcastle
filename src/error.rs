@@ -440,7 +440,7 @@ pub enum Error {
         code(memcastle::assets::not_found),
         help(
             "point `--assets-dir`, MEMCASTLE_ASSETS_DIR or `assets.dir` at an existing directory, \
-                or remove the setting to use the installed or embedded assets"
+             or remove the setting to use the installed or embedded assets"
         )
     )]
     AssetsNotFound {
@@ -512,8 +512,8 @@ pub enum Error {
         code(memcastle::auth::unauthorized),
         help(
             "send `Authorization: Bearer <token>`; the CLI reads the token from MEMCASTLE_AUTH_TOKEN \
-                or `auth.token`. A token can be (re)generated with `memcastle auth generate` \
-                by someone who already holds a valid one"
+             or `auth.token`. A token can be (re)generated with `memcastle auth generate` \
+             by someone who already holds a valid one"
         )
     )]
     Unauthorized {
@@ -529,7 +529,7 @@ pub enum Error {
         code(memcastle::auth::not_configured),
         help(
             "set MEMCASTLE_AUTH_TOKEN (or `auth.token`), or start once with `auth.enabled = false`, \
-                run `memcastle auth generate`, store the token, then enable authentication"
+             run `memcastle auth generate`, store the token, then enable authentication"
         )
     )]
     AuthNotConfigured,
@@ -544,7 +544,7 @@ pub enum Error {
         code(memcastle::db::unsafe_bind),
         help(
             "the default is 127.0.0.1, which needs nothing; to listen elsewhere pass `--allow-remote` \
-                (or set `db.allow_remote`) and enable authentication (`auth.enabled` with a token)"
+             (or set `db.allow_remote`) and enable authentication (`auth.enabled` with a token)"
         )
     )]
     DbEndpointUnsafe {
@@ -561,7 +561,7 @@ pub enum Error {
         code(memcastle::db::already_running),
         help(
             "stop it first with `memcastle db stop` to change its settings, \
-                or run `memcastle db start` without them to use it as it is"
+             or run `memcastle db start` without them to use it as it is"
         )
     )]
     DbEndpointRunning {
@@ -575,7 +575,7 @@ pub enum Error {
         code(memcastle::db::bind_failed),
         help(
             "pick a free port with `--port`, MEMCASTLE_DB_PORT or `db.port` (it must differ from the \
-                daemon's own port), or use port 0 to let the OS choose"
+             daemon's own port), or use port 0 to let the OS choose"
         )
     )]
     DbEndpointBind {
@@ -593,7 +593,7 @@ pub enum Error {
         code(memcastle::db::unavailable),
         help(
             "the admin endpoint exists because an embedded SurrealKV database has no server of its own; \
-                point SurrealDB Studio at the remote SurrealDB server directly"
+             point SurrealDB Studio at the remote SurrealDB server directly"
         )
     )]
     DbEndpointUnavailable {
@@ -620,7 +620,7 @@ pub enum Error {
         code(memcastle::palace::room_not_found),
         help(
             "list the wing's rooms with `memcastle room list --wing <wing>`, \
-                or create it with `memcastle room create <wing>/<room>`"
+             or create it with `memcastle room create <wing>/<room>`"
         )
     )]
     RoomNotFound {
@@ -650,7 +650,7 @@ pub enum Error {
         code(memcastle::palace::path_invalid),
         help(
             "paths read `<wing>`, `<wing>/<room>` or `<wing>/<room>/<drawer>`; \
-                wing and room names cannot contain `/`"
+             wing and room names cannot contain `/`"
         )
     )]
     InvalidPalacePath {
@@ -1794,19 +1794,19 @@ fn bind_help(source: &std::io::Error) -> &'static str {
     match source.kind() {
         std::io::ErrorKind::AddrInUse => {
             "another process (possibly another memcastle daemon) already listens on that port: \
-                stop it, or pick a free port with `--port`, MEMCASTLE_PORT or `server.port`"
+             stop it, or pick a free port with `--port`, MEMCASTLE_PORT or `server.port`"
         }
         std::io::ErrorKind::PermissionDenied => {
             "binding this port needs privileges (ports below 1024 usually do): \
-                pick a higher port with `--port`, MEMCASTLE_PORT or `server.port`"
+             pick a higher port with `--port`, MEMCASTLE_PORT or `server.port`"
         }
         std::io::ErrorKind::AddrNotAvailable => {
             "this machine has no interface with that address: \
-                check `--bind`, MEMCASTLE_BIND or `server.bind` (`127.0.0.1` is always available)"
+             check `--bind`, MEMCASTLE_BIND or `server.bind` (`127.0.0.1` is always available)"
         }
         _ => {
             "check the listener address and port (`--bind`/`--port`, MEMCASTLE_BIND/MEMCASTLE_PORT \
-                or `server.bind`/`server.port`)"
+             or `server.bind`/`server.port`)"
         }
     }
 }

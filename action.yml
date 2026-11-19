@@ -58,7 +58,7 @@ runs:
         if [[ "$selected" == development ]]; then
           current="$(gh api repos/memcastle/memcastle/releases/tags/development)"
           [[ "$(jq -r '.body | capture("Core main SHA: (?<sha>[0-9a-f]{40})").sha' <<< "$current")" == "$sha" \
-             && "$(jq -r '.assets[] | select(.name == "memcastle_linux-amd64") | .label' <<< "$current")" == "$sha" ]] || {
+              && "$(jq -r '.assets[] | select(.name == "memcastle_linux-amd64") | .label' <<< "$current")" == "$sha" ]] || {
             echo '::error::development release changed during download'; exit 1;
           }
         fi
