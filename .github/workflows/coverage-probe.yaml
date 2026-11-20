@@ -48,11 +48,12 @@ jobs:
           printf '%s\n' 'pub fn add(a: u32, b: u32) -> u32 { a + b }' '#[test] fn adds() { assert_eq!(add(1, 2), 3); }' > .coverage-probe/src/lib.rs
 
       - name: Probe raw profiler binary IDs
+        continue-on-error: true
         run: |
           probe="$PWD/target/raw-profile-probe"
           mkdir -p "$probe"
           printf '%s\n' 'fn main() { println!("raw profiler probe"); }' > "$probe/main.rs"
-          rustc -C instrument-coverage -C linker=lld-link -C link-arg=/build-id "$probe/main.rs" -o "$probe/probe.exe"
+          MSYS2_ARG_CONV_EXCL="link-arg=" rustc -C instrument-coverage -C linker=lld-link -C link-arg=/build-id "$probe/main.rs" -o "$probe/probe.exe"
           LLVM_PROFILE_FILE="$(cygpath -w "$probe")/%m-%b.profraw" "$probe/probe.exe"
           profiles=("$probe"/*.profraw)
           if [[ -s "${profiles[0]}" ]]; then
