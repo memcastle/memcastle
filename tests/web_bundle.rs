@@ -1,18 +1,16 @@
-//! The web UI that ships with MemCastle (docs/adr/035), built by the script the release runs and served from
-//! the tree it writes and from the checkout it builds in: the same `web/dist/` found through both ways of choosing the
-//! assets root.
+//! The web UI that ships with MemCastle (docs/adr/035), consumed directly from the frontend build destination.
+//! Installed assets flatten `web/dist` to `web`; both layouts use the daemon's dashboard resolver.
 //!
 //! This is what keeps "the dashboard ships with every release, packaged and in development alike" from being a claim
-//! about the release workflow that only a tag would test. It needs bun and node, so it is `#[ignore]`d from the basic
+//! about the release workflow that only a tag would test. It needs a prebuilt dashboard, so it is `#[ignore]`d from the basic
 //! suite and run by `mise run web:check` (`cargo test --test web_bundle -- --ignored`); an ignored test says so in the
 //! output, which a silent skip would not. What the daemon does with the files (headers, authentication, the page for a
-//! missing build) is tested without bun in `tests/in_process/web.rs` and `src/assets`.
+//! missing build) is tested without frontend tools in `tests/in_process/web.rs` and `src/assets`.
 
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Once;
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
@@ -21,24 +19,13 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// The package tree, built once for every test in this binary: the script rebuilds `web/dist/` in the checkout, so two
-/// builds at once would race.
-fn package() -> PathBuf {
-    static BUILD: Once = Once::new();
-    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("bundled-web");
-    BUILD.call_once(|| {
-        let output = Command::new("bash")
-            .arg(root().join("packaging/web/build.sh"))
-            .arg(&out)
-            .output()
-            .expect("bash starts");
-        assert!(
-            output.status.success(),
-            "packaging/web/build.sh failed:\n{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    });
+/// The task builds once before these tests; rebuilding here would race with other build consumers.
+fn dist() -> PathBuf {
+    let out = root().join("web/dist");
+    assert!(
+        out.join("index.html").is_file(),
+        "run mise run web:build first"
+    );
     out
 }
 
@@ -131,23 +118,15 @@ async fn get(daemon: &Daemon, path: &str) -> (reqwest::StatusCode, String) {
 }
 
 #[test]
-#[ignore = "needs bun and node; `mise run web:check` runs it"]
-fn the_package_holds_the_built_dashboard_under_web_dist_and_nothing_else() {
-    let package = package();
-
-    let mut top: Vec<_> = std::fs::read_dir(&package)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    top.sort();
-    assert_eq!(top, ["web"]);
-    let dist = package.join("web/dist");
+#[ignore = "needs a built dashboard; `mise run web:check` runs it"]
+fn the_build_destination_holds_the_dashboard_and_no_frontend_sources() {
+    let dist = dist();
     assert!(dist.join("index.html").is_file());
     assert!(dist.join("assets").is_dir());
 
     // The sources the build replaced, their dependencies and source maps (which would let the daemon serve the
     // sources) must not travel with it.
-    for file in files_under(&package) {
+    for file in files_under(&dist) {
         let name = file.file_name().unwrap().to_string_lossy();
         assert!(
             !name.ends_with(".ts")
@@ -167,9 +146,9 @@ fn the_package_holds_the_built_dashboard_under_web_dist_and_nothing_else() {
 }
 
 #[tokio::test]
-#[ignore = "needs bun and node; `mise run web:check` runs it"]
+#[ignore = "needs a built dashboard; `mise run web:check` runs it"]
 async fn a_daemon_run_from_an_installed_prefix_serves_the_packaged_dashboard_with_no_flag() {
-    let package = package();
+    let dist = dist();
     let home = tempfile::tempdir().unwrap();
     // `<prefix>/bin/memcastle` beside `<prefix>/share/memcastle/web`: what a package or an unpacked tarball installs.
     let prefix = home.path().join("prefix");
@@ -179,8 +158,8 @@ async fn a_daemon_run_from_an_installed_prefix_serves_the_packaged_dashboard_wit
     assert!(
         Command::new("cp")
             .arg("-r")
-            .arg(package.join("web"))
-            .arg(prefix.join("share/memcastle/"))
+            .arg(&dist)
+            .arg(prefix.join("share/memcastle/web"))
             .status()
             .unwrap()
             .success()
@@ -192,7 +171,7 @@ async fn a_daemon_run_from_an_installed_prefix_serves_the_packaged_dashboard_wit
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         body,
-        std::fs::read_to_string(package.join("web/dist/index.html")).unwrap()
+        std::fs::read_to_string(dist.join("index.html")).unwrap()
     );
     let (status, config) = get(&daemon, "/api/config").await;
     assert_eq!(status, 200);
@@ -202,10 +181,9 @@ async fn a_daemon_run_from_an_installed_prefix_serves_the_packaged_dashboard_wit
 }
 
 #[tokio::test]
-#[ignore = "needs bun and node; `mise run web:check` runs it"]
+#[ignore = "needs a built dashboard; `mise run web:check` runs it"]
 async fn a_daemon_pointed_at_the_checkout_serves_the_same_dashboard_through_the_same_lookup() {
-    // Building the package built `web/dist/` in the checkout, which is all development mode needs.
-    let package = package();
+    let dist = dist();
     let home = tempfile::tempdir().unwrap();
     let checkout = root();
 
@@ -220,7 +198,7 @@ async fn a_daemon_pointed_at_the_checkout_serves_the_same_dashboard_through_the_
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         body,
-        std::fs::read_to_string(package.join("web/dist/index.html")).unwrap()
+        std::fs::read_to_string(dist.join("index.html")).unwrap()
     );
     let config: serde_json::Value =
         serde_json::from_str(&get(&daemon, "/api/config").await.1).unwrap();

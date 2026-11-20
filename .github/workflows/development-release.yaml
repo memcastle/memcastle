@@ -21,13 +21,8 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.asset }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "", smoke: true }
+    name: Build linux-amd64
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -35,46 +30,31 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
-        if: matrix.cross
         with:
           tool: cross@0.2.5
       - name: Reproducible build paths and date
         shell: bash
         run: |
-          native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
-          remap="--remap-path-prefix=$(native "${GITHUB_WORKSPACE}")=/build"
-          remap="${remap} --remap-path-prefix=$(native "${CARGO_HOME:-${HOME}/.cargo}")=/cargo"
-          remap="${remap} --remap-path-prefix=$(native "${RUSTUP_HOME:-${HOME}/.rustup}")=/rustup"
+          remap="--remap-path-prefix=${GITHUB_WORKSPACE}=/build"
+          remap="${remap} --remap-path-prefix=${CARGO_HOME:-${HOME}/.cargo}=/cargo"
+          remap="${remap} --remap-path-prefix=${RUSTUP_HOME:-${HOME}/.rustup}=/rustup"
           remap="${remap} --remap-path-prefix=/project=/build"
           {
             echo "RUSTFLAGS=${RUSTFLAGS} ${remap}"
             echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
           } >> "$GITHUB_ENV"
-      - name: Statically link the Windows C runtime
-        if: endsWith(matrix.target, 'windows-msvc')
-        shell: bash
-        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
       - name: Build and smoke-test
         shell: bash
         run: |
-          if [[ '${{ matrix.cross }}' == true ]]; then
-            cross build --release --locked --target '${{ matrix.target }}'
-          else
-            cargo build --release --locked --target '${{ matrix.target }}'
-          fi
-          if [[ '${{ matrix.smoke }}' == true ]]; then
-            'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' --version
-          fi
-          mkdir -p dist
-          cp 'target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}' \
-            'dist/memcastle_${{ matrix.asset }}${{ matrix.ext }}'
+          cross build --release --locked --target x86_64-unknown-linux-gnu
+          target/x86_64-unknown-linux-gnu/release/memcastle --version
       - uses: actions/upload-artifact@v7
         with:
-          name: development-${{ matrix.asset }}
-          path: dist/*
+          name: development-linux-amd64
+          path: target/x86_64-unknown-linux-gnu/release/memcastle
           if-no-files-found: error
 
   publish:
@@ -99,9 +79,10 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          pattern: development-*
-          merge-multiple: true
+          name: development-linux-amd64
           path: dist
+      - name: Name the development binary
+        run: mv dist/memcastle dist/memcastle_linux-amd64
       - name: Publish a complete, current revision
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -116,8 +97,8 @@ jobs:
             exit 0
           fi
           (cd dist && sha256sum -- memcastle_linux-amd64 > SHA256SUMS)
-          if gh release view development --json isDraft,isPrerelease >/dev/null 2>&1; then
-            test "$(gh release view development --json isPrerelease --jq .isPrerelease)" = true || {
+          if release="$(gh release view development --json isPrerelease 2>/dev/null)"; then
+            jq -e '.isPrerelease == true' <<< "$release" >/dev/null || {
               echo '::error::development tag belongs to a non-prerelease release'
               exit 1
             }

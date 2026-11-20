@@ -1456,7 +1456,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::integration::assets_missing),
         help(
-            "install MemCastle from a package that ships integrations, or run from a checkout with `--assets-dir <checkout>` after `mise run integrations:build`"
+            "install the provider plugin that supplies the integration, then pass its assets directory with `--assets-dir` if needed"
         )
     )]
     IntegrationAssetsMissing {

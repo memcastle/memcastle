@@ -317,8 +317,7 @@ fn plan_files(shipped: &Shipped, catalog: &Catalog) -> Result<Plan> {
         if !from.exists() {
             return Err(Error::IntegrationAssetsMissing {
                 message: format!(
-                    "{} is missing from integration `{id}`; in a checkout, run `mise run integrations:build` first, \
-                     and a package that lacks it is incomplete",
+                    "{} is missing from integration `{id}`; reinstall the provider plugin that supplies it",
                     from.display()
                 ),
             });
@@ -1773,7 +1772,7 @@ name = "wake-up"
             "{error}"
         );
         assert!(
-            error.to_string().contains("mise run integrations:build"),
+            error.to_string().contains("reinstall the provider plugin"),
             "{error}"
         );
         assert_eq!(machine.status("pi").state, State::Unavailable);

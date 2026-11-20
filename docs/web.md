@@ -126,7 +126,10 @@ The choice lasts for the tab.
 ## Developing the dashboard
 
 The source is `web/` (Vue 3 and [OpenVue](https://openvue.dev), with Vite and TypeScript), its own bun package.
-It needs bun and node.
+It uses Bun for dependency installation, typechecking, Vite and Vitest.
+`mise install` provisions Bun and installs the frontend dependencies with the frozen lockfile.
+`web/bunfig.toml` forces package scripts to use Bun even when a tool has a Node shebang.
+Coverage uses Istanbul instrumentation because Bun runs on JavaScriptCore.
 
 ```sh
 mise run web:build                      # web/ -> web/dist
@@ -137,8 +140,8 @@ In this repository `mise.toml` already sets `MEMCASTLE_ASSETS_DIR` to the checko
 so with mise active `mise cli serve` is enough, and serves the dashboard at `http://127.0.0.1:8420/ui/` once it is built
 (see [Development](development.md#running-the-daemon-locally)).
 
-A checkout has the same layout as a package (`web/dist/index.html`), so `--assets-dir <checkout>` is the whole development
-setup, and the daemon finds the files by the same lookup it uses for an installed package.
+A checkout builds into `web/dist/`; packages install the build contents directly under `web/`.
+The assets resolver recognizes a checkout by `web/package.json`, so `--assets-dir <checkout>` is the whole development setup.
 For hot reload, run the daemon, then:
 
 ```sh
@@ -163,6 +166,6 @@ the store or the jobs.
 | Symptom | Cause |
 |---|---|
 | `/ui` answers `401` or `404` | `web.enable` is not set, or the daemon was not restarted after setting it. |
-| `/ui/` answers a page saying the files are missing | The daemon found no `web/dist/index.html` in its [assets](configuration.md#runtime-assets). `mise run web:build` and `--assets-dir <checkout>`, or install a package. `GET /api/config` shows where the assets came from. |
+| `/ui/` answers a page saying the files are missing | The daemon found no `web/index.html` in its [assets](configuration.md#runtime-assets), or no `web/dist/index.html` in a checkout. Run `mise run web:build` with `--assets-dir <checkout>`, or install a package. `GET /api/config` shows where the assets came from. |
 | The login refuses a token you are sure of | The user must be `memcastle`, and the password the token itself, with no "Bearer" in front. A token that was revoked or replaced stops working at the next request. |
 | The dev server cannot reach the daemon | `MEMCASTLE_URL`, or start the daemon before the dev server so its registry file exists. |

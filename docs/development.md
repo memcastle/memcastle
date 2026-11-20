@@ -25,8 +25,7 @@ workflow inputs and compatibility policy.
 
 ## Prerequisites
 
-- Node and bun, only for `web/` and `integrations/` (`mise run web:check` and `integrations:check` install them for the
-  task; the Rust build needs neither).
+- Bun for `web/`, installed globally by mise; the Rust build does not need it.
 - Rust via `rustup`, with mise 2026.9.2+ providing native Mr Boxington wrapping for Cargo builds.
   `rust-toolchain.toml` and mise declare the stable channel; explicit `RUSTUP_TOOLCHAIN` selections still win.
   Mise also installs `wasm32-wasip2` for the reference sources and WebAssembly tests.
@@ -52,18 +51,14 @@ mise run sources:test -- directory   # the same for one source, which is what ea
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard, including its rule fixtures, described below
-mise run integrations:check # package shared skills and test the checkout and release asset layouts
-mise run integrations:build # prepare any Core-shipped declarative integrations (currently none)
-mise run integrations:package # package shared skills in target/bundled-integrations
-mise run web:check  # typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node)
+mise run web:check  # build and test the web UI, then verify checkout and installed-prefix serving
 mise run web:build  # build web/ into web/dist, for `--assets-dir "$PWD"` with `web.enable`
 mise run web:dev    # the dashboard's dev server, proxying /api to the running daemon
-mise run web:package # lay out what a release ships in target/bundled-web
 mise run eval       # measure retrieval quality and latency on the bundled dataset (docs/retrieval-evaluation.md)
 mise run eval:baseline # rewrite the committed retrieval baseline, after a change meant to move quality
 mise run eval:compare -- a.json b.json # what changed between two retrieval reports
 mise run eval:longmemeval -- file.json # session retrieval on a downloaded LongMemEval file
-mise run check      # every lint, the guards, both test suites, the sources, the integrations and the dashboard, without modifying the tree
+mise run check      # every lint, the guards, both test suites, the sources and the dashboard, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
@@ -71,13 +66,16 @@ mise run docs       # serve this documentation locally
 mise run docs:build # build it into site/
 ```
 
-The project-owned `web:build`, `web:package`, `integrations:build` and `integrations:package` tasks skip their build
-when their inputs have not changed and their required outputs still exist.
+The project-owned `web:build` task skips its build when its inputs have not changed and its required outputs still exist.
 Changing a source or removing an output makes the corresponding task run again; use `mise run --force web:build`
-(or the other task name) to rebuild regardless of freshness.
+to rebuild regardless of freshness.
 The test and check tasks still run on every invocation, including when used through `mise run check` or `mise run ci`.
 
 `mise install` also installs the Git hooks through its postinstall hook.
+The same hook installs frontend dependencies in `web/` with `bun install --frozen-lockfile`.
+CI sets `MISE_NO_HOOKS=1` and installs frontend dependencies explicitly only in jobs that need them.
+Packaging consumes `web/dist` and `skills/*/` directly, without intermediate asset bundles.
+Distributed dashboard files install under `web/`; `dist/` is only the checkout build destination.
 The hooks wire formatting, spelling, actionlint, rumdl, Commitizen with Emotional, basic file hygiene,
 and the architecture guard described below into `git commit` as hooks.
 Full-project Clippy runs in CI and with `mise run lint`, rather than on every local commit.
@@ -112,7 +110,7 @@ Run it from another directory, or `env -u MEMCASTLE_ASSETS_DIR memcastle ...`, t
 A flag still wins over the variable (`--assets-dir`), and your own `mise.local.toml` can override or drop either.
 
 The suites that start a daemon or run the installer are not affected:
-`mise run integrations:check` and `mise run web:check` unset every `MEMCASTLE_*` variable before they start,
+`mise run web:check` unsets every `MEMCASTLE_*` variable before its tests start,
 and the Rust and bun harnesses build their own environment, so a test never depends on where it was run from.
 
 By default the palace lives under `~/.local/share/memcastle/default` and the daemon listens on `127.0.0.1` port `8420`.
@@ -141,7 +139,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
   The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.
   The WebAssembly suite runs in CI on Linux only, in its own `wasm` job with its own Codecov flag,
   and its `sources` job explicitly tests the `directory` reference source with `mise run sources:test -- directory`.
-  That job runs conformance, plus any source-owned `core-tests.rs` cases not expressible as conformance.
+  That job runs the reference source's conformance fixtures through the public source tooling.
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
   Those that start the daemon inside the test process are modules of one binary, `tests/in_process/main.rs`:
   each `tests/` binary links the whole server, about 600 MB with debug info, so sixteen of them were most of what
@@ -225,22 +223,16 @@ Every path, environment variable, flag and the precedence between them is in [Co
     preservation of the user's other plugins and settings,
     and resolution from `--assets-dir`, the environment and the binary's own prefix.
     The installer's unit tests are in `src/integration/` (manifest, discovery, adapters, install, update, remove, rollback).
-  - `tests/integration_bundle.rs` — checks the bundles built by `integrations:check` with
-    `packaging/integrations/build.sh`: the package tree (manifests accepted by this MemCastle, no sources or
-    `node_modules`, the skills) and the same lifecycle from the
-    packaged tree and from the checkout.
-    It is `#[ignore]`d in the basic suite so that `mise run integrations:check` can build the checkout assets without a
-    second suite racing it.
   - `tests/in_process/events.rs` — `GET /api/events` against a real daemon: a note, a wing and a job's progress arrive as
     identifiers and never as content, a `disabled` session is refused and a `read_only` one served, the token is
     required, and an open stream does not keep the daemon from shutting down.
   - `tests/in_process/web.rs` — the dashboard's routes against a real daemon: opt-in, the static files and their headers,
-    the refusal of any path that leaves `web/dist`, the page for a build that is missing, the public shell with
-    authentication on, `/api/config`, and the jobs listing's `kind` and `limit` (in-process).
-    `src/assets` unit-tests that a packaged layout and a worktree resolve `web/dist/index.html` through the same lookup.
-  - `tests/web_bundle.rs` — builds the dashboard with `packaging/web/build.sh`, checks the package tree (no sources, maps
+    the refusal of paths outside the selected dashboard directory, the page for a build that is missing,
+    the public shell with authentication on, `/api/config`, and the jobs listing's `kind` and `limit` (in-process).
+    `src/assets` unit-tests that installed `web/` and checkout `web/dist/` use one dashboard resolver.
+  - `tests/web_bundle.rs` — consumes the existing dashboard build, checks its output (no sources, maps
     or `node_modules`) and serves it from an installed prefix and from the checkout.
-    It needs bun and node, so it is `#[ignore]`d in the basic suite and `mise run web:check` runs it.
+    It needs a prebuilt dashboard, so it is `#[ignore]`d in the basic suite and `mise run web:check` runs it.
   - `web/test/` — the dashboard's client, login, route guard, event-stream parser and live loader
     (vitest, no daemon), and the same client, login and event stream
     against a real `memcastle serve` (`web/test/daemon`, bun), see [Web UI](web.md#developing-the-dashboard).
@@ -261,8 +253,6 @@ Every path, environment variable, flag and the precedence between them is in [Co
     stand-in for the API, with a digest that does not match and a repository that cannot be read), an unreadable
     registry, and the CLI publishing, signing, searching, installing and updating (in-process and subprocess,
     WebAssembly suite, using the synthetic Core mock source).
-  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh` removes stale bundled components and archives from the
-    now-empty Core source package tree (WebAssembly suite, Unix only).
   - `tests/wasm_runtime.rs`, `tests/wasm_plugin.rs` — installable mock sources against a real daemon: consent, independent
     module lifecycles, mining through the shared pipeline, retained data, and refusing a component altered on disk
     (in-process, WebAssembly suite).
@@ -283,10 +273,10 @@ mise run test -- --filter-expr 'test(job)'
 
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
-The web TypeScript suite reports coverage too: with `COVERAGE=1`, `mise run web:check` runs its `test:cover` script,
+The web TypeScript suite reports coverage too: with `COVERAGE=1`, `mise run web:check` adds Vitest's `--coverage` flag,
 which writes lcov under `web/coverage/`; CI uploads it to Codecov under the `web` flag.
 Standalone agent plugins run their own client suites in their provider repositories.
-`.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web, integrations)
+`.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web)
 by path, so the Codecov page shows each area whatever flag covered it.
 Each component reflects the merged execution coverage from every reporting suite.
 Its required status permits the same 0.5% fluctuation as the project status,
@@ -300,8 +290,8 @@ independent plugin modules without testing any provider's discovery rules or cal
 The mock is a test fixture, not a releasable source: it lives outside `sources/` and is built only by the generic tests.
 `tests/source_isolation.rs` guards against reintroducing a concrete provider fixture into those tests.
 
-Each real WebAssembly source's own `mise run sources:test -- <name>` CI leg runs its conformance fixtures and source-owned
-behavior tests; `sources/directory/` retains the directory conformance cases.
+Each reference WebAssembly source's `mise run sources:test -- <name>` CI leg runs its conformance fixtures;
+`sources:check` discovers the projects and invokes the same task for each.
 Core's built-in directory adapter has its separate native conformance test.
 Scaffolding and sandbox tests (`tests/wasm_projects.rs`), OAuth tests (`tests/wasm_oauth.rs`) and the release bundle test
 use purpose-built components because their behavior is what those tests verify.
@@ -417,8 +407,8 @@ The integration installer is local tooling like the source tooling, and is held 
 `tests/integration_isolation.rs` fails when `src/integration/` mentions the store, the jobs, the daemon client, the
 network or an agent's settings file or a credential, and when anything under `src/mcp`, `src/api`, `src/app` or
 `src/server` (or any module but the binary) calls it.
-`tests/integration_cli.rs` exercises the installer with synthetic integrations;
-`tests/integration_bundle.rs` checks the Core-shipped package tree on Linux.
+`tests/integration_cli.rs` exercises the installer with synthetic integrations.
+CI checks shared skills directly in release archives and native packages; provider plugins own integration bundles.
 
 The web UI is held to HTTP as an integration is: the `web-http-only-*` and shared `clients-http-only-*` rules fail on
 `surrealdb`, `surrealkv`,
@@ -483,7 +473,7 @@ or a user-visible behaviour updates the page that describes it, in the same comm
   GitHub and the site both render them; stick to flowcharts, sequence, state, class and entity-relationship diagrams,
   and keep them small enough to read on a phone.
 - **Prose style.** One sentence per line, wrapped at a clause boundary if a sentence would pass 120 columns
-  (`mise run lint:md` enforces the width on `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`).
+  (`mise run lint:md` enforces the width on all project Markdown except the generated root `CHANGELOG.md`).
   `mise run spell` runs `typos`; a legitimate new term goes into `typos.toml`'s `extend-words`.
 
 ## This repository is generated from a template

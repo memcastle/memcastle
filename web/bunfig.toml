@@ -1,0 +1,3 @@
+[run]
+# Vite, vue-tsc and Vitest have Node shebangs; always run them with the locked Bun runtime.
+bun = true

@@ -271,7 +271,7 @@ pub async fn run(config: Config) -> Result<()> {
             warn!(
                 path = crate::api::UI_PREFIX,
                 assets = %assets.source(),
-                "web UI enabled but web/dist/index.html was not found: /ui answers a page that says how to install it \
+                "web UI enabled but web/index.html (web/dist/index.html in a checkout) was not found: /ui answers a page that says how to install it \
                  (install a package, or build it with `mise run web:build` and pass --assets-dir)"
             );
         }

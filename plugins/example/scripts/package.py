@@ -39,11 +39,6 @@ def main() -> None:
             if not built.is_file():
                 raise ValueError(f"source {name!r} built no component at {built}")
             shutil.copyfile(built, safe_parent(module["entry"]))
-            # The conformance runner uses each module's own `dist/source.wasm`; this is build output,
-            # not another copy inside the plugin archive.
-            test_component = module_dir / "dist/source.wasm"
-            test_component.parent.mkdir(exist_ok=True)
-            shutil.copyfile(built, test_component)
         elif kind == "integration":
             # Checked and collected by Core's packager, not by this build-only fixture script.
             continue

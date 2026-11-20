@@ -2,7 +2,8 @@
 
 ## Status
 
-Superseded for Pi by its move to the standalone `memcastle-pi` repository (#290).
+Superseded by the move of all integrations to standalone provider repositories, starting with `memcastle-pi` (#290).
+The Core integration build tasks and common package described below have been removed.
 The language-neutral daemon contract fixtures remain in Core, while each provider tests its client independently.
 Originally accepted, amends [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md)
 (which said there is nothing shared between packages).

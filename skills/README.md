@@ -47,9 +47,10 @@ The split follows what an agent does over a session, not the MCP tool list: ther
 - Declare `metadata.memcastle-version` as a semver range, normally `>=x.y.z` with the release that introduced the last
   thing the skill relies on.
   Raise the floor when the skill starts to depend on a later release, or when a breaking change ships with the skill
-  update, and only once `Cargo.toml` carries that release: `tests/in_process/skills.rs` requires the crate to satisfy the range.
+  update, and only once `Cargo.toml` carries that release:
+  `tests/in_process/skills.rs` requires the crate to satisfy the range.
 - Write Markdown as the rest of the documentation is written (semantic linefeeds, 120 columns): `SKILL.md` files are
-  linted with it. This README is a working document outside that lint scope.
+  linted with it, along with this README and the other project Markdown files.
 
 ## Non-goals
 

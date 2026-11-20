@@ -30,6 +30,9 @@ concurrency:
   group: ${{ github.event_name == 'pull_request' && format('docs-{0}', github.ref) || 'pages' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  MISE_NO_HOOKS: "1"
+
 jobs:
   build:
     name: 📝 Build documentation
@@ -54,9 +57,6 @@ jobs:
     name: 🌐 Publish documentation
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
     environment:
       name: github-pages
       url: https://memcastle.github.io/

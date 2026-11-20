@@ -120,7 +120,7 @@ impl Project {
         check_is_component(&bytes, &built)?;
         let target = self.component_path();
         // Written to a file of its own and renamed over the target, so a process reading `dist/source.wasm` while
-        // another builds (a test binary beside `packaging/sources/build.sh`) sees the old component or the new one,
+        // another builds (for example, a concurrent conformance test) sees the old component or the new one,
         // never an empty or half-written file. The process id keeps concurrent builders off each other's file.
         let temporary = self
             .dir

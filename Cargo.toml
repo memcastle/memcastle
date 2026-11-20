@@ -8,8 +8,8 @@
 name = "memcastle"
 version = "0.5.2"
 edition = "2024"
-# The MSRV. Checked by the MSRV job in ci.yaml, which greps this very line — keep it
-# a plain literal. `rust-toolchain.toml` separately pins the channel to develop
+# The MSRV. Read as TOML by the MSRV job in ci.yaml.
+# `rust-toolchain.toml` separately pins the channel to develop
 # against; the two answer different questions.
 rust-version = "1.90"
 license = "MIT"
@@ -19,7 +19,6 @@ license = "MIT"
 # on, the PKGBUILD's `# Maintainer:` line.
 description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 repository = "https://github.com/memcastle/memcastle"
-homepage = "https://memcastle.github.io/"
 documentation = "https://memcastle.github.io/"
 readme = "README.md"
 keywords = ["mcp", "memory", "agent", "search", "daemon"]
@@ -38,7 +37,7 @@ publish = false
 # target, so this list never drifts from the publish matrix.
 #
 # `pkg-fmt = "bin"`: the publish workflow uploads the raw executable, not an
-# archive — see publish-release.yaml's "Stage the asset" step.
+# archive — see publish-release.yaml's "Name the release binaries" step.
 [package.metadata.binstall]
 pkg-fmt = "bin"
 
@@ -96,7 +95,6 @@ strip = true
 [features]
 # Separate genuinely expensive process-boundary and retrieval-baseline checks from the cross-platform basic suite.
 slow-tests = []
-provider-tests = []
 
 [[test]]
 name = "persistence"

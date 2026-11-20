@@ -51,7 +51,7 @@ class Memcastle < Formula
     (pkgshare/"integrations").mkpath
     resource("skills").stage { (pkgshare/"skills").install Dir["skills/*"] }
 
-    # And `share/memcastle/web/dist`, which the daemon serves under `/ui` when `web.enable` is set.
+    # The build destination's contents install directly under `share/memcastle/web`.
     resource("web").stage { (pkgshare/"web").install Dir["web/*"] }
 
     # Generated from the installed binary, so the scripts always match its
@@ -64,7 +64,7 @@ class Memcastle < Formula
     assert_path_exists pkgshare/"sources"
     assert_path_exists pkgshare/"integrations"
     assert_path_exists pkgshare/"skills/wake-up/SKILL.md"
-    assert_path_exists pkgshare/"web/dist/index.html"
+    assert_path_exists pkgshare/"web/index.html"
 
   end
 end

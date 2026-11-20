@@ -1,6 +1,6 @@
 # Builds the .deb and .rpm from the binary already staged in dist/.
 # Driven by packaging/nfpm/build.sh (run by publish-release.yaml and by CI),
-# which exports VERSION, NFPM_ARCH, BINARY, COMPLETIONS_DIR, SOURCES_DIR, INTEGRATIONS_DIR and WEB_DIR.
+# which exports VERSION, NFPM_ARCH, BINARY, COMPLETIONS_DIR, SKILLS_DIR, WEB_DIST_DIR and WEB_INSTALL_DIR.
 name: memcastle
 arch: "${NFPM_ARCH}"
 platform: linux
@@ -38,25 +38,24 @@ contents:
     file_info:
       mode: 0644
   # Keep an empty Core sources directory for bundled-source lookup (docs/adr/040).
-  # A caller supplying an optional bundle can still package its unpacked sources here.
-  - src: "${SOURCES_DIR}"
-    dst: /usr/share/memcastle/sources
-    type: tree
-    expand: true
-  # The agent integrations and the shared skills they read (docs/adr/034), where `memcastle integration install` looks
-  # first when run from `/usr/bin`: bundles built by packaging/integrations/build.sh, with no `node_modules`.
-  - src: "${INTEGRATIONS_DIR}/integrations"
-    dst: /usr/share/memcastle/integrations
-    type: tree
-    expand: true
-  - src: "${INTEGRATIONS_DIR}/skills"
+  - dst: /usr/share/memcastle/sources
+    type: dir
+    file_info:
+      mode: 0755
+  # Provider plugins own integrations; retain the empty lookup directory without a staging tree.
+  - dst: /usr/share/memcastle/integrations
+    type: dir
+    file_info:
+      mode: 0755
+  # Only skill directories ship, not the repository's skills/README.md.
+  - src: "${SKILLS_DIR}/*/**"
     dst: /usr/share/memcastle/skills
-    type: tree
     expand: true
-  # The web UI (docs/adr/035), at the same `web/dist/` a checkout has, so the daemon finds it through the one
-  # assets root: built by packaging/web/build.sh, with no sources and no `node_modules`. Served only when `web.enable`.
-  - src: "${WEB_DIR}/web"
-    dst: /usr/share/memcastle/web
+    file_info:
+      mode: 0644
+  # dist is a build destination, not part of the installed dashboard layout.
+  - src: "${WEB_DIST_DIR}"
+    dst: "/usr/share/memcastle/${WEB_INSTALL_DIR}"
     type: tree
     expand: true
   - src: packaging/systemd/memcastle.service

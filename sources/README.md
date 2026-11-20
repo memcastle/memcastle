@@ -16,8 +16,7 @@ on the `PATH`; run `memcastle source test` by hand with the same prefix.
 Core CI explicitly tests `directory`; adding another reference source to CI requires a workflow matrix entry.
 They are not compiled into MemCastle, and a source that ships with MemCastle's releases uses exactly the same package
 contract as one a user installs.
-`packaging/sources/build.sh` writes an empty bundle until Core ships another source;
-`mise run sources:package` verifies that layout locally.
+Core has no source-bundle packaging step; use `memcastle source package` to create a local source archive.
 `docs/publishing-sources.md` describes how a source reaches users through a provider plugin.
 OpenCode history is maintained with its agent integration in the external
 [`memcastle-opencode`](https://github.com/memcastle/memcastle-opencode) plugin.

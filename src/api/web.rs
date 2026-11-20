@@ -1,7 +1,7 @@
 //! The web UI's static files, under `/ui` (docs/adr/035).
 //!
 //! Only merged into the router when `web.enable` is set, so a daemon that did not ask for a UI answers none. The
-//! files are read through [`Assets::find`], which is the same lookup in a package (`<prefix>/share/memcastle`) and
+//! files are read through [`Assets::find_web`], which selects the built dashboard in a package and
 //! in a worktree (`--assets-dir <checkout>`), and which refuses a path that climbs out of the asset root.
 //!
 //! The files hold no data: the dashboard is a client of `/api` like the CLI, and the authentication layer lets
@@ -21,7 +21,7 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 
-use crate::assets::{Asset, Assets, WEB_DIST_DIR, WEB_INDEX};
+use crate::assets::{Asset, Assets};
 
 /// The URL prefix the dashboard is served under; also the `base` the frontend is built with.
 pub const UI_PREFIX: &str = "/ui";
@@ -62,7 +62,7 @@ async fn file(State(assets): State<Arc<Assets>>, UrlPath(path): UrlPath<String>)
     serve(&assets, &path).await
 }
 
-/// Answer one request for `requested`, relative to `web/dist`.
+/// Answer one request relative to the selected dashboard directory.
 async fn serve(assets: &Assets, requested: &str) -> Response {
     let target = requested.trim_matches('/');
     let target = if target.is_empty() {
@@ -72,14 +72,14 @@ async fn serve(assets: &Assets, requested: &str) -> Response {
     };
     let has_extension = Path::new(target).extension().is_some();
 
-    let found = assets.find(&format!("{WEB_DIST_DIR}/{target}"));
+    let found = assets.find_web(target);
     let response = match found {
         Some(Asset::File(path)) => file_response(&path, target).await,
         // The one embedded asset is the page that says the build is missing.
         Some(Asset::Embedded(bytes)) => unavailable(bytes),
         // A path without an extension is a client-side route, which the page itself resolves; a file that is not
         // there is a 404, never the index, so a broken script URL does not come back as HTML.
-        None if !has_extension => match assets.find(WEB_INDEX) {
+        None if !has_extension => match assets.find_web("index.html") {
             Some(Asset::File(path)) => file_response(&path, "index.html").await,
             Some(Asset::Embedded(bytes)) => unavailable(bytes),
             None => not_found(),

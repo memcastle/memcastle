@@ -3,6 +3,8 @@
 ## Status
 
 Accepted.
+Core no longer packages source bundles or publishes provider archives itself.
+The Core bundle-script references below are historical; local publishers use `memcastle source package` directly.
 Completes [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md),
 which defined the package and the runtime and left distribution to this decision.
 Amended by [ADR-040](040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md):

@@ -184,13 +184,14 @@ An invariant nothing checks is a comment, and it will be violated.
     skips them, and the bundle is read from disk and nothing else) and by
     `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
     trusted key signed, an update never widens permissions silently, a registry never installs, updates or replaces a
-    bundled source), `tests/wasm_bundle.rs` (the release script removes stale sources from Core's empty bundle)
+    bundled source)
     and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
     kept anywhere but the credential store).
 11. **The web UI is a client of the REST API and nothing else, and it is opt-in** —
     everything under `web/` reaches MemCastle only over HTTP, never storage, the job code or the database admin endpoint,
     exactly as an integration does (invariant 8), and the daemon serves it only when `web.enable` is set.
-    It is found through the one assets root at `web/dist/`, in a checkout and in a package alike, and what it may do
+    One assets resolver selects `web/dist/` in a checkout and `web/` in a package under the chosen assets root,
+    and what it may do
     is what the REST API lets any client do: no shutdown, source installation or token management from the page.
     Its login is the database console's (the user `memcastle`, the token as the password), checked by the same layer on
     every request; the token lives in `sessionStorage` and is never put in a URL, a cookie or a log
@@ -199,7 +200,8 @@ An invariant nothing checks is a comment, and it will be violated.
     (they fail on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs` path or `/api/db` in supported source files
     under `web/`,
     Markdown, `node_modules`, `dist` and `bun.lock` excepted),
-    by `tests/in_process/web.rs` (off by default, no path leaves `web/dist`, the headers, a missing build is a 503 and
+    by `tests/in_process/web.rs` (off by default, paths stay in the selected dashboard directory, the headers,
+    a missing build is a 503 and
     never a failed start, `/api/config` carries no secret),
     by `tests/web_bundle.rs` (the package holds the build and nothing else, and a daemon serves it from an installed prefix
     and from the checkout through the same lookup)
@@ -317,7 +319,7 @@ src/
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
 sources/        reference WebAssembly sources (`directory`, ...), built and tested but not compiled or bundled into Core;
-                `packaging/sources/build.sh` exercises local bundle packaging, while plugins distribute provider modules
+                local publishers use `memcastle source package` directly, while plugins distribute provider modules
 integrations/   Agent integration documentation; Core ships no agent-specific integration assets.
                 Pi, OpenCode and Claude Code source/integration modules live in standalone `memcastle-pi`,
                 `memcastle-opencode` and `memcastle-anthropic` plugins; Codex's integration and history and ChatGPT
@@ -351,8 +353,7 @@ The name should say what would be broken if it failed.
 **Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
 when it would otherwise exceed the 120-column limit `.config/rumdl.toml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
-The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`);
-`PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
+The Markdown lint checks all project Markdown except the generated root `CHANGELOG.md`.
 
 **Documentation ships with the behaviour.**
 A change to a CLI flag, a setting, an environment variable, an MCP tool, a REST route or any other user-visible behaviour
@@ -414,8 +415,7 @@ to choose checks relevant to the change and report any skipped checks in your ha
 
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl)
 and are updated with `git tpl update`.
-Files carrying template-owned content end with a `# --- project-specific ...` marker
-(`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it.
+Files carrying template-owned content have project-specific section markers: add below them.
 Global mise tools instead go between the begin/end project-specific tools markers inside `[tools]`.
 
 Changing template-owned content here fixes it in one repository.

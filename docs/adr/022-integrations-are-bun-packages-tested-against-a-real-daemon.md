@@ -2,6 +2,9 @@
 
 ## Status
 
+Historical Core build-task references below are superseded by provider plugins.
+Core no longer builds or packages integrations; each standalone provider repository owns those steps and tests.
+
 Accepted, settles the toolchain question that [ADR-019](019-shared-integration-contract.md) left to the first adapter.
 Amended by [ADR-027](027-cross-integration-tests-live-in-a-common-package.md):
 tests that need two integrations live in a test-only `integrations/common` package.

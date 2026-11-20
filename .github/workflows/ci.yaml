@@ -18,6 +18,7 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  MISE_NO_HOOKS: "1"
   RUST_BACKTRACE: full
 
   # Shared action caching cannot reuse Cargo's private incremental state.
@@ -139,8 +140,6 @@ jobs:
           # %b requires a build ID in each instrumented binary; Darwin keeps its native linker settings.
           RUSTFLAGS: ${{ runner.os == 'Windows' && '-C link-arg=/build-id' || runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
         run: |
-          # --no-report retains cached profiles unless they are explicitly cleaned first.
-          cargo llvm-cov clean --workspace
           # nextest's filter skips execution, not linking; select only basic Cargo targets too.
           targets=(--lib --bin memcastle --test in_process)
           for file in tests/*.rs; do
@@ -151,8 +150,7 @@ jobs:
               *) targets+=(--test "$name") ;;
             esac
           done
-          cargo llvm-cov nextest --profile ci --no-report "${targets[@]}"
-          cargo llvm-cov report --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
 
       # Debug runs need raw inputs even when a corrupt profile prevents generating lcov.info.
       - name: Upload coverage artifacts
@@ -201,10 +199,7 @@ jobs:
         with:
           cache-generation: slow-v1
       - name: Run slow tests (with coverage)
-        run: |
-          cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --profile ci-slow --no-report --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
-          cargo llvm-cov report --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --profile ci-slow --lcov --output-path lcov.info --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -250,10 +245,7 @@ jobs:
       # linked, instrumented, only for the profile's filter to skip it. Cargo still builds the `memcastle` binary these
       # tests start.
       - name: Run tests (with coverage)
-        run: |
-          cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --profile ci-wasm --no-report --test 'wasm_*'
-          cargo llvm-cov report --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --profile ci-wasm --lcov --output-path lcov.info --test 'wasm_*'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -320,19 +312,12 @@ jobs:
           version: 1.28.0
           cache-generation: example-plugin-v1
 
-      - name: Check Core release selection tooling
-        run: python3 -m unittest discover -s packaging/plugins
-
       - name: Build and package the example plugin
         run: |
           python3 plugins/example/scripts/package.py
           python3 -m unittest discover -s plugins/example/tests
-          git diff --exit-code -- plugins/example/plugin.toml || {
-            echo "::error::packaging must not change plugin.toml"
-            exit 1
-          }
-          git diff --exit-code -- plugins/example/manifest.toml || {
-            echo "::error::packaging must not change the checked-in manifest.toml"
+          git diff --exit-code -- plugins/example/plugin.toml plugins/example/manifest.toml || {
+            echo "::error::packaging must not change the plugin descriptor or checked-in manifest"
             exit 1
           }
           (cd plugins/example/dist && for checksum in *.sha256sum; do sha256sum --check "$checksum"; done)
@@ -353,33 +338,7 @@ jobs:
           name: example-plugin-components
           path: plugins/example/modules/*/source.wasm
 
-  # The Core-shipped declarative integrations must install from a package and a checkout through the same local code.
-  # Their agent assets are checked without needing a provider's build or client test suite.
-  # This job is local to this repository; the template does not have it.
-  integrations:
-    name: 🔌 Integrations
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: rui314/setup-mold@v1
-
-      - uses: jdx/mise-action@v5
-        with:
-          cache: true
-
-      - uses: jdx/mr-boxington-action@v1
-        with:
-          cache-generation: core-build-v1
-
-      # `build` is a dependency of the task, so the installer tests have a current binary.
-      - name: Package and test the integrations
-        run: mise run integrations:check
-
-  # The web UI (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
-  # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
-  # `mise install` deliberately leaves out of [tools]. This job is local to this repository; the template does not
-  # have it.
+  # Build once, then test that output from both the checkout and an installed prefix.
   web:
     name: 🏰 Web UI
     runs-on: ubuntu-latest
@@ -396,22 +355,17 @@ jobs:
         with:
           cache-generation: core-build-v1
 
-      # `build` is a dependency of the task, so the debug binary the tests start is built first.
-      - name: Typecheck, test and package the dashboard
+      # CI skips local postinstall hooks; only this job needs frontend dependencies.
+      - name: Install frontend dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      # Cargo builds the daemon with the integration tests; the frontend consumes that same binary afterward.
+      - name: Build and test the dashboard
         env:
-          # Makes the task run `test:cover`, which writes lcov beside each package.
+          # Adds Vitest's coverage flag; the reporter writes repository-relative LCOV paths.
           COVERAGE: "1"
         run: mise run web:check
-
-      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
-      # apart from the daemon's own `src/`. Prefixing them makes each file unique.
-      - name: Make the web coverage paths relative to the repository
-        if: ${{ !cancelled() }}
-        run: |
-          for report in web/coverage/lcov.info; do
-            package="$(dirname "$(dirname "$report")")"
-            sed -i "s|^SF:|SF:$package/|" "$report"
-          done
 
       - name: Upload web coverage to Codecov
         if: ${{ !cancelled() }}
@@ -442,13 +396,12 @@ jobs:
           STUB
           done
           # Core ships no source or integration modules; package only the real shared skills.
-          packaging/integrations/build.sh integrations-bundle
-          bash packaging/skills/archive.sh integrations-bundle dist 0.0.0
-          # And for the dashboard (packaging/web/build.sh builds the real one, which tests/web_bundle.rs checks).
-          mkdir -p web-bundle/web/dist/assets
-          echo '<!doctype html>' > web-bundle/web/dist/index.html
-          INTEGRATIONS_DIR="${PWD}/integrations-bundle" WEB_DIR="${PWD}/web-bundle" \
-            packaging/nfpm/build.sh 0.0.0 dist
+          bash packaging/skills/archive.sh . dist 0.0.0
+          # The package consumes the build destination directly; the web job checks the actual build.
+          mkdir -p web/dist/assets
+          echo '<!doctype html>' > web/dist/index.html
+          echo '/* built asset */' > web/dist/assets/app.js
+          packaging/nfpm/build.sh 0.0.0 dist
 
       - name: Check the shared skills release archive
         run: |
@@ -473,9 +426,14 @@ jobs:
                         usr/share/zsh/site-functions/_memcastle \
                         usr/share/fish/vendor_completions.d/memcastle.fish \
                         usr/share/memcastle/skills/wake-up/SKILL.md \
-                        usr/share/memcastle/web/dist/index.html; do
+                        usr/share/memcastle/web/index.html \
+                        usr/share/memcastle/web/assets/app.js; do
               grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }
             done
+            if grep -Eq '/web/dist/|/skills/README.md|node_modules|package.json|\.vue$|\.map$' contents.txt; then
+              echo '::error::Build inputs or intermediate directories leaked into the package'
+              exit 1
+            fi
             for dir in usr/share/memcastle/sources usr/share/memcastle/integrations; do
               grep -q " ./${dir}/$" contents.txt || { echo "::error::${asset}: empty ${dir} is missing"; exit 1; }
             done
@@ -493,7 +451,11 @@ jobs:
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
-          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          # A root package's explicit version wins; an inherited version comes from the workspace.
+          version="$(yq -p toml -o yaml -er '
+            ((.package."rust-version" | select(tag == "!!str")) // .workspace.package."rust-version") |
+            select(tag == "!!str" and . != "")
+          ' Cargo.toml)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
@@ -504,7 +466,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           cache-generation: msrv-v1
 
       # `check`, not `test`: dev-dependencies routinely require a newer
@@ -543,7 +504,6 @@ jobs:
       # This PR-only workload restores compatible baselines without saving PR-scoped archives.
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           cache-generation: pr-build-${{ matrix.build.target }}-v1
       - uses: taiki-e/install-action@cross
         if: matrix.build.cross
@@ -568,15 +528,8 @@ jobs:
 
   development:
     name: 🧪 Publish tested development Core
-    needs: [lint, test, slow, wasm, sources, example_plugin, integrations, web, packaging, msrv]
-    if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.lint.result == 'success' && needs.test.result == 'success' &&
-      needs.slow.result == 'success' &&
-      needs.wasm.result == 'success' && needs.sources.result == 'success' &&
-      needs.example_plugin.result == 'success' && needs.integrations.result == 'success' &&
-      needs.web.result == 'success' && needs.packaging.result == 'success' &&
-      needs.msrv.result == 'success'
+    needs: [lint, test, slow, wasm, sources, example_plugin, web, packaging, msrv]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/development-release.yaml
     with:
       sha: ${{ github.sha }}

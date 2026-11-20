@@ -6,10 +6,12 @@ The toolchain is managed by [mise](https://mise.jdx.dev/);
 every tool is pinned to an exact build in `mise.lock`, so a local run and a CI run use the same versions.
 
 ```bash
-mise install          # the tools and Git hooks
+mise install          # the tools, Git hooks and frontend dependencies
 ```
 
 Mise's postinstall hook installs both `pre-commit` and `commit-msg` hooks.
+It also installs frontend dependencies in `web/` with the frozen Bun lockfile.
+CI sets `MISE_NO_HOOKS=1` and installs those dependencies explicitly only in frontend jobs.
 Prek installs Commitizen and its Emotional plugin in an isolated Python environment
 for commit-message validation.
 
@@ -119,6 +121,16 @@ optional comprehensive check.
 
 ## Tasks
 
+`mise build` uses source/output freshness checks to avoid starting Cargo when nothing changed.
+Cargo handles incremental compilation whenever the task runs, with mbx caching.
+The task tracks `src/`, embedded schemas in `database/schema/`, the WIT contracts, manifests, toolchain and Cargo config,
+and checks the debug binary and library outputs.
+Extend `tasks.build.sources` for external path dependencies or build assets.
+Adjust its outputs for custom target directories or compilation targets.
+After changing environment-only inputs such as `RUSTFLAGS` or `RUSTUP_TOOLCHAIN`,
+use `mise run --force build`.
+Use `mise exec -- cargo build` directly for one-off profile/target options.
+
 | Command | What it does |
 |---|---|
 | `mise run default` | Format, lint, build and test |
@@ -129,20 +141,15 @@ optional comprehensive check.
 | `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
-| `mise run sources:package` | Exercise local source-bundle packaging into `target/bundled-sources`; Core releases carry no sources |
-| `mise run integrations:check` | Package the shared skills and check the checkout and release asset layouts |
-| `mise run integrations:build` | Prepare any Core-shipped declarative integrations (currently none) |
-| `mise run integrations:package` | Lay out the shared skills that ship with releases in `target/bundled-integrations` |
-| `mise run web:check` | Typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node) |
-| `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs bun and node) |
-| `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs bun and node) |
-| `mise run web:package` | Lay out the dashboard that ships with releases in `target/bundled-web` (needs bun and node) |
+| `mise run web:check` | Build and test the web UI, including checkout and installed-prefix serving |
+| `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs Bun) |
+| `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs Bun) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |
 | `mise run lint` | Clippy, warnings denied |
 | `mise run lint:actions` | actionlint over the workflows |
-| `mise run lint:md` | rumdl over AGENTS.md, CONTRIBUTING.md, README.md, docs/ and the skills' `SKILL.md` files |
+| `mise run lint:md` | Check all project Markdown except the generated root CHANGELOG.md |
 | `mise run spell` | typos |
 | `mise run guards` | The `architecture` and `architecture-rule-tests` prek hooks: ast-grep scan and native rule tests for invariants 1, 2, 4, 5, 8 and 11 |
 | `mise run snapshots` | Review pending insta snapshots |
@@ -155,9 +162,10 @@ optional comprehensive check.
 | `mise run changelog` | Preview the changelog for unreleased commits |
 | `mise run release` | Show the version the next release would take |
 | `mise run ship:validate` | Check the release setup against what gh-ship requires |
-| `mise run tpl:check` | Has the template moved? Exits 1 if merging it would change anything |
+| `mise run tpl:check` | Update the template ref and report whether merging would change files |
 | `mise run tpl:update` | Bring the rendered template ref up to date |
 | `mise run tpl:diff` | Show what merging the template would change |
+| `mise run tpl:merge` | Merge the updated rendered template |
 
 `mise <task>` is a shorthand for `mise run <task>`, but a builtin subcommand of the same name wins it silently —
 which is why the format task is `format` and not `fmt` (`mise fmt` formats `mise.toml`),
@@ -208,9 +216,19 @@ remain authoring conventions. The type selects the changelog section, and a `!`
 or a `BREAKING CHANGE:` footer drives the version bump — so the message is part
 of the release, not paperwork around it.
 
-The official typos hooks check source files on `pre-commit` and commit messages
-on `commit-msg`. Message spelling is checked without rewriting the message, so
-fix any reported errors before retrying the commit.
+The pre-commit hooks format and check project Markdown with rumdl and validate
+EditorConfig settings. The generated root `CHANGELOG.md` is excluded because
+git-cliff owns it. Run `mise lint:md` for a non-rewriting Markdown check.
+Rumdl owns Markdown list indentation and the 120-column prose limit, with tables
+and code blocks exempt from line wrapping.
+Markdown and Rust keep their EditorConfig editor defaults but are excluded from the generic EditorConfig hook;
+rumdl and `cargo fmt` own their syntax-aware formatting checks, including prose and embedded strings.
+Other file types are checked by the EditorConfig hook.
+
+The official typos hook checks source files on `pre-commit`. Commit-message
+spelling checks are temporarily disabled pending
+[the upstream commit/rebase fix](https://github.com/crate-ci/typos/pull/1605).
+Commitizen still validates commit messages on `commit-msg`.
 
 ## Releases
 
@@ -256,8 +274,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 The release is built to be reproducible, and two things keep it that way.
 The Rust toolchain, `cross` and the runner images are pinned to exact versions,
 so moving any of them is an edit to the workflow and not something that happens between two releases.
-The publish job also installs Bun at the version recorded in `mise.lock`, alongside Node 24,
-so the web UI packages with the same tool version used in local checks.
+The publish job installs the Bun version recorded in `mise.lock`,
+so the web UI packages with the same runtime used in local checks.
 Build paths are remapped to fixed names, and the tarballs have a fixed order, timestamps and ownership.
 CI does not rebuild the release to check this, because two LTO release builds are too slow for a pull request.
 Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
@@ -298,6 +316,8 @@ gh workflow run recover-release.yaml --ref main -f tag=<tag> -f run_id=<failed-p
 
 The recovery verifies that the saved binaries came from the tag, packages the tagged source with the fixed publish
 workflow, runs the package smoke tests and attestations, and uploads the assets to the existing draft.
+Packaging tooling comes from the repaired workflow revision; frontend sources and tool versions come from the tag.
+Recovery retains the nested dashboard layout when required by an older binary.
 It never publishes the draft automatically: check that every expected asset, `SHA256SUMS`, and the attestations are
 present and valid, then make the existing release public with `gh release edit <tag> --draft=false`.
 If a platform build failed or its artifact expired, repair the build and use the normal release process instead.
@@ -339,20 +359,22 @@ The toolchain, hooks, CI and release workflows come from [rust.tpl](https://gith
 
 ```bash
 git tpl status         # is there a template update pending?
-mise run tpl:update    # advance refs/tpl/<id> — HEAD and index untouched; may save changed answers
+mise run tpl:update    # advance refs/tpl/<id>; may save migrated answers
 mise run tpl:diff      # read what merging it would change
-git tpl merge          # take it
+mise run tpl:merge     # take it
 ```
 
-`tpl:update` advances the rendered ref and may save changed answers in `.config/git.tpl.toml`.
-Rendered files reach your branch only through the merge.
+`tpl:update` advances the rendered ref without merging rendered files or changing HEAD or the index.
+It may save migrated answers in `.config/git.tpl.toml` as an unstaged edit.
+`tpl:check` runs update first and has the same migration behavior.
+Rendered changes reach your branch when you merge.
 
 `mise install` provides git-tpl through the declared `cargo:` tool. With
 cargo-binstall available, mise downloads its release archive rather than
 compiling the libgit2 dependency from source.
 
 Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml` —
-end with a `# --- project-specific ...` marker (`project-specific tasks` in `mise.toml`, `project-specific hooks` in `prek.toml`).
-Add below it, or put global mise tools between the begin/end project-specific tools markers inside `[tools]`.
+have project-specific section markers.
+Add below them, or put global mise tools between the begin/end project-specific tools markers inside `[tools]`.
 Git's 3-way merge then preserves your additions across updates.
 A fix that belongs to every project belongs in the template, not here.

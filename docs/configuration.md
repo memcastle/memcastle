@@ -847,7 +847,7 @@ This is the one root for everything a package ships, in the same layout wherever
 |---|---|---|
 | `sources/<name>/` | the bundled mining sources, unpacked: a `memcastle-source.toml` and a `source.wasm` each | the daemon, which lists them as installed and runs them in place (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
 | `skills/` | the shared agent skills | `memcastle integration`, which copies the ones an integration's manifest names into its installed copy |
-| `web/dist/` | the built [web UI](web.md) | the daemon, under `/ui`, when `web.enable` is set |
+| `web/` (`web/dist/` in a checkout) | the built [web UI](web.md) | the daemon, under `/ui`, when `web.enable` is set |
 
 A standalone binary has none (the dashboard is not built into it, so with `web.enable` it answers a page that says the
 files are missing), so point the setting at a package or checkout only when it supplies assets you need.
@@ -1216,8 +1216,9 @@ installed source and not to a palace.
 It is off by default: a daemon that does not set it answers nothing at `/ui`.
 There is no command-line flag; `daemon start` and `daemon restart` pass the environment and the file to the daemon as usual.
 
-The dashboard's files are found in `web/dist/` of the [runtime assets](#runtime-assets),
-in a package and in a checkout alike.
+The dashboard's files are found in `web/` of the [runtime assets](#runtime-assets) in an installed package.
+An explicit checkout assets root, identified by `web/package.json`, uses the local build in `web/dist/` instead.
+The resolver never falls back to the checkout's source `web/index.html` when that build is missing.
 If they are missing, the daemon still starts, logs a warning, and answers `/ui` with a page that says how to install them.
 See [Web UI](web.md) for the login, the memory mode and the development workflow.
 

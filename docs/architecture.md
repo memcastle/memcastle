@@ -633,7 +633,7 @@ flowchart TD
 
 The resolver only reads directories, so startup never needs the network.
 Its consumers are the bundle of sources (`sources/`), the integration installer (`integrations/`, `skills/`) and the
-dashboard's static routes (`web/dist/`, only when `web.enable` is set).
+dashboard's static routes (installed `web/`, checkout `web/dist/`, only when `web.enable` is set).
 The assets root is a directory with that layout, so a checkout of the repository is a valid one,
 which is how a developer installs the integrations as built in their worktree (see below).
 The module is pure and the daemon's composition root calls it once, before binding the listener,

@@ -3,7 +3,7 @@ import { fileURLToPath, URL } from "node:url"
 import { defineConfig } from "vite"
 import { discoverDaemon } from "./dev/daemon.ts"
 
-// The daemon serves this build under `/ui/` (assets resolve to `web/dist`, in a worktree as in a package), so every
+// The daemon serves this build under `/ui/` (web/dist in a checkout, web in a package), so every
 // URL in the build is relative to that prefix. `src/api/client.ts` calls `/api` on the same origin and nothing else.
 export default defineConfig(async ({ command }) => ({
   base: "/ui/",
@@ -34,6 +34,13 @@ export default defineConfig(async ({ command }) => ({
     // The daemon suite spawns a real `memcastle serve`; it runs under `bun test` (see package.json).
     exclude: ["test/daemon/**", "node_modules/**"],
     // Only read with `--coverage` (`bun run test:cover`): lcov is what Codecov ingests.
-    coverage: { provider: "v8", reporter: ["lcov", "text-summary"], include: ["src/**"], reportsDirectory: "coverage" },
+    // Bun uses JavaScriptCore, so coverage must use instrumentation rather than V8's profiler.
+    coverage: {
+      provider: "istanbul",
+      // Emit repository-relative paths locally too, rather than repairing reports in CI.
+      reporter: [["lcov", { projectRoot: fileURLToPath(new URL("..", import.meta.url)) }], "text-summary"],
+      include: ["src/**"],
+      reportsDirectory: "coverage",
+    },
   },
 }))

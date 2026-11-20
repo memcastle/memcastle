@@ -1,21 +1,14 @@
 # Toolchain and task definitions.
 #
-# Tool versions are resolved to exact builds in `mise.lock`, which is
-# committed. CI installs from these two files, so local runs and CI runs
-# use identical tool versions — CI drives the tools directly rather than
-# through the tasks defined below.
+# Tool versions are resolved to exact builds in `mise.lock`, which is committed.
+# CI installs from these two files, so local runs and CI runs use identical tool versions.
 #
 # Tools no CI job needs are declared on their own task rather than in `[tools]`,
-# because `mise install` — what CI runs — installs `[tools]` only. It matters:
-# cargo-binstall has no prebuilt artifact for some cargo tools, so a global
-# entry would make every CI job compile them from source.
-#
-# Rustup still owns toolchains. Native mbx integration needs a Rust tool entry;
-# the environment below preserves explicit and CI-selected runtime toolchains.
-
+# because `mise install` — what CI runs — installs `[tools]` only.
+# It matters as cargo-binstall has no prebuilt artifact for some cargo tools,
+# so a global entry would make every CI job compile them from source.
 [settings]
-# Resolve tools through mise.lock and keep it updated. Without this, the
-# lockfile is ignored and `latest` really means latest.
+# Resolve tools through mise.lock and keep it updated.
 lockfile = true
 
 # The explicit Rust entry supplies native wrapping. Avoid a second request
@@ -28,12 +21,8 @@ idiomatic_version_file_enable_tools = []
 rust = { version = "stable", components = ["rustfmt", "clippy"], targets = ["wasm32-wasip2"], mr_boxington = true }
 mr-boxington = "latest"
 actionlint = "latest"
-# actionlint silently skips its shellcheck integration when the binary is
-# absent, so without this a local run is NOT the CI run. Runners ship it.
-#
-# The aqua backend is named explicitly: left as a bare `shellcheck` it resolves
-# to `asdf:shellcheck`, which carries no lockfile URLs, and `mise install
-# --locked` — what mise-action runs as soon as a mise.lock exists — fails on it.
+# actionlint silently skips its shellcheck integration when the binary is absent
+# Preserve the backend recorded in mise.lock so locked installs and executable lookup agree.
 "aqua:koalaman/shellcheck" = "latest"
 prek = "latest"
 typos = "latest"
@@ -41,24 +30,9 @@ git-cliff = "latest"
 cargo-binstall = "latest"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-llvm-cov" = "latest"
-# The template this project is rendered from. `cargo:` rather than `github:` or `ubi:`, which both
-# install it fine and write no lockfile URLs — and `mise install --locked`,
-# which mise-action runs as soon as a mise.lock exists, then fails on the entry
-# it cannot verify. The same trap as `shellcheck` above, from the other
-# direction: there the fix was naming a backend that locks, here it is naming
-# one that needs no URL to.
-#
-# It is not a source build. git-tpl ships binstall metadata, so with
-# cargo-binstall present this downloads a release archive — about three seconds
-# against several minutes to compile a crate that vendors libgit2.
-#
-# `latest` follows mise's minimum release age when resolving updates; mise.lock
-# records the exact selected build so local and CI installations agree.
 "cargo:git-tpl" = "latest"
 # Zensical runs through `uvx`, so uv is the only thing the docs build needs.
 uv = "latest"
-# cargo-insta is declared on the task that uses it instead of here — see the
-# note in the header.
 
 # --- begin project-specific tools ---
 # Add project-wide tools here; tools needed by only one task belong on that task.
@@ -88,19 +62,12 @@ stable
 MBX_TARGET_VIEWS = "0"
 
 [hooks]
-# prek.toml declares both pre-commit and commit-msg as default hook types.
-postinstall = "prek install"
+postinstall = [
+  "prek install",
+  "bun install --cwd web --frozen-lockfile",
+]
 
 # --- Everyday ---------------------------------------------------------------
-#
-# `mise <task>` is shorthand for `mise tasks run <task>`, and a builtin
-# subcommand of the same name wins it silently — `mise fmt` formats mise.toml
-# rather than running cargo fmt, and says nothing about the task it shadowed.
-# `run` and `fmt` are both builtins, which is why these are `cli` and `format`.
-#
-# mise may claim further names in future releases, so `check:tasks` in the
-# template repository fails the render when it does.
-
 [tasks.default]
 description = "Run format, lint, build and test"
 depends = ["format", "lint", "lint:actions", "lint:md", "build", "test"]
@@ -108,6 +75,23 @@ depends = ["format", "lint", "lint:actions", "lint:md", "build", "test"]
 [tasks.build]
 description = "Build the project"
 run = "cargo build"
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "mise.lock",
+  ".cargo/config",
+  ".cargo/config.toml",
+  "build.rs",
+  "src/**",
+  # These files are embedded at compile time; omitting them can leave a stale binary marked fresh.
+  "database/schema/**",
+  "wit/**",
+]
+outputs = [
+  'target/debug/memcastle{% if os() == "windows" %}.exe{% endif %}',
+  "target/debug/libmemcastle.rlib",
+]
 
 [tasks.test]
 description = "Run the basic tests, without the WebAssembly suite (accepts nextest selectors)"
@@ -136,31 +120,30 @@ run = "typos"
 
 [tasks."lint:actions"]
 description = "Lint the GitHub Actions workflows"
-# Suppressions live in .github/actionlint.yml rather than as flags here, so
-# this task and the prek hook cannot drift apart.
+# Suppressions live in .github/actionlint.yml rather than as flags here,
+# so this task and the prek hook cannot drift apart.
 run = "actionlint .github/workflows/*.yaml"
 
 [tasks."lint:md"]
-description = "Lint the documentation Markdown"
+description = "Lint all project Markdown"
 # Install the native binary only for this task; keep its version aligned with
 # the rumdl pre-commit hook in prek.toml.
 tools = { rumdl = "0.3.2" }
-#
-# Scoped to the same files as the prek hook, minus CHANGELOG.md, which is
-# git-cliff's output, not prose to wrap.
-run = 'rumdl check "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/" skills/*/SKILL.md'
+# The shared rumdl config excludes the generated root CHANGELOG.md.
+run = "rumdl check ."
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"
+# cargo-insta is declared here as only used once by this task
 tools = { "cargo:cargo-insta" = "latest" }
 run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-# `guards`, `test:wasm`, `sources:check`, `integrations:check` and `web:check` are project-specific: without them
+# `guards`, `test:wasm`, `sources:check` and `web:check` are project-specific: without them
 # `check`/`ci` pass locally while the architecture hooks (which otherwise run only on commit and in CI), the
-# WebAssembly suite, the reference sources, the integration suites and the dashboard fail later.
-depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "integrations:check", "web:check"]
+# WebAssembly suite, the reference sources and the dashboard fail later.
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "web:check"]
 
 [tasks.ci]
 description = "The local equivalent of CI's lint, test and documentation steps"
@@ -170,8 +153,6 @@ depends = ["check", "docs:build"]
 
 [tasks.cli]
 description = "Run memcastle from source"
-# `raw_args` so flags reach the binary rather than mise: `mise cli --help`
-# prints the binary's help, not the task's.
 raw_args = true
 run = "cargo run --bin memcastle --"
 
@@ -214,54 +195,41 @@ run = "gh ship validate"
 
 # --- Template ---------------------------------------------------------------
 #
-# This project is rendered from rust.tpl. `git tpl update` advances
-# refs/tpl/<id> without changing HEAD or the index. It may save migrated
-# answers in .config/git.tpl.toml as an unstaged edit. Rendered files reach
-# the worktree only when you merge:
+# This project is rendered from https://github.com/noirbizarre/rust.tpl
+# To update it:
 #
-#   mise run tpl:check       # has it moved?
-#   mise run tpl:update      # bring the rendered ref up to date
-#   mise run tpl:diff        # read what merging it would change
-#   git tpl merge            # take it
-#
-# git-tpl is in [tools] above, so `mise install` is all these tasks need.
-# It used to be excluded because it vendored libgit2 and had no prebuilt
-# artifact, which would have made every CI job compile it; since 0.4.0 it ships
-# release archives and mise installs them directly.
+#   mise tpl:check       # has it moved?
+#   mise tpl:update      # bring the rendered ref up to date
+#   mise tpl:diff        # read what merging it would change
+#   mise tpl:merge       # take it
 
 [tasks."tpl:update"]
 description = "Advance refs/tpl/<id>; may save migrated answers without merging rendered files"
-# `raw_args` so `--ref`, `--dirty` and `--answer` reach git-tpl.
 raw_args = true
 run = "git tpl update"
 
 [tasks."tpl:diff"]
 description = "Show what merging the template would change"
-# `raw_args` so `--stat`, `--name-only` and path limiting reach git-tpl.
 raw_args = true
 run = "git tpl diff"
 
+[tasks."tpl:merge"]
+description = "Merge the last updated rendered files"
+raw_args = true
+run = "git tpl merge"
+
 [tasks."tpl:check"]
 description = "Has the template moved? Exits 1 if merging it would change anything"
-# `update` first, because the rendered ref may not exist at all: a fresh clone
-# has no `refs/tpl/*` — `git clone` and `actions/checkout` fetch neither — and
-# `update` creates it rather than failing, so this works anywhere.
-#
-# `--exit-code` reports *difference*, never conflict. A preview that would
-# conflict is a correct answer to the question asked, and failing on it would
-# make this useless on exactly the projects that have diverged most.
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-git tpl update
-git tpl diff --exit-code --stat
-"""
+run = [
+  "git tpl update",
+  "git tpl diff --exit-code --stat",
+]
 
 # --- project-specific tasks --------------------------------------------------
 #
 # Add your own tasks below this line and global tools between the tools markers.
-# Outside those regions the template keeps updating content; Git's 3-way merge
-# preserves it across `git tpl update`.
+# Group related project tasks here; the template owns the sections above.
+# Git's 3-way merge preserves project additions across template merges.
 #
 # Open any multi-line `run` block with `#!/usr/bin/env bash`. Without one mise
 # runs it through `sh`, which is dash on a GitHub runner — `set -o pipefail`
@@ -318,73 +286,19 @@ description = "Run the local checks and the additional Linux-only slow suite"
 # The template owns `check` above the project-specific marker; compose it rather than editing template content.
 depends = ["check", "test:slow"]
 
-[tasks."integrations:check"]
-description = "Package and test the Core-shipped declarative integrations"
-# The installer tests run the real binary against the package tree and checkout.
-depends = ["build"]
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-# The development defaults in `[env]` are for running the daemon by hand. A test that inherited them would install from
-# the checkout, or serve a dashboard, because of where it was run from and not because of what it asserts.
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
-export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
-# The bundles the release ships, built by the release's own script and installed from both the package tree and this
-# checkout (docs/adr/034). The ignored test runs only here, so simultaneous suites never rebuild the same `dist/`.
-packaging/integrations/build.sh target/bundled-integrations
-cargo test --test integration_bundle -- --ignored
-"""
-
-[tasks."integrations:build"]
-description = "Prepare any Core-shipped declarative integrations for development"
-sources = [
-  "packaging/integrations/build.sh",
-]
-run = "packaging/integrations/build.sh"
-
-[tasks."integrations:package"]
-description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
-# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
-# (currently only the shared skills; provider plugins own the agent assets).
-sources = [
-  "packaging/integrations/build.sh",
-  "skills/*/**",
-]
-# Rebuild when a shared skill or the package tree is absent.
-outputs = [
-  "target/bundled-integrations/skills/checkpoint-instructions/SKILL.md",
-  "target/bundled-integrations/skills/diary/SKILL.md",
-  "target/bundled-integrations/skills/memcastle-setup/SKILL.md",
-  "target/bundled-integrations/skills/search-before-answer/SKILL.md",
-  "target/bundled-integrations/skills/wake-up/SKILL.md",
-]
-run = "packaging/integrations/build.sh target/bundled-integrations"
-
 [tasks."web:check"]
-description = "Typecheck, test and build the web UI, then check its package and serve it from a real daemon"
-# Bun runs the package scripts; Node runs Vite and vue-tsc. Keep these task-specific
-# requests aligned with the versions recorded in mise.lock.
-# Task tool setup can resolve prefixes again; exact requests keep it on the
-# existing lockfile versions instead of probing not-yet-published platform builds.
-tools = { bun = "1.4.4", node = "24.22.2" }
-# The suite and the bundle test start a real `memcastle serve`, so the debug binary must exist and be current.
-depends = ["build"]
+description = "Build and test the web UI, including checkout and installed-prefix serving"
+# Cargo's integration-test build also produces the daemon; a separate build would compile a second feature graph.
+depends = ["web:build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-# See `integrations:check`: the `[env]` development defaults must not reach what is tested.
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
-export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
-# Builds `web/dist` (which is what development mode serves) and lays out the tree a release packages, with the
-# release's own script (docs/adr/035). The bundle test serves both, from an installed prefix and from this checkout; it
-# is `#[ignore]`d in the basic suite because it needs bun and node, which are on the PATH here.
-packaging/web/build.sh target/bundled-web
+# Development overrides must not make the installed-prefix test read assets from the checkout.
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
+# The bundle tests consume the same build as the frontend's real-daemon tests, without rebuilding it.
 cargo test --test web_bundle -- --ignored
 cd web
-# --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
-bun install --frozen-lockfile
-bun run typecheck
-bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)"
+bun run test ${COVERAGE:+--coverage}
 # Against a real daemon, serving the build made above.
 bun run test:daemon
 """
@@ -392,76 +306,42 @@ bun run test:daemon
 [tasks."web:build"]
 description = "Build the web UI into web/dist, which is all development mode needs"
 # After this, `memcastle serve --assets-dir "$PWD"` with `web.enable` serves the dashboard as built in this checkout.
-tools = { bun = "1.4.4", node = "24.22.2" }
 sources = [
-  "packaging/web/build.sh",
-  "web/package.json",
-  "web/bun.lock",
-  "web/vite.config.ts",
-  "web/tsconfig.json",
-  "web/env.d.ts",
-  "web/index.html",
-  "web/src/**",
-  "web/public/**",
-  "docs/images/icon.svg", # Vite's @brand alias imports this file from outside web/.
+  "package.json",
+  "bun.lock",
+  "bunfig.toml",
+  "vite.config.ts",
+  "dev/**", # The Vite configuration imports the development daemon plugin.
+  "tsconfig.json",
+  "env.d.ts",
+  "index.html",
+  "src/**",
+  "public/**",
+  "../docs/images/icon.svg", # Vite's @brand alias imports this file from outside web/.
 ]
-outputs = ["web/dist/index.html", "web/dist/assets"]
-run = "packaging/web/build.sh"
+outputs = ["dist/index.html", "dist/assets"]
+run = "bun run build"
+dir = "web"
 
 [tasks."web:dev"]
 description = "Run the dashboard's dev server (hot reload) against the running daemon"
 # The page is the dev server's and `/api` is proxied to the daemon, found through its registry file or MEMCASTLE_URL.
-tools = { bun = "1.4.4", node = "24.22.2" }
+run = "bun run dev"
 dir = "web"
-run = "bun install --frozen-lockfile && bun run dev"
-
-[tasks."web:package"]
-description = "Lay out the dashboard that ships with releases in target/bundled-web"
-# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and serve from
-# (`memcastle serve --assets-dir target/bundled-web`).
-tools = { bun = "1.4.4", node = "24.22.2" }
-sources = [
-  "packaging/web/build.sh",
-  "web/package.json",
-  "web/bun.lock",
-  "web/vite.config.ts",
-  "web/tsconfig.json",
-  "web/env.d.ts",
-  "web/index.html",
-  "web/src/**",
-  "web/public/**",
-  "docs/images/icon.svg",
-]
-# Packaging rebuilds the checkout as well as the release tree, so require both entrypoints.
-outputs = ["web/dist/index.html", "web/dist/assets", "target/bundled-web/web/dist/index.html", "target/bundled-web/web/dist/assets"]
-run = "packaging/web/build.sh target/bundled-web"
 
 [tasks."sources:check"]
 description = "Build and conformance-test every reference WebAssembly source under sources/"
 # `memcastle source build` is what a source author runs, so this is also the proof that it works on the reference
 # sources. It needs the `wasm32-wasip2` target, which rust-toolchain.toml requests.
-depends = ["build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 for manifest in sources/*/memcastle-source.toml; do
   source="$(dirname "$manifest")"
   echo "==> $source"
-  # A source that wraps a program ships a stand-in for it in `fixtures/bin`, which its cases need
-  # first on the PATH because the real program needs data no fixture can carry.
-  PATH="$PWD/$source/fixtures/bin:$PATH" ./target/debug/memcastle source test "$source"
-  name="${source#sources/}"
-  if [[ -f "$source/core-tests.rs" ]]; then
-    cargo nextest run --features provider-tests --test "source_$name"
-  fi
+  mise run sources:test -- "${source#sources/}"
 done
 """
-
-[tasks."sources:package"]
-description = "Exercise local source bundle packaging (empty in Core) into target/bundled-sources"
-# The runtime can still run an unpacked bundle supplied through `mining.bundled_dir`, though Core releases carry none.
-depends = ["build"]
-run = "packaging/sources/build.sh target/debug/memcastle target/bundled-sources"
 
 [tasks."sources:test"]
 description = "Build and conformance-test one reference WebAssembly source: mise run sources:test -- <name>"
@@ -473,15 +353,12 @@ run = """
 set -euo pipefail
 # The stand-in for a wrapped program, when the source ships one (see `sources:check`).
 PATH="$PWD/sources/${usage_name?}/fixtures/bin:$PATH" ./target/debug/memcastle source test "sources/${usage_name?}"
-if [[ -f "sources/${usage_name?}/core-tests.rs" ]]; then
-  cargo nextest run --features provider-tests --test "source_${usage_name?}"
-fi
 """
 
 # The retrieval evaluation (docs/retrieval-evaluation.md). Explicit report-writing tasks stay outside `check` and `ci`;
 # the committed baseline runs separately in Linux's slow test suite (`mise run test:slow`).
 # They run the `#[ignore]`d tests of `tests/in_process/retrieval_eval`, with `--no-capture` so the report reaches the
-# terminal, and with the `[env]` development defaults dropped for the reason `integrations:check` gives.
+# terminal, and with the `[env]` development defaults dropped so they cannot change the test configuration.
 
 [tasks.eval]
 description = "Measure retrieval quality and latency on the bundled dataset: prints a report, writes target/eval/report.json"
@@ -490,7 +367,7 @@ description = "Measure retrieval quality and latency on the bundled dataset: pri
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_run)'
 """
 
@@ -501,7 +378,7 @@ description = "Re-measure the bundled dataset and rewrite the committed baseline
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 # Timings are not part of a baseline, so there is nothing to repeat.
 EVAL_UPDATE_BASELINE=1 EVAL_REPETITIONS=0 \\
   cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_run)'
@@ -514,13 +391,8 @@ arg "<base>" help="The report to compare against, such as tests/fixtures/retriev
 arg "<new>" help="The report to judge, such as target/eval/report.json"
 arg "[threshold]" help="The largest drop in any metric that is tolerated" default="0.02"
 '''
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
-EVAL_BASE="${usage_base?}" EVAL_NEW="${usage_new?}" EVAL_THRESHOLD="${usage_threshold:-0.02}" EVAL_FAIL_ON_REGRESSION=1 \\
-  cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_compare)'
-"""
+env = { EVAL_FAIL_ON_REGRESSION = "1" }
+run = '''EVAL_BASE="${usage_base?}" EVAL_NEW="${usage_new?}" EVAL_THRESHOLD="${usage_threshold:-0.02}" cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_compare)' '''
 
 [tasks."eval:longmemeval"]
 description = "Measure session retrieval on a downloaded LongMemEval file: mise run eval:longmemeval -- <file.json>"
@@ -530,7 +402,7 @@ usage = 'arg "<file>" help="A LongMemEval JSON file, such as longmemeval_s.json"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+for name in "${!MEMCASTLE_@}"; do unset "$name"; done
 EVAL_LONGMEMEVAL="$(realpath "${usage_file?}")" \\
   cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_longmemeval)'
 """

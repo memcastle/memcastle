@@ -235,7 +235,7 @@ Core releases do not attach a standalone sources archive.
 The runtime can still load a bundle supplied through `mining.bundled_dir`, and its sources appear as `bundled` and
 `installed` until enabled by the user. Release packages keep the empty directory for the runtime's bundled-source lookup.
 
-`mise run sources:package` still exercises optional local bundles through `packaging/sources/build.sh`.
+Use `memcastle source package` directly for local source archives; Core has no source-bundle packaging task.
 Its empty Core bundle does not constrain the runtime: an unpacked source package can still be supplied separately.
 `directory` is the worked example of the built-in source and is not bundled.
 
