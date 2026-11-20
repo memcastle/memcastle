@@ -37,6 +37,7 @@ nav = [
   ] },
   { "Guides" = [
     { "Running the daemon" = "daemon.md" },
+    { "Daemon container" = "container.md" },
     { "Authentication" = "authentication.md" },
     { "Web UI" = "web.md" },
     { "Terminal operations console" = "tui.md" },

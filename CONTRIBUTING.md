@@ -135,6 +135,7 @@ Use `mise exec -- cargo build` directly for one-off profile/target options.
 |---|---|
 | `mise run default` | Format, lint, build and test |
 | `mise run build` | Build the binary |
+| `mise run docker` | Build the local daemon image using the Rust and frontend builds |
 | `mise cli <args>` | Run `memcastle` from source (passes flags through) |
 | `mise run setup` | Install `memcastle` into `~/.cargo/bin` |
 | `mise run test` | Run the basic tests, without the WebAssembly suite (accepts nextest selectors) |
@@ -250,6 +251,11 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 `gh ship validate` runs on every pull request, so a broken release contract fails on the PR rather than mid-release.
 
 ### What a release contains
+
+After a stable release becomes public, the project-owned **Container** workflow packages its exact Linux binaries
+and frontend build into `ghcr.io/memcastle/memcastle` for amd64 and arm64.
+It can be retried independently using its `tag` input; see [the container guide](docs/container.md).
+Pull-request container checks reuse the existing build and web jobs rather than compiling Rust again.
 
 📦 Publish Release attaches, for a tag `<tag>`:
 
