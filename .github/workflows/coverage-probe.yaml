@@ -23,11 +23,11 @@ jobs:
   probe:
     name: Coverage (${{ matrix.mode }})
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        mode: [wrapped, no-llvm-wrapper, no-mbx, no-wrappers]
+        mode: [wrapped, no-llvm-wrapper]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.100.0
@@ -86,6 +86,31 @@ jobs:
           cargo llvm-cov --version
           cargo llvm-cov nextest -vv --lcov --output-path report.lcov "${extra[@]}" 2>&1 | tee probe.log
 
+      - name: Probe one existing Core test
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          extra=()
+          if [[ "$MODE" == "no-llvm-wrapper" ]]; then extra+=(--no-rustc-wrapper); fi
+          cargo llvm-cov nextest -vv --profile ci --lib \
+            -E 'test(domain::source_package::tests::contracts_are_compatible_by_minor_before_one_point_zero)' \
+            --success-output immediate --lcov --output-path root-report.lcov "${extra[@]}" 2>&1 | tee root-probe.log
+
+      - name: Inspect and execute the Core test binary directly
+        if: always()
+        shell: pwsh
+        run: |
+          $binary = Get-ChildItem "$env:GITHUB_WORKSPACE/target/llvm-cov-target" -Recurse -Filter 'memcastle-*.exe' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $binary) { Write-Warning 'No Core test executable was built'; exit 0 }
+          $sysroot = rustc --print sysroot
+          & "$sysroot/lib/rustlib/x86_64-pc-windows-msvc/bin/llvm-readobj.exe" --sections $binary.FullName |
+            Tee-Object -FilePath root-sections.txt | Select-String 'Name:|Size:'
+          New-Item -ItemType Directory "$env:GITHUB_WORKSPACE/target/manual-profile" -Force | Out-Null
+          $env:LLVM_PROFILE_FILE = "$env:GITHUB_WORKSPACE/target/manual-profile/%p-%m.profraw"
+          Write-Host "Direct profile path: $env:LLVM_PROFILE_FILE"
+          & $binary.FullName --exact 'domain::source_package::tests::contracts_are_compatible_by_minor_before_one_point_zero' --nocapture
+
       - name: Locate raw profiles
         if: always()
         shell: pwsh
@@ -101,5 +126,8 @@ jobs:
           path: |
             .coverage-probe/probe.log
             .coverage-probe/report.lcov
+            root-probe.log
+            root-report.lcov
+            root-sections.txt
             probe-profiles.txt
             target/**/*.profraw
