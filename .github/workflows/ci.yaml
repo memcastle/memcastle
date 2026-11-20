@@ -135,11 +135,21 @@ jobs:
 
       - name: Run tests (with coverage)
         env:
-          # %m signatures can collide; %b separates builds, but LLVM cannot read build IDs on macOS.
-          LLVM_PROFILE_FILE_NAME: ${{ runner.os == 'macOS' && '%m.profraw' || '%m-%b.profraw' }}
-          # %b requires a build ID in each instrumented binary; Darwin keeps its native linker settings.
-          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C link-arg=/build-id' || runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
+          # Use process IDs on Windows: its LLVM runtime can reject %b and silently fall back outside the report tree.
+          # Linux keeps build-ID isolation; Darwin's LLVM runtime cannot read build IDs either.
+          LLVM_PROFILE_FILE_NAME: ${{ runner.os == 'Windows' && '%p-%m.profraw' || runner.os == 'Linux' && '%m-%b.profraw' || '%m.profraw' }}
+          RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
         run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Surface profiler startup diagnostics before spending a full build on missing raw profiles.
+            probe="$PWD/target/coverage-probe"
+            mkdir -p "$probe"
+            printf '%s\n' 'fn main() { println!("coverage probe"); }' > "$probe/main.rs"
+            rustc -C instrument-coverage -C linker=lld-link "$probe/main.rs" -o "$probe/probe.exe"
+            LLVM_PROFILE_FILE="$(cygpath -w "$probe")/$LLVM_PROFILE_FILE_NAME" "$probe/probe.exe"
+            profiles=("$probe"/*.profraw)
+            [[ -s "${profiles[0]}" ]] || { echo '::error::Rust coverage runtime emitted no raw profile'; exit 1; }
+          fi
           # nextest's filter skips execution, not linking; select only basic Cargo targets too.
           targets=(--lib --bin memcastle --test in_process)
           for file in tests/*.rs; do
