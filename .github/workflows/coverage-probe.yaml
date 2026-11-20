@@ -1,0 +1,104 @@
+name: Windows coverage probe
+
+on:
+  push:
+    branches: [diagnostics/pr394-windows-coverage]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUSTUP_TOOLCHAIN: "1.100.0"
+  MISE_NO_HOOKS: "1"
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link
+  LLVM_PROFILE_FILE_NAME: "%p-%m.profraw"
+
+jobs:
+  probe:
+    name: Coverage (${{ matrix.mode }})
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [wrapped, no-llvm-wrapper, no-mbx, no-wrappers]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: llvm-tools-preview
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+      - uses: ./.github/actions/setup-windows
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: pr394-coverage-probe-v1
+
+      - name: Create isolated Cargo fixture
+        run: |
+          mkdir -p .coverage-probe/src
+          printf '%s\n' '[package]' 'name = "coverage_probe"' 'version = "0.0.0"' 'edition = "2024"' '[workspace]' > .coverage-probe/Cargo.toml
+          printf '%s\n' 'pub fn add(a: u32, b: u32) -> u32 { a + b }' '#[test] fn adds() { assert_eq!(add(1, 2), 3); }' > .coverage-probe/src/lib.rs
+
+      - name: Probe raw profiler binary IDs
+        run: |
+          probe="$PWD/target/raw-profile-probe"
+          mkdir -p "$probe"
+          printf '%s\n' 'fn main() { println!("raw profiler probe"); }' > "$probe/main.rs"
+          rustc -C instrument-coverage -C linker=lld-link -C link-arg=/build-id "$probe/main.rs" -o "$probe/probe.exe"
+          LLVM_PROFILE_FILE="$(cygpath -w "$probe")/%m-%b.profraw" "$probe/probe.exe"
+          profiles=("$probe"/*.profraw)
+          if [[ -s "${profiles[0]}" ]]; then
+            echo 'Raw profiler emitted a build-ID profile'
+          else
+            echo '::warning::Raw profiler did not emit a build-ID profile'
+          fi
+
+      - name: Compare Cargo coverage pipelines
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          extra=()
+          case "$MODE" in
+            no-mbx|no-wrappers)
+              # Put the real toolchain first so cargo-llvm-cov's child Cargo also bypasses mise's cargo wrapper.
+              real_cargo="$(cygpath -u "$(rustup which cargo)")"
+              PATH="$(dirname "$real_cargo"):$PATH"
+              export PATH
+              export CARGO_BUILD_RUSTC_WRAPPER="" RUSTC_WRAPPER=""
+              ;;
+          esac
+          case "$MODE" in
+            no-llvm-wrapper|no-wrappers) extra+=(--no-rustc-wrapper) ;;
+          esac
+          CARGO_TARGET_DIR="$(cygpath -w "$PWD/target")/cargo-profile-probe"
+          export CARGO_TARGET_DIR
+          cd .coverage-probe
+          cargo --version
+          cargo llvm-cov --version
+          cargo llvm-cov nextest -vv --lcov --output-path report.lcov "${extra[@]}" 2>&1 | tee probe.log
+
+      - name: Locate raw profiles
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "$env:DEV_DRIVE/target", "$env:GITHUB_WORKSPACE/.coverage-probe" -Filter '*.profraw' -Recurse |
+            Select-Object FullName, Length | Format-Table -AutoSize |
+            Out-String -Width 300 | Tee-Object -FilePath probe-profiles.txt
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-probe-${{ matrix.mode }}
+          path: |
+            .coverage-probe/probe.log
+            .coverage-probe/report.lcov
+            probe-profiles.txt
+            target/**/*.profraw
