@@ -21,6 +21,8 @@ The last row is not a place you keep anything.
 It is where an OS package installs read-only files, the bundled sources, the agent integrations and the skills,
 and it is never under the XDG directories.
 See [Runtime assets](#runtime-assets).
+The [daemon container](container.md#storage-and-configuration) sets the XDG roots under `/data`
+and installs immutable assets under `/usr/local/share/memcastle`.
 
 The XDG variables are honoured as the specification describes:
 an unset, empty or relative value is ignored, and the default under your home directory is used instead.

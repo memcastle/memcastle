@@ -25,6 +25,10 @@ workflow inputs and compatibility policy.
 
 ## Prerequisites
 
+Container packaging reuses existing CI/release binaries and assets rather than invoking Cargo again.
+See [Build locally](container.md#build-locally)
+for local assembly and the inline daemon status check.
+
 - Bun for `web/`, installed globally by mise; the Rust build does not need it.
 - Rust via `rustup`, with mise 2026.9.2+ providing native Mr Boxington wrapping for Cargo builds.
   `rust-toolchain.toml` and mise declare the stable channel; explicit `RUSTUP_TOOLCHAIN` selections still win.
@@ -44,6 +48,7 @@ so the storage engine itself needs no C/C++ toolchain.
 
 ```sh
 mise run build      # cargo build
+mise run docker     # build the local daemon image from the Rust/frontend outputs
 mise run test       # the basic suite: cargo nextest run, without the WebAssembly tests (accepts nextest selectors)
 mise run test:wasm  # the WebAssembly suite: every tests/wasm_*.rs binary (slow; needs the wasm32-wasip2 target)
 mise run sources:check      # build and conformance-test every source under sources/

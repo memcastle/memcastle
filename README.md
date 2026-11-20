@@ -50,6 +50,7 @@ paru -S memcastle-bin                             # Arch Linux (AUR)
 Or download a binary for your platform from the [latest release](https://github.com/memcastle/memcastle/releases/latest),
 or build from source with `cargo install --path .`.
 See the [installation guide](https://memcastle.github.io/installation/) for details and platform notes.
+For Docker or Podman, use the [daemon container guide](https://memcastle.github.io/container/).
 
 ## Quickstart
 

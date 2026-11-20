@@ -355,6 +355,11 @@ set -euo pipefail
 PATH="$PWD/sources/${usage_name?}/fixtures/bin:$PATH" ./target/debug/memcastle source test "sources/${usage_name?}"
 """
 
+[tasks.docker]
+description = "Build the container image for local testing"
+depends = ["build", "web:build"]
+run = "docker build --tag memcastle:local ."
+
 # The retrieval evaluation (docs/retrieval-evaluation.md). Explicit report-writing tasks stay outside `check` and `ci`;
 # the committed baseline runs separately in Linux's slow test suite (`mise run test:slow`).
 # They run the `#[ignore]`d tests of `tests/in_process/retrieval_eval`, with `--no-capture` so the report reaches the
