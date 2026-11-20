@@ -140,12 +140,6 @@ jobs:
           # %b requires a build ID in each instrumented binary; Darwin keeps its native linker settings.
           RUSTFLAGS: ${{ runner.os == 'Windows' && '-C link-arg=/build-id' || runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
         run: |
-          coverage_args=()
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            # The selective wrapper omits Core's instrumentation with Rust 1.100 on Windows.
-            # Direct flags produce coverage sections and raw profiles for the same executable.
-            coverage_args+=(--no-rustc-wrapper)
-          fi
           # nextest's filter skips execution, not linking; select only basic Cargo targets too.
           targets=(--lib --bin memcastle --test in_process)
           for file in tests/*.rs; do
@@ -156,7 +150,7 @@ jobs:
               *) targets+=(--test "$name") ;;
             esac
           done
-          cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${coverage_args[@]}" "${targets[@]}"
+          cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
 
       # Debug runs need raw inputs even when a corrupt profile prevents generating lcov.info.
       - name: Upload coverage artifacts
