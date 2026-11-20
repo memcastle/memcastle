@@ -1,5 +1,5 @@
 // Versioned MemCastle source contract; changes require a deliberate compatibility update.
-package memcastle:source@0.4.0;
+package memcastle:source@0.5.0;
 
 interface types {
     record source-ref {
@@ -24,8 +24,8 @@ interface types {
         metadata: string,
         occurred-at: option<string>,
     }
-    enum source-kind { file, manual, transcript, other }
-    record segment { text: string }
+    enum source-kind { file, manual, transcript, other, }
+    record segment { text: string, }
     record canonical-document {
         title: option<string>,
         room: option<string>,
@@ -50,19 +50,48 @@ interface host {
     }
     run-process: func(program: string, args: list<string>, stdin: option<list<u8>>) -> result<process-output, string>;
     access-token: func() -> result<string, string>;
+    source-credential: func() -> result<string, string>;
 }
 
 interface adapter {
     use types.{source-ref, candidate, discovery, raw-document, canonical-document, source-error};
-    identify: func(locator: option<string>, options: list<tuple<string, string>>) -> result<source-ref, source-error>;
+    identify: async func(locator: option<string>, options: list<tuple<string, string>>) -> result<source-ref, source-error>;
     default-wing: func(source: source-ref) -> string;
     default-room: func() -> string;
-    discover: func(source: source-ref, cursor: string, limit: u32) -> result<discovery, source-error>;
-    read: func(source: source-ref, candidate: candidate) -> result<option<raw-document>, source-error>;
+    discover: async func(source: source-ref, cursor: string, limit: u32) -> result<discovery, source-error>;
+    read: async func(source: source-ref, candidate: candidate) -> result<option<raw-document>, source-error>;
     normalize: func(raw: raw-document) -> result<canonical-document, source-error>;
 }
 
 world source {
     import host;
     export adapter;
+}
+
+// Optional extension; kept in sync with the canonical Core contract.
+interface reconciliation {
+    use types.{source-ref, candidate, raw-document, source-error};
+    record known-document {
+        pending: bool,
+        retired: bool,
+        external-id: string,
+        revision: string,
+        metadata: string,
+    }
+    variant decision { unchanged, refresh(string), retire(string) }
+    variant acquisition { document(raw-document), skip, retire(string) }
+    record discovery-page {
+        candidates: list<candidate>,
+        exhausted: bool,
+        cursor-after: option<string>,
+    }
+    reconcile: async func(source: source-ref, known: known-document) -> result<decision, source-error>;
+    discover: async func(source: source-ref, cursor: string, limit: u32) -> result<discovery-page, source-error>;
+    acquire: async func(source: source-ref, candidate: candidate) -> result<acquisition, source-error>;
+}
+
+world reconciled-source {
+    import host;
+    export adapter;
+    export reconciliation;
 }

@@ -9,7 +9,7 @@ use crate::domain::is_valid_source_name;
 use crate::error::{Error, Result};
 
 /// The WIT package implemented by embedding provider components.
-pub const CONTRACT: &str = "0.1.0";
+pub const CONTRACT: &str = "0.2.0";
 
 /// A model and the dimensions this implementation actually supports.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,7 +268,7 @@ mod tests {
     use super::*;
 
     fn descriptor() -> Manifest {
-        parse("id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3, 768]\n").unwrap()
+        parse("id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3, 768]\n").unwrap()
     }
 
     #[test]
@@ -290,9 +290,9 @@ mod tests {
             validate_selection(&manifest, &serde_json::json!({"region": 7}), "one", 3).is_err()
         );
         validate_selection(&manifest, &serde_json::json!({"region": "eu"}), "one", 3).unwrap();
-        let parsed = parse("id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nrequired = ['region']\nadditionalProperties = false\n[config_schema.properties.region]\ntype = 'string'\n").unwrap();
+        let parsed = parse("id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nrequired = ['region']\nadditionalProperties = false\n[config_schema.properties.region]\ntype = 'string'\n").unwrap();
         validate_selection(&parsed, &serde_json::json!({"region": "eu"}), "one", 3).unwrap();
-        assert!(parse("id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nformat = 'unvalidated'\n").is_err());
+        assert!(parse("id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nformat = 'unvalidated'\n").is_err());
     }
 
     #[test]
@@ -309,11 +309,11 @@ mod tests {
     fn malformed_capabilities_and_secret_bearing_schemas_are_rejected_before_installation() {
         let bad = [
             (
-                "id = 'Not-a-module'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
+                "id = 'Not-a-module'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
                 "lowercase",
             ),
             (
-                "id = 'synthetic'\nversion = 'no-version'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
+                "id = 'synthetic'\nversion = 'no-version'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
                 "version",
             ),
             (
@@ -321,31 +321,35 @@ mod tests {
                 "contract",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n",
+                "contract",
+            ),
+            (
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n",
                 "models",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3, 3]\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3, 3]\n",
                 "duplicate model/dimension",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [0]\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [0]\n",
                 "invalid",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[[models]]\nid = 'one'\ndimensions = [4]\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[[models]]\nid = 'one'\ndimensions = [4]\n",
                 "duplicate",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nadditionalProperties = true\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nadditionalProperties = true\n",
                 "unspecified settings",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\n[config_schema.properties.api_key]\ntype = 'string'\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\n[config_schema.properties.api_key]\ntype = 'string'\n",
                 "credential reference",
             ),
             (
-                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nrequired = ['region']\n",
+                "id = 'synthetic'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'one'\ndimensions = [3]\n[config_schema]\ntype = 'object'\nrequired = ['region']\n",
                 "unknown property",
             ),
         ];

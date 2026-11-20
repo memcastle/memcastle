@@ -11,7 +11,7 @@ edition = "2024"
 # The MSRV. Read as TOML by the MSRV job in ci.yaml.
 # `rust-toolchain.toml` separately pins the channel to develop
 # against; the two answer different questions.
-rust-version = "1.90"
+rust-version = "1.100"
 license = "MIT"
 # No `authors`: Cargo/crates.io stopped generating and reading it after the
 # 2021 edition — ownership on crates.io comes from the registry account that
@@ -220,14 +220,13 @@ dashmap = "6.2.1"
 
 # The source runtime (docs/adr/026): third-party mining sources are WebAssembly Components run in-process, behind the
 # `SourceAdapter` contract. Only `mining::wasm` and `embed::wasm` may name these crates
-# (`tests/source_isolation.rs`). Pinned to 41,
-# the newest line whose MSRV is this crate's (42 needs Rust 1.91); a newer line is a deliberate MSRV bump.
+# (`tests/source_isolation.rs`). Both hosts use the same WASI 0.3 implementation.
 # `default-features = false` drops the profiler, GC, coredump, debug and cache stacks a source host never uses; what is
-# left is the Cranelift compiler, the component model, and async support (which WASI preview 2 requires).
-wasmtime = { version = "41.0.4", default-features = false, features = ["runtime", "cranelift", "component-model", "async", "std"] }
-# WASI preview 2 is what a `wasm32-wasip2` component imports. Nothing is granted by default: each source and embedding
+# left is the Cranelift compiler, the component model, and native component async support.
+wasmtime = { version = "50.0.3", default-features = false, features = ["runtime", "cranelift", "component-model", "component-model-async", "async", "std"] }
+# WASI 0.3 is what a `wasm32-wasip3` component imports. Nothing is granted by default: each source and embedding
 # host builds its context from the module's reviewed permissions alone.
-wasmtime-wasi = { version = "41.0.4", default-features = false, features = ["p2"] }
+wasmtime-wasi = { version = "50.0.3", default-features = false, features = ["p3"] }
 # Source manifests state which MemCastle versions they run on (`[compatibility] memcastle = ">=0.3, <0.4"`).
 semver = "1"
 # A source package is a gzip-compressed tarball: `memcastle source package` writes it, `source install` reads it.

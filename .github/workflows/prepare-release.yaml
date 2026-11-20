@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       # git-cliff is pinned by mise.lock: a changelog tool that changes
       # version between releases would silently change our release notes.

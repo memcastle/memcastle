@@ -725,7 +725,10 @@ mod tests {
         let store = SurrealStore::connect_memory_for_tests().await;
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        store.save_source_package(&record("0.4")).await.unwrap();
+        store
+            .save_source_package(&record(crate::domain::CONTRACT_VERSION))
+            .await
+            .unwrap();
         let binding = crate::domain::OAuthBinding {
             source: "demo".into(),
             configuration: "demo".into(),
@@ -770,8 +773,11 @@ mod tests {
     fn an_intact_compatible_package_has_no_reason_to_be_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        assert_eq!(unavailable_reason(&record("0.4"), dir.path()), None);
-        let described = describe_package(&record("0.4"), dir.path());
+        assert_eq!(
+            unavailable_reason(&record(crate::domain::CONTRACT_VERSION), dir.path()),
+            None
+        );
+        let described = describe_package(&record(crate::domain::CONTRACT_VERSION), dir.path());
         assert_eq!(described.state, SourceState::Enabled);
         assert_eq!(described.version.as_deref(), Some("1.0.0"));
     }
@@ -791,11 +797,13 @@ mod tests {
     #[test]
     fn a_package_whose_component_is_missing_or_altered_says_which() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = unavailable_reason(&record("0.4"), dir.path()).unwrap();
+        let missing =
+            unavailable_reason(&record(crate::domain::CONTRACT_VERSION), dir.path()).unwrap();
         assert!(missing.contains("missing"), "{missing}");
 
         install_component(dir.path(), b"something else");
-        let altered = unavailable_reason(&record("0.4"), dir.path()).unwrap();
+        let altered =
+            unavailable_reason(&record(crate::domain::CONTRACT_VERSION), dir.path()).unwrap();
         assert!(altered.contains("no longer matches"), "{altered}");
     }
 
@@ -803,13 +811,13 @@ mod tests {
     fn a_disabled_package_is_not_minable_and_the_state_is_named() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        let mut disabled = record("0.4");
+        let mut disabled = record(crate::domain::CONTRACT_VERSION);
         disabled.state = SourcePackageState::Disabled;
         let error = minable_package(&disabled, dir.path())
             .unwrap_err()
             .to_string();
         assert!(error.contains("disabled"), "{error}");
-        assert!(minable_package(&record("0.4"), dir.path()).is_ok());
+        assert!(minable_package(&record(crate::domain::CONTRACT_VERSION), dir.path()).is_ok());
         let unavailable = minable_package(&record("0.9"), dir.path())
             .unwrap_err()
             .to_string();

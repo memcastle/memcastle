@@ -21,9 +21,9 @@ use memcastle::plugin::package;
 fn component() -> Vec<u8> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture = root.join("tests/fixtures/mock-embedding");
-    let target = root.join("target/test-mock-embedding");
+    let target = common::wasm::shared_target();
     let output = Command::new("cargo")
-        .args(["build", "--target", "wasm32-wasip2", "--target-dir"])
+        .args(["build", "--target", "wasm32-wasip3", "--target-dir"])
         .arg(&target)
         .current_dir(&fixture)
         .output()
@@ -33,14 +33,14 @@ fn component() -> Vec<u8> {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    std::fs::read(target.join("wasm32-wasip2/debug/memcastle_test_mock_embedding.wasm")).unwrap()
+    std::fs::read(target.join("wasm32-wasip3/debug/memcastle_test_mock_embedding.wasm")).unwrap()
 }
 
 fn manifest() -> Manifest {
     Manifest {
         id: "mock-embedding".into(),
         version: "0.1.0".into(),
-        contract: "0.1.0".into(),
+        contract: memcastle::plugin::embedding::CONTRACT.into(),
         models: vec![Model {
             id: "synthetic".into(),
             dimensions: vec![3],
@@ -225,13 +225,95 @@ async fn network_is_unavailable_without_the_manifest_grant() {
         Duration::from_secs(5),
     )
     .unwrap();
-    assert_eq!(allowed.embed(&["text".into()]).await.unwrap().len(), 1);
+    assert_eq!(
+        allowed.embed(&["text".into()]).await.unwrap(),
+        vec![vec![4.0, 0.0, 1.0]]
+    );
+}
+
+#[tokio::test]
+async fn cpu_bound_guests_yield_to_other_tasks_before_their_deadline() {
+    let provider = WasmEmbedder::load(
+        manifest(),
+        &component(),
+        "synthetic".into(),
+        3,
+        "spin".into(),
+        None,
+        Duration::from_millis(200),
+    )
+    .unwrap();
+    let progressed = std::sync::atomic::AtomicBool::new(false);
+    let texts = ["text".into()];
+    let (result, ()) = tokio::join!(
+        async {
+            let result = provider.embed(&texts).await;
+            assert!(
+                progressed.load(std::sync::atomic::Ordering::SeqCst),
+                "the executor was blocked by a CPU-bound guest"
+            );
+            result
+        },
+        async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            progressed.store(true, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
+    assert!(result.unwrap_err().to_string().contains("time limit"));
+}
+
+#[tokio::test]
+async fn suspended_wasi_io_yields_to_other_tasks_and_obeys_the_wall_clock_deadline() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut descriptor = manifest();
+    descriptor.network = true;
+    let provider = WasmEmbedder::load(
+        descriptor,
+        &component(),
+        "synthetic".into(),
+        3,
+        format!("tcp-read:{port}"),
+        None,
+        Duration::from_millis(200),
+    )
+    .unwrap();
+    // Keep the socket open without replying. An independent OS thread also releases a broken blocking host.
+    let server = std::thread::spawn(move || {
+        use std::io::Write;
+        let (mut socket, _) = listener.accept().unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        let _ = socket.write_all(b"x");
+    });
+    let progressed = std::sync::atomic::AtomicBool::new(false);
+    let texts = ["text".into()];
+    let started = std::time::Instant::now();
+    let (result, ()) = tokio::join!(
+        async {
+            let result = provider.embed(&texts).await;
+            assert!(
+                progressed.load(std::sync::atomic::Ordering::SeqCst),
+                "the executor was blocked by guest I/O"
+            );
+            result
+        },
+        async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            progressed.store(true, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
+    assert!(result.unwrap_err().to_string().contains("time limit"));
+    assert!(
+        started.elapsed() < Duration::from_millis(900),
+        "the call waited for the peer instead of its deadline"
+    );
+    server.join().unwrap();
 }
 
 #[tokio::test]
 async fn an_installed_module_becomes_selectable_without_replacing_other_profiles() {
     let bytes = component();
-    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\ncredential = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\ncredential = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
     let mut config = EmbeddingsConfig::default();
     config.providers.insert(
         "mock".into(),
@@ -320,7 +402,7 @@ async fn an_installed_module_becomes_selectable_without_replacing_other_profiles
                 entry: "embeddings/mock-embedding/embedding.wasm".into(),
                 sha256: sha256_hex(&bytes),
                 optional: false,
-                contract: Some("0.1.0".into()),
+                contract: Some(memcastle::plugin::embedding::CONTRACT.into()),
                 config_schema: None,
             }],
             artifacts: vec![],
@@ -351,7 +433,7 @@ async fn an_installed_module_becomes_selectable_without_replacing_other_profiles
         .load_plugins(&config, std::slice::from_ref(&record), root.path())
         .unwrap();
     assert_eq!(embeddings.select(None).unwrap().space(), selected.space());
-    let changed_descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\ncredential = true\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let changed_descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\ncredential = true\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
     std::fs::write(base.join("memcastle-embedding.toml"), changed_descriptor).unwrap();
     let mut replacement = record;
     replacement.manifest.modules[0].manifest_sha256 = sha256_hex(changed_descriptor);
@@ -400,7 +482,7 @@ fn release_version(descriptor: &[u8], version: &str) -> Vec<u8> {
             entry: "embeddings/mock-embedding/embedding.wasm".into(),
             sha256: String::new(),
             optional: false,
-            contract: Some("0.1.0".into()),
+            contract: Some(memcastle::plugin::embedding::CONTRACT.into()),
             config_schema: None,
         }],
         artifacts: vec![],
@@ -422,7 +504,7 @@ fn release_version(descriptor: &[u8], version: &str) -> Vec<u8> {
 
 #[tokio::test]
 async fn a_plugin_install_activates_only_its_configured_embedding_profile() {
-    let archive = release(b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n");
+    let archive = release(b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n");
     let daemon = common::TestDaemon::start_configured(|config| {
         config.embeddings.providers.insert(
             "synthetic".into(),
@@ -467,7 +549,7 @@ async fn a_plugin_install_activates_only_its_configured_embedding_profile() {
     );
     let error: serde_json::Value = unavailable.json().await.unwrap();
     assert_eq!(error["code"], "memcastle::embed::profile_unavailable");
-    let incompatible = release(b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'synthetic'\ndimensions = [768]\n");
+    let incompatible = release(b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'synthetic'\ndimensions = [768]\n");
     let incompatible = client
         .post(format!("{}/api/plugins/preview", daemon.base_url))
         .body(incompatible)
@@ -532,7 +614,7 @@ async fn a_plugin_install_activates_only_its_configured_embedding_profile() {
 
 #[tokio::test]
 async fn an_embedding_network_grant_requires_its_own_reviewed_consent() {
-    let archive = release(b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n");
+    let archive = release(b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n");
     let daemon = common::TestDaemon::start().await;
     let client = reqwest::Client::new();
     let preview = client
@@ -583,8 +665,8 @@ async fn an_embedding_network_grant_requires_its_own_reviewed_consent() {
 
 #[tokio::test]
 async fn a_plugin_update_reuses_only_the_permissions_previously_reviewed_for_that_module() {
-    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
-    let network = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let network = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\nnetwork = true\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
     let daemon = common::TestDaemon::start().await;
     let client = reqwest::Client::new();
     let endpoint = format!("{}/api/plugins", daemon.base_url);
@@ -681,7 +763,7 @@ async fn a_plugin_update_reuses_only_the_permissions_previously_reviewed_for_tha
 
 #[tokio::test]
 async fn an_update_cannot_retire_an_embedding_module_selected_by_a_profile() {
-    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
+    let descriptor = b"id = 'mock-embedding'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'synthetic'\ndimensions = [3]\n";
     let daemon = common::TestDaemon::start_configured(|config| {
         config.embeddings.providers.insert(
             "synthetic".into(),

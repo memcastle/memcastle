@@ -10,6 +10,7 @@ use serde_json::json;
 wit_bindgen::generate!({
     path: "wit",
     world: "source",
+    sync: true,
 });
 
 use exports::memcastle::source::adapter::Guest;

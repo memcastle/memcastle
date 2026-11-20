@@ -182,7 +182,7 @@ remapped, so rebuilding a tag on the same target should give the same bytes.
 
 ### From source
 
-You need a Rust toolchain, version 1.90 or newer.
+You need a Rust toolchain, version 1.100 or newer.
 
 ```sh
 git clone https://github.com/memcastle/memcastle

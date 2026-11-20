@@ -20,6 +20,8 @@ mod bindings {
     wasmtime::component::bindgen!({
         path: "wit/embedding/memcastle-embedding.wit",
         world: "embedding-provider",
+        exports: { default: async | store },
+        imports: { default: async },
     });
 }
 
@@ -41,38 +43,48 @@ impl WasiView for State {
 }
 
 impl bindings::memcastle::embedding::host::Host for State {
-    fn access_token(&mut self) -> std::result::Result<String, String> {
-        if let Some(account) = &self.account {
-            return crate::provider_auth::resolve(account)
-                .map(|token| token.expose().to_owned())
-                .map_err(|reason| {
-                    format!(
-                        "embedding account {reason}; check its credential reference on the daemon"
-                    )
-                });
-        }
-        match &self.credential {
-            Some(CredentialRef::Env { name }) => std::env::var(name)
-                .ok()
+    async fn access_token(&mut self) -> std::result::Result<String, String> {
+        let account = self.account.clone();
+        let credential = self.credential.clone();
+        // File/keyring credentials and provider refresh must not block the component executor.
+        tokio::task::spawn_blocking(move || resolve_token(account.as_ref(), credential.as_ref()))
+            .await
+            .map_err(|_| "embedding credential worker failed".to_string())?
+    }
+}
+
+fn resolve_token(
+    account: Option<&ProviderAccount>,
+    credential: Option<&CredentialRef>,
+) -> std::result::Result<String, String> {
+    if let Some(account) = account {
+        return crate::provider_auth::resolve(account)
+            .map(|token| token.expose().to_owned())
+            .map_err(|reason| {
+                format!("embedding account {reason}; check its credential reference on the daemon")
+            });
+    }
+    match credential {
+        Some(CredentialRef::Env { name }) => std::env::var(name)
+            .ok()
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| "embedding credential is unavailable".into()),
+        Some(CredentialRef::File { path }) => {
+            // Never read an unbounded file because a credential can name any operator-owned path.
+            let mut value = String::new();
+            let file =
+                std::fs::File::open(path).map_err(|_| "embedding credential is unavailable")?;
+            file.take(8 * 1024)
+                .read_to_string(&mut value)
+                .map_err(|_| "embedding credential is unavailable")?;
+            value
+                .lines()
+                .next()
                 .filter(|token| !token.is_empty())
-                .ok_or_else(|| "embedding credential is unavailable".into()),
-            Some(CredentialRef::File { path }) => {
-                // Never read an unbounded file because a credential can name any operator-owned path.
-                let mut value = String::new();
-                let file =
-                    std::fs::File::open(path).map_err(|_| "embedding credential is unavailable")?;
-                file.take(8 * 1024)
-                    .read_to_string(&mut value)
-                    .map_err(|_| "embedding credential is unavailable")?;
-                value
-                    .lines()
-                    .next()
-                    .filter(|token| !token.is_empty())
-                    .map(str::to_string)
-                    .ok_or_else(|| "embedding credential is unavailable".into())
-            }
-            _ => Err("no credential was granted to this embedding provider".into()),
+                .map(str::to_string)
+                .ok_or_else(|| "embedding credential is unavailable".into())
         }
+        _ => Err("no credential was granted to this embedding provider".into()),
     }
 }
 
@@ -82,6 +94,7 @@ fn engine() -> Result<&'static Engine> {
         .get_or_init(|| {
             let mut config = Config::new();
             config.epoch_interruption(true);
+            config.wasm_component_model_async(true);
             let engine = Engine::new(&config).map_err(|error| error.to_string())?;
             let weak = engine.weak();
             std::thread::Builder::new()
@@ -206,14 +219,18 @@ impl WasmEmbedder {
             account,
             timeout,
         }));
-        provider.check()?;
+        block_on(provider.check())?;
         Ok(provider)
     }
 
     fn state(&self, granted: bool) -> State {
         let mut wasi = WasiCtxBuilder::new();
         if granted && self.0.manifest.network {
-            wasi.inherit_network().allow_ip_name_lookup(true);
+            // Wasmtime 50 denies protocols as well as addresses by default; grant both explicitly.
+            wasi.inherit_network()
+                .allow_tcp(true)
+                .allow_udp(true)
+                .allow_ip_name_lookup(true);
         }
         State {
             wasi: wasi.build(),
@@ -235,20 +252,24 @@ impl WasmEmbedder {
         }
     }
 
-    fn instantiate(&self, granted: bool) -> Result<(Store<State>, bindings::EmbeddingProvider)> {
+    async fn instantiate(
+        &self,
+        granted: bool,
+    ) -> Result<(Store<State>, bindings::EmbeddingProvider)> {
         let mut linker = Linker::<State>::new(self.0.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|error| self.failed(error))?;
+        wasmtime_wasi::p3::add_to_linker(&mut linker).map_err(|error| self.failed(error))?;
         bindings::EmbeddingProvider::add_to_linker::<State, HasSelf<State>>(&mut linker, |state| {
             state
         })
         .map_err(|error| self.failed(error))?;
         let mut store = Store::new(self.0.engine, self.state(granted));
         store.limiter(|state| &mut state.limits);
-        store.set_epoch_deadline(
-            u64::try_from((self.0.timeout.as_millis() / 50).max(1) + 1).unwrap_or(u64::MAX),
-        );
+        // Async I/O is cooperative already; epoch timeslicing keeps CPU-bound guests cooperative too.
+        store.set_epoch_deadline(1);
+        store.epoch_deadline_async_yield_and_update(1);
         let guest =
-            bindings::EmbeddingProvider::instantiate(&mut store, &self.0.component, &linker)
+            bindings::EmbeddingProvider::instantiate_async(&mut store, &self.0.component, &linker)
+                .await
                 .map_err(|error| self.failed(error))?;
         Ok((store, guest))
     }
@@ -263,12 +284,23 @@ impl WasmEmbedder {
         }
     }
 
-    fn check(&self) -> Result<()> {
-        let (mut store, guest) = self.instantiate(false)?;
-        let models = guest
-            .memcastle_embedding_provider()
-            .call_models(&mut store)
-            .map_err(|error| self.failed(error))?;
+    async fn check(&self) -> Result<()> {
+        let work = async {
+            let (mut store, guest) = self.instantiate(false).await?;
+            store
+                .run_concurrent(async move |access| {
+                    guest
+                        .memcastle_embedding_provider()
+                        .call_models(access)
+                        .await
+                })
+                .await
+                .map_err(|error| self.failed(error))?
+                .map_err(|error| self.failed(error))
+        };
+        let models = tokio::time::timeout(self.0.timeout, work)
+            .await
+            .map_err(|_| self.failed("capability check exceeded its time limit"))??;
         let claimed = &self.0.manifest.models;
         if models.len() != claimed.len()
             || !models.iter().all(|model| {
@@ -282,24 +314,33 @@ impl WasmEmbedder {
         Ok(())
     }
 
-    fn embed_blocking(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    async fn embed_async(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         if let Some((id, account)) = &self.0.account {
-            crate::provider_auth::resolve(account).map_err(|reason| Error::EmbeddingFailed {
+            let account = account.clone();
+            tokio::task::spawn_blocking(move || crate::provider_auth::resolve(&account)).await
+                .map_err(|_| self.failed("credential worker failed"))?
+                .map_err(|reason| Error::EmbeddingFailed {
                 message: format!(
                     "provider account `{id}` {reason}; check its credential reference on the daemon"
                 ),
             })?;
         }
-        let (mut store, guest) = self.instantiate(true)?;
-        guest
-            .memcastle_embedding_provider()
-            .call_embed(
-                &mut store,
-                &self.0.model,
-                self.0.dimensions,
-                &self.0.settings,
-                texts,
-            )
+        let (mut store, guest) = self.instantiate(true).await?;
+        store
+            .run_concurrent(async move |access| {
+                guest
+                    .memcastle_embedding_provider()
+                    .call_embed(
+                        access,
+                        self.0.model.clone(),
+                        self.0.dimensions,
+                        self.0.settings.clone(),
+                        texts.to_vec(),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|_| self.failed("component trapped; check its provider configuration"))?
             // Guest messages and traps can contain the token returned by access-token; keep them out of logs and jobs.
             .map_err(|_| self.failed("component trapped; check its provider configuration"))?
             .map_err(|_| {
@@ -313,13 +354,28 @@ impl WasmEmbedder {
 impl Embedder for WasmEmbedder {
     fn embed<'a>(&'a self, texts: &'a [String]) -> EmbedFuture<'a> {
         Box::pin(async move {
-            let provider = self.clone();
-            let texts = texts.to_vec();
-            tokio::task::spawn_blocking(move || provider.embed_blocking(&texts))
+            // Epochs stop CPU loops; the wall-clock budget also covers suspended WASI I/O.
+            tokio::time::timeout(self.0.timeout, self.embed_async(texts))
                 .await
-                .map_err(|error| Error::EmbeddingFailed {
-                    message: format!("embedding component task failed: {error}"),
-                })?
+                .map_err(|_| self.failed("component exceeded its time limit"))?
         })
+    }
+}
+
+/// Capability loading is synchronous, including when requested from a current-thread runtime.
+fn block_on<R: Send>(future: impl Future<Output = Result<R>> + Send) -> Result<R> {
+    let failed = |message: String| Error::EmbeddingFailed { message };
+    let run = || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| failed(format!("cannot start the embedding executor: {error}")))?
+            .block_on(future)
+    };
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::scope(|scope| scope.spawn(run).join())
+            .map_err(|_| failed("the embedding executor was interrupted".into()))?
+    } else {
+        run()
     }
 }

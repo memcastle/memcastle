@@ -633,8 +633,8 @@ mod tests {
     use crate::domain::{PluginInfo, PluginModule, PluginModuleKind};
 
     fn fixture() -> BTreeMap<String, Vec<u8>> {
-        let source = b"format = 1\n[source]\nname = 'one'\nversion = '0.1.0'\ndescription = 'one'\n[compatibility]\ncontract = '0.4.0'\nmemcastle = '>=0.4.0'\n";
-        let second = b"format = 1\n[source]\nname = 'two'\nversion = '0.1.0'\ndescription = 'two'\n[compatibility]\ncontract = '0.4.0'\nmemcastle = '>=0.4.0'\n";
+        let source = b"format = 1\n[source]\nname = 'one'\nversion = '0.1.0'\ndescription = 'one'\n[compatibility]\ncontract = '0.5.0'\nmemcastle = '>=0.4.0'\n";
+        let second = b"format = 1\n[source]\nname = 'two'\nversion = '0.1.0'\ndescription = 'two'\n[compatibility]\ncontract = '0.5.0'\nmemcastle = '>=0.4.0'\n";
         let component = b"\0asm\x01\0\0\0";
         let modules = [("one", source.as_slice()), ("two", second.as_slice())]
             .into_iter()
@@ -647,7 +647,7 @@ mod tests {
                 entry: format!("modules/{id}/source.wasm"),
                 sha256: sha256_hex(component),
                 optional: false,
-                contract: Some("0.4.0".to_string()),
+                contract: Some(crate::domain::CONTRACT_VERSION.into()),
                 config_schema: None,
             })
             .collect::<Vec<_>>();
@@ -1059,7 +1059,7 @@ mod tests {
         let mut manifest =
             manifest::parse(std::str::from_utf8(&files[MANIFEST_FILE]).unwrap()).unwrap();
         let entry = b"\0asm\x0d\0\x01\0";
-        let config = b"id = 'embeddings'\nversion = '0.1.0'\ncontract = '0.1.0'\n[[models]]\nid = 'demo'\ndimensions = [768]\n";
+        let config = b"id = 'embeddings'\nversion = '0.1.0'\ncontract = '0.2.0'\n[[models]]\nid = 'demo'\ndimensions = [768]\n";
         manifest.modules.push(PluginModule {
             id: "embeddings".into(),
             kind: PluginModuleKind::EmbeddingProvider,
@@ -1069,7 +1069,7 @@ mod tests {
             entry: "modules/embeddings/embedding.wasm".into(),
             sha256: sha256_hex(entry),
             optional: true,
-            contract: Some("0.1.0".into()),
+            contract: Some(crate::plugin::embedding::CONTRACT.into()),
             config_schema: None,
         });
         files.insert(

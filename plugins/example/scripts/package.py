@@ -34,8 +34,8 @@ def main() -> None:
                 f"--remap-path-prefix={sysroot / 'lib/rustlib/src/rust'}=/rustc/{commit}",
                 f"--remap-path-prefix={module_dir}=/module",
             ))
-            subprocess.run(["cargo", "build", "--locked", "--release", "--target", "wasm32-wasip2"], cwd=module_dir, env=build_env, check=True)
-            built = module_dir / "target/wasm32-wasip2/release" / f"{name.replace('-', '_')}.wasm"
+            subprocess.run(["cargo", "build", "--locked", "--release", "--target", "wasm32-wasip3"], cwd=module_dir, env=build_env, check=True)
+            built = module_dir / "target/wasm32-wasip3/release" / f"{name.replace('-', '_')}.wasm"
             if not built.is_file():
                 raise ValueError(f"source {name!r} built no component at {built}")
             shutil.copyfile(built, safe_parent(module["entry"]))

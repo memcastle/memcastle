@@ -168,7 +168,7 @@ mod tests {
                 },
                 compatibility: Compatibility {
                     reconciliation: None,
-                    contract: "0.4".into(),
+                    contract: crate::domain::CONTRACT_VERSION.into(),
                     memcastle: ">=0.1".into(),
                 },
                 capabilities: Default::default(),

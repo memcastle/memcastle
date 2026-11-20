@@ -164,9 +164,10 @@ The history is the value.
   (amends ADR-035, builds on ADR-006, ADR-007 and ADR-014)
 - [ADR-042](042-mine-takes-a-source-and-its-options.md) — `memcastle mine <source> [place] [key=value]...` replaces
   `--source` and `--locator`, with `memcastle mine <path>` kept as the directory shorthand;
-  sources declare the options they accept (`[options.<name>]`) and the daemon refuses the rest before queuing,
-  the source contract is `0.4.0` (`identify` takes the options, `source-ref` carries them) and the source decides which
-  options are identity and which only narrow; a miner's single options table becomes the defaults of its run
+  sources declare the options they accept (`[options.<name>]`) and the daemon refuses the rest before queuing;
+  this introduced source contract `0.4.0` (`identify` takes the options, `source-ref` carries them),
+  and the source decides which options are identity and which only narrow;
+  a miner's single options table becomes the defaults of its run
   (amends ADR-023, ADR-026 and ADR-037)
 - [ADR-043](043-source-triggers.md) — triggers are `[[triggers]]` entries (`schedule`, `poll`, `webhook`, `watch`), disabled
   until the user enables them, that only decide *when* and end in the request `miner run` makes,

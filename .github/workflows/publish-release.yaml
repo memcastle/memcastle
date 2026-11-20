@@ -54,7 +54,7 @@ env:
   # moving `stable` channel for local development and would otherwise make
   # rustup install the latest one over the pinned install below. Keep it equal
   # to the `dtolnay/rust-toolchain` ref.
-  RUSTUP_TOOLCHAIN: "1.98.1"
+  RUSTUP_TOOLCHAIN: "1.100.0"
   # Branch runs remain trials; development publication has its own workflow.
   TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.ref || 'trial' }}
   # Recovery uses repaired packaging tooling while building frontend assets from the release tag.
@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
 
       # An exact version: see `RUSTUP_TOOLCHAIN` above, which this must equal.
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: ${{ matrix.target }}
       # Bootstrap rustup before relocating Windows temporary storage.
@@ -402,7 +402,7 @@ jobs:
       # links, taken from `Cargo.lock` and the manifest. `--target all` because
       # one SBOM describes five builds. Named with a hyphen so the `memcastle_*`
       # glob that selects the attested subjects below does not match it.
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-cyclonedx@0.5.9

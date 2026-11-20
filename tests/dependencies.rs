@@ -197,6 +197,14 @@ fn the_webassembly_runtime_is_built_without_the_features_a_source_host_never_use
             "`{name}` must be declared with `default-features = false`"
         );
     }
+    let wasi_features = dependencies["wasmtime-wasi"]["features"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        wasi_features,
+        &[toml::Value::String("p3".into())],
+        "only the WASI 0.3 host is supported"
+    );
     let features: Vec<&str> = dependencies["wasmtime"]["features"]
         .as_array()
         .expect("wasmtime lists its features")

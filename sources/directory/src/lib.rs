@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 wit_bindgen::generate!({
     path: "../../wit",
     world: "source",
+    // Stackful bindings preserve std I/O while the async-typed export can suspend on WASI tasks.
+    sync: true,
 });
 
 use exports::memcastle::source::adapter::Guest;

@@ -750,7 +750,7 @@ async fn restart_rebuilds_the_local_module_pointer_from_the_durable_plugin_recor
 #[tokio::test]
 async fn a_plugin_with_a_component_that_cannot_load_leaves_no_module_or_package_installed() {
     let daemon = TestDaemon::start().await;
-    let source = b"format = 1\n[source]\nname = 'broken'\nversion = '0.1.0'\ndescription = 'broken component'\n[compatibility]\ncontract = '0.4.0'\nmemcastle = '>=0.4'\n";
+    let source = b"format = 1\n[source]\nname = 'broken'\nversion = '0.1.0'\ndescription = 'broken component'\n[compatibility]\ncontract = '0.5.0'\nmemcastle = '>=0.4'\n";
     let invalid_component = b"\0asmnot-a-component";
     let manifest = PluginManifest {
         format: 1,
@@ -775,7 +775,7 @@ async fn a_plugin_with_a_component_that_cannot_load_leaves_no_module_or_package_
             entry: "modules/broken/source.wasm".into(),
             sha256: sha256_hex(invalid_component),
             optional: false,
-            contract: Some("0.4.0".into()),
+            contract: Some(memcastle::domain::CONTRACT_VERSION.into()),
             config_schema: None,
         }],
         checksums: BTreeMap::new(),

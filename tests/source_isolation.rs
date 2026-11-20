@@ -336,10 +336,7 @@ fn the_webassembly_host_grants_nothing_beyond_what_a_manifest_lists() {
         "inherit_stdout",
         "inherit_stderr",
         "inherit_args",
-        "DirPerms::all",
-        "FilePerms::all",
-        "DirPerms::MUTATE",
-        "FilePerms::WRITE",
+        "FsPerms::ReadWrite",
         "allow_blocking_current_thread",
     ] {
         assert!(

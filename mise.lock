@@ -235,6 +235,11 @@ version = "0.16.0"
 backend = "cargo:git-tpl"
 specifiers = ["latest"]
 
+[[tools."cargo:wasm-tools"]]
+version = "1.263.0"
+backend = "cargo:wasm-tools"
+specifiers = ["1.263.0"]
+
 [[tools.git-cliff]]
 version = "2.14.2"
 backend = "aqua:orhun/git-cliff"
@@ -423,7 +428,7 @@ specifiers = ["stable"]
 
 [tools.rust.options]
 components = "clippy,rustfmt"
-targets = "wasm32-wasip2"
+targets = "wasm32-wasip3"
 
 [[tools.typos]]
 version = "1.52.2"

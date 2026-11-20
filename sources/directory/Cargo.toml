@@ -3,12 +3,13 @@
 # It exists to be read, copied and tested (docs/writing-sources.md), and to prove the same conformance cases pass for a
 # built-in adapter and a component. It is not part of MemCastle's own build: the empty `[workspace]` below keeps Cargo
 # from treating it as a member of the root package, and `memcastle source build` (or `mise run sources:check`) builds
-# it for `wasm32-wasip2`.
+# it for `wasm32-wasip3`.
 
 [package]
 name = "memcastle-source-directory"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.100"
 publish = false
 
 [lib]
@@ -16,7 +17,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Generates the guest side of `wit/memcastle-source.wit`.
-wit-bindgen = "0.57"
+wit-bindgen = "0.63.0"
 serde_json = "1"
 
 [profile.release]

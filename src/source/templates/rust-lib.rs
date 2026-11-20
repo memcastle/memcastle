@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 wit_bindgen::generate!({
     path: "wit",
     world: "source",
+    // Async-typed exports may suspend during std I/O without requiring a guest executor.
+    sync: true,
 });
 
 use exports::memcastle::source::adapter::Guest;

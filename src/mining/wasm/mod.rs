@@ -16,7 +16,8 @@ use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use dashmap::DashMap;
-use wasmtime::component::{Component, HasSelf, Linker};
+use futures::future::BoxFuture;
+use wasmtime::component::{Accessor, Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store, Trap};
 
 use crate::config::MiningConfig;
@@ -37,13 +38,16 @@ const EPOCH_TICK: Duration = Duration::from_millis(50);
 /// The longest a message from a failed source is kept, so a trap's backtrace cannot flood a job's error.
 const MAX_MESSAGE_CHARS: usize = 600;
 
-/// The one engine every source runs on. Epoch interruption is what bounds a call: a ticker advances the epoch and a
-/// store's deadline traps the guest, even one stuck in a loop that never calls the host.
+type GuestResult<T> = wasmtime::Result<std::result::Result<T, wit::SourceError>>;
+
+/// The one engine every source runs on. Epoch interruption preempts even a guest that never calls the host,
+/// so the async executor can enforce its wall-clock deadline and keep other jobs moving.
 fn engine() -> Result<&'static Engine> {
     static ENGINE: OnceLock<std::result::Result<Engine, String>> = OnceLock::new();
     let engine = ENGINE.get_or_init(|| {
         let mut config = Config::new();
         config.epoch_interruption(true);
+        config.wasm_component_model_async(true);
         let engine = Engine::new(&config).map_err(|e| format!("{e:#}"))?;
         let weak = engine.weak();
         std::thread::Builder::new()
@@ -176,7 +180,7 @@ impl WasmAdapter {
             }
         };
         let mut linker = Linker::<HostState>::new(engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
+        wasmtime_wasi::p3::add_to_linker(&mut linker)
             .map_err(|e| incompatible(format!("{e:#}")))?;
         Source::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |state| state)
             .map_err(|e| incompatible(format!("{e:#}")))?;
@@ -225,10 +229,10 @@ impl WasmAdapter {
             timeout,
             default_room: String::new(),
         };
-        inner.default_room = inner.call(false, None, |store, guest| {
-            guest.call_default_room(store).map(Ok)
-        })?;
-        inner.validate_reconciliation()?;
+        inner.default_room = block_on(inner.call(false, None, |store, guest| {
+            Box::pin(async move { guest.call_default_room(store).await.map(Ok) })
+        }))?;
+        block_on(inner.validate_reconciliation())?;
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -237,8 +241,8 @@ impl WasmAdapter {
     /// Run a blocking call from a synchronous trait method without stalling the async runtime's worker.
     fn blocking<R>(&self, work: impl FnOnce(&Inner) -> R) -> R {
         match tokio::runtime::Handle::try_current() {
-            // `block_in_place` is only legal on the multi-threaded runtime the daemon uses; a current-thread
-            // runtime (a test's) has nothing else to starve and runs the call directly.
+            // Only multi-threaded Tokio can replace a worker while a synchronous trait method waits.
+            // The bridge itself uses a separate executor, including for current-thread callers.
             Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
                 tokio::task::block_in_place(|| work(&self.inner))
             }
@@ -253,31 +257,37 @@ impl Inner {
     /// `granted` is whether the manifest's permissions apply: `normalize` runs without them, so that it is pure
     /// whatever the source asked for. `f` returns the guest's own `result`, which is mapped to MemCastle's errors
     /// here, together with traps, timeouts and refused permissions.
-    fn call<R>(
+    async fn call<R: Send>(
         &self,
         granted: bool,
         locator: Option<&str>,
-        f: impl FnOnce(
-            &mut Store<HostState>,
-            &host::exports::memcastle::source::adapter::Guest,
-        ) -> wasmtime::Result<std::result::Result<R, wit::SourceError>>,
+        f: impl for<'a> FnOnce(
+            &'a Accessor<HostState>,
+            host::exports::memcastle::source::adapter::Guest,
+        ) -> BoxFuture<'a, GuestResult<R>>
+        + Send
+        + 'static,
     ) -> Result<R> {
-        self.invoke(granted, locator, |store| {
-            self.pre
-                .instantiate(&mut *store)
-                .and_then(|instance| f(store, instance.memcastle_source_adapter()))
+        let pre = self.pre.clone();
+        self.invoke(granted, locator, move |store| {
+            Box::pin(async move {
+                let instance = pre.instantiate_async(&mut *store).await?;
+                let guest = instance.memcastle_source_adapter().clone();
+                store
+                    .run_concurrent(async move |access| f(access, guest).await)
+                    .await?
+            })
         })
+        .await
     }
 
     /// Optional interfaces share precisely the same sandbox, credential grants,
     /// time limits and failure mapping as the original six adapter functions.
-    fn invoke<R>(
+    async fn invoke<R: Send>(
         &self,
         granted: bool,
         locator: Option<&str>,
-        f: impl FnOnce(
-            &mut Store<HostState>,
-        ) -> wasmtime::Result<std::result::Result<R, wit::SourceError>>,
+        f: impl for<'a> FnOnce(&'a mut Store<HostState>) -> BoxFuture<'a, GuestResult<R>> + Send,
     ) -> Result<R> {
         let none = Permissions::default();
         let permissions = if granted { &self.permissions } else { &none };
@@ -311,13 +321,24 @@ impl Inner {
             self.selected_env.as_deref(),
         )
         .map_err(|message| self.failed(message))?;
+        let deadline = state.deadline;
         let mut store = Store::new(self.engine, state);
         store.limiter(|state| &mut state.limits);
-        // At least one tick, plus one because the current tick may be nearly over.
-        let ticks = (self.timeout.as_millis() / EPOCH_TICK.as_millis()).max(1) + 1;
-        store.set_epoch_deadline(u64::try_from(ticks).unwrap_or(u64::MAX));
+        // Direct async execution must also yield during CPU loops, or one source can starve its executor worker.
+        store.set_epoch_deadline(1);
+        store.epoch_deadline_async_yield_and_update(1);
 
-        let outcome = f(&mut store);
+        // Epochs bound CPU loops; a wall-clock deadline also bounds suspended WASI I/O.
+        let outcome = tokio::time::timeout_at(deadline.into(), f(&mut store)).await;
+        // The host import's future can be gone while its blocking worker still owns a native child.
+        store.data_mut().stop_process().await;
+        if outcome.is_err() || std::time::Instant::now() >= deadline {
+            return Err(Error::SourceTimeout {
+                name: self.name.clone(),
+                secs: self.timeout.as_secs(),
+            });
+        }
+        let outcome = outcome.expect("an elapsed call returned its timeout above");
         let denied = store.data().denied.clone();
         let credential = store.data_mut().credential_failure.take();
         let failure = match outcome {
@@ -435,10 +456,7 @@ impl SourceAdapter for WasmAdapter {
         source: &SourceRef,
         known: &super::adapter::KnownDocument,
     ) -> Result<super::adapter::Reconciliation> {
-        let inner = self.inner.clone();
-        let source = source.clone();
-        let known = known.clone();
-        run_blocking(move || inner.reconcile_document(&source, &known)).await
+        self.inner.reconcile_document(source, known).await
     }
 
     async fn acquire(
@@ -452,10 +470,7 @@ impl SourceAdapter for WasmAdapter {
                 super::adapter::Acquisition::Document,
             ));
         }
-        let inner = self.inner.clone();
-        let source = source.clone();
-        let candidate = candidate.clone();
-        run_blocking(move || inner.acquire_document(&source, &candidate)).await
+        self.inner.acquire_document(source, candidate).await
     }
     fn name(&self) -> &str {
         &self.inner.name
@@ -474,28 +489,28 @@ impl SourceAdapter for WasmAdapter {
             // The host hands over the canonical path of a directory it is about to grant, so that `identify` is the
             // one place two spellings of a place become one source, as for a built-in adapter.
             let locator = locator.map(|locator| inner.grant_locator(locator));
-            inner
-                .call(true, locator.as_deref(), |store, guest| {
-                    let options: Vec<(String, String)> = options
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone()))
-                        .collect();
-                    guest.call_identify(store, locator.as_deref(), &options)
-                })
-                .map(from_wit)
+            let options: Vec<(String, String)> = options
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            let argument = locator.clone();
+            block_on(inner.call(true, locator.as_deref(), move |store, guest| {
+                Box::pin(async move { guest.call_identify(store, argument, options).await })
+            }))
+            .map(from_wit)
         })
     }
 
     fn default_wing(&self, source: &SourceRef) -> String {
         self.blocking(|inner| {
             let fallback = || "unnamed".to_string();
-            inner
-                .call(false, None, |store, guest| {
-                    guest.call_default_wing(store, &to_wit(source)).map(Ok)
-                })
-                // A wing name is cosmetic: a source that fails to give one files under a neutral name, and the
-                // real failure surfaces from the calls that matter.
-                .unwrap_or_else(|_| fallback())
+            let source = to_wit(source);
+            block_on(inner.call(false, None, move |store, guest| {
+                Box::pin(async move { guest.call_default_wing(store, source).await.map(Ok) })
+            }))
+            // A wing name is cosmetic: a source that fails to give one files under a neutral name, and the
+            // real failure surfaces from the calls that matter.
+            .unwrap_or_else(|_| fallback())
         })
     }
 
@@ -510,99 +525,94 @@ impl SourceAdapter for WasmAdapter {
         limit: usize,
     ) -> Result<Discovery> {
         if self.reconciles() {
-            let inner = self.inner.clone();
-            let source = source.clone();
-            let cursor = cursor.clone();
-            return run_blocking(move || inner.discover_reconciled(&source, &cursor, limit)).await;
+            return self.inner.discover_reconciled(source, cursor, limit).await;
         }
-        let inner = self.inner.clone();
-        let source = source.clone();
+        let inner = &self.inner;
+        let argument = to_wit(source);
         let cursor = cursor.to_string();
         let limit = u32::try_from(limit).unwrap_or(u32::MAX);
-        run_blocking(move || {
-            let found = inner.call(true, Some(&source.locator), |store, guest| {
-                guest.call_discover(store, &to_wit(&source), &cursor, limit)
-            })?;
-            let candidates = found
-                .candidates
-                .into_iter()
-                .map(|candidate| {
-                    let cursor_after =
-                        serde_json::from_str(&candidate.cursor_after).map_err(|e| {
-                            inner.failed(format!(
-                                "candidate `{}` has a cursor-after that is not JSON: {e}",
-                                candidate.external_id
-                            ))
-                        })?;
-                    Ok(Candidate {
-                        external_id: candidate.external_id,
-                        cursor_after,
-                        handle: candidate.handle,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Ok(Discovery {
-                candidates,
-                exhausted: found.exhausted,
-                filtered: 0,
-                cursor_after: None,
+        let found = inner
+            .call(true, Some(&source.locator), move |store, guest| {
+                Box::pin(async move { guest.call_discover(store, argument, cursor, limit).await })
             })
+            .await?;
+        let candidates = found
+            .candidates
+            .into_iter()
+            .map(|candidate| {
+                let cursor_after = serde_json::from_str(&candidate.cursor_after).map_err(|e| {
+                    inner.failed(format!(
+                        "candidate `{}` has a cursor-after that is not JSON: {e}",
+                        candidate.external_id
+                    ))
+                })?;
+                Ok(Candidate {
+                    external_id: candidate.external_id,
+                    cursor_after,
+                    handle: candidate.handle,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Discovery {
+            candidates,
+            exhausted: found.exhausted,
+            filtered: 0,
+            cursor_after: None,
         })
-        .await
     }
 
     async fn read(&self, source: &SourceRef, candidate: &Candidate) -> Result<Option<RawDocument>> {
-        let inner = self.inner.clone();
-        let source = source.clone();
+        let inner = &self.inner;
+        let argument = to_wit(source);
         let candidate = wit::Candidate {
             external_id: candidate.external_id.clone(),
             cursor_after: candidate.cursor_after.to_string(),
             handle: candidate.handle.clone(),
         };
-        run_blocking(move || {
-            let read = inner.call(true, Some(&source.locator), |store, guest| {
-                guest.call_read(store, &to_wit(&source), &candidate)
-            })?;
-            read.map(|raw| {
-                let metadata = serde_json::from_str(&raw.metadata).map_err(|e| {
-                    inner.failed(format!(
-                        "document `{}` has metadata that is not JSON: {e}",
-                        raw.external_id
-                    ))
-                })?;
-                let occurred_at = raw
-                    .occurred_at
-                    .as_deref()
-                    .map(|at| {
-                        chrono::DateTime::parse_from_rfc3339(at)
-                            .map(|at| at.with_timezone(&chrono::Utc))
-                            .map_err(|e| {
-                                inner.failed(format!(
-                                    "document `{}` has an occurred-at that is not RFC 3339: {e}",
-                                    raw.external_id
-                                ))
-                            })
-                    })
-                    .transpose()?;
-                Ok(RawDocument {
-                    external_id: raw.external_id,
-                    revision: raw.revision,
-                    body: raw.body,
-                    metadata,
-                    occurred_at,
-                })
+        let read = inner
+            .call(true, Some(&source.locator), move |store, guest| {
+                Box::pin(async move { guest.call_read(store, argument, candidate).await })
             })
-            .transpose()
+            .await?;
+        read.map(|raw| {
+            let metadata = serde_json::from_str(&raw.metadata).map_err(|e| {
+                inner.failed(format!(
+                    "document `{}` has metadata that is not JSON: {e}",
+                    raw.external_id
+                ))
+            })?;
+            let occurred_at = raw
+                .occurred_at
+                .as_deref()
+                .map(|at| {
+                    chrono::DateTime::parse_from_rfc3339(at)
+                        .map(|at| at.with_timezone(&chrono::Utc))
+                        .map_err(|e| {
+                            inner.failed(format!(
+                                "document `{}` has an occurred-at that is not RFC 3339: {e}",
+                                raw.external_id
+                            ))
+                        })
+                })
+                .transpose()?;
+            Ok(RawDocument {
+                external_id: raw.external_id,
+                revision: raw.revision,
+                body: raw.body,
+                metadata,
+                occurred_at,
+            })
         })
-        .await
+        .transpose()
     }
 
     fn normalize(&self, raw: &RawDocument) -> Result<CanonicalDocument> {
         self.blocking(|inner| {
             // No grants: normalization is pure by contract, and the host holds a source to it.
-            let canonical = inner.call(false, None, |store, guest| {
-                guest.call_normalize(store, &raw_to_wit(raw))
-            })?;
+            let raw = raw_to_wit(raw);
+            let canonical = block_on(inner.call(false, None, move |store, guest| {
+                Box::pin(async move { guest.call_normalize(store, raw).await })
+            }))?;
             Ok(CanonicalDocument {
                 title: canonical.title,
                 room: canonical.room,
@@ -625,15 +635,53 @@ impl SourceAdapter for WasmAdapter {
     }
 }
 
-/// Run a blocking call off the async workers: a source may take its whole time limit, and must not stall the jobs
-/// and requests sharing the runtime meanwhile.
-async fn run_blocking<R: Send + 'static>(
-    work: impl FnOnce() -> Result<R> + Send + 'static,
-) -> Result<R> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|e| Error::SourceFailed {
-            name: "runtime".to_string(),
-            message: format!("the source call was interrupted: {e}"),
-        })?
+/// Synchronous adapter methods also work inside a current-thread Tokio runtime, where nested block_on would panic.
+fn block_on<R: Send>(future: impl Future<Output = Result<R>> + Send) -> Result<R> {
+    let failed = |message: String| Error::SourceFailed {
+        name: "runtime".into(),
+        message,
+    };
+    let run = || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| failed(format!("cannot start the source executor: {error}")))?
+            .block_on(future)
+    };
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::scope(|scope| scope.spawn(run).join())
+            .map_err(|_| failed("the source executor was interrupted".into()))?
+    } else {
+        run()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synchronous_calls_drive_async_io_outside_and_inside_either_tokio_runtime() {
+        let call = || {
+            block_on(async {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                Ok(42)
+            })
+            .unwrap()
+        };
+        assert_eq!(call(), 42);
+        for runtime in [
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap(),
+        ] {
+            assert_eq!(runtime.block_on(async { call() }), 42);
+        }
+    }
 }

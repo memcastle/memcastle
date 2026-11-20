@@ -1,7 +1,7 @@
 # Pins the Rust channel and components for local development.
 #
 # This pins the local channel only. CI selects its toolchain through the
-# `dtolnay/rust-toolchain@stable` action ref and installs its components
+# `dtolnay/rust-toolchain@1.100.0` action ref and installs its components
 # per job, because the coverage job needs `llvm-tools-preview` on top.
 #
 # The minimum supported version is declared separately as `rust-version` in
@@ -12,4 +12,4 @@ channel = "stable"
 components = ["rustfmt", "clippy"]
 # The reference WASM source under `sources/` (docs/writing-sources.md) builds for this target, and so does
 # `memcastle source build` for the Rust template.
-targets = ["wasm32-wasip2"]
+targets = ["wasm32-wasip3"]

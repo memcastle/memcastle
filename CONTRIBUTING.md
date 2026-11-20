@@ -139,7 +139,8 @@ Use `mise exec -- cargo build` directly for one-off profile/target options.
 | `mise cli <args>` | Run `memcastle` from source (passes flags through) |
 | `mise run setup` | Install `memcastle` into `~/.cargo/bin` |
 | `mise run test` | Run the basic tests, without the WebAssembly suite (accepts nextest selectors) |
-| `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
+| `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip3` target) |
+| `mise run components:check` | Compile and validate all reference, example and test components as WASI 0.3.0 |
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
 | `mise run web:check` | Build and test the web UI, including checkout and installed-prefix serving |
