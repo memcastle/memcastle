@@ -40,15 +40,28 @@ struct Provider {
     issued: AtomicUsize,
     revoke: AtomicBool,
     expires_in: AtomicU64,
+    clients: std::sync::Mutex<HashMap<String, String>>,
+    seen: std::sync::Mutex<Vec<HashMap<String, String>>>,
 }
 
 fn oauth_error(code: &str) -> axum::response::Response {
     (StatusCode::BAD_REQUEST, Json(json!({"error": code}))).into_response()
 }
 
-async fn device(State(provider): State<Arc<Provider>>) -> impl IntoResponse {
+async fn device(
+    State(provider): State<Arc<Provider>>,
+    Form(form): Form<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let client = form["client_id"].clone();
+    let code = format!("device-secret-{client}");
+    provider
+        .clients
+        .lock()
+        .unwrap()
+        .insert(code.clone(), client);
+    provider.seen.lock().unwrap().push(form);
     Json(json!({
-        "device_code": "device-secret",
+        "device_code": code,
         "user_code": "WDJB-MJHT",
         "verification_uri": format!("{}/activate", provider.base),
         "expires_in": 120,
@@ -60,6 +73,14 @@ async fn token(
     State(provider): State<Arc<Provider>>,
     Form(form): Form<HashMap<String, String>>,
 ) -> axum::response::Response {
+    provider.seen.lock().unwrap().push(form.clone());
+    if let Some(token) = form
+        .get("refresh_token")
+        .or_else(|| form.get("device_code"))
+        && provider.clients.lock().unwrap().get(token) != form.get("client_id")
+    {
+        return oauth_error("invalid_grant");
+    }
     match form.get("grant_type").map(String::as_str).unwrap_or("") {
         "urn:ietf:params:oauth:grant-type:device_code" => {
             // Decremented by compare-exchange: the newer atomic helpers are past this crate's minimum Rust version, and
@@ -86,9 +107,20 @@ async fn token(
         _ => return oauth_error("unsupported_grant_type"),
     }
     let n = provider.issued.fetch_add(1, Ordering::SeqCst) + 1;
+    let client = &form["client_id"];
+    let refresh = if client == "demo-client" {
+        "refresh-secret-1".into()
+    } else {
+        format!("refresh-secret-{client}")
+    };
+    provider
+        .clients
+        .lock()
+        .unwrap()
+        .insert(refresh.clone(), client.clone());
     Json(json!({
         "access_token": format!("access-{n}"),
-        "refresh_token": "refresh-secret-1",
+        "refresh_token": refresh,
         "token_type": "Bearer",
         "expires_in": provider.expires_in.load(Ordering::SeqCst),
         "scope": "read",
@@ -400,16 +432,44 @@ async fn source_auth_signs_a_source_in_and_a_run_is_given_the_token_and_no_secre
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_named_source_configuration_signs_in_once_and_its_miners_use_only_its_token() {
+async fn named_client_overrides_refresh_independently_and_miners_share_only_their_selected_grant() {
     let fixture = Fixture::start().await;
     fixture.install().await;
+    fixture.provider.expires_in.store(30, Ordering::SeqCst);
     let (ok, stdout, stderr) = fixture
-        .cli(&["source", "config", "set", "work", "--source", NAME])
+        .cli(&[
+            "source",
+            "config",
+            "set",
+            "work",
+            "--source",
+            NAME,
+            "--oauth-client-id",
+            "work-client",
+        ])
         .await;
     assert!(ok, "{stderr} {stdout}");
+    let configured: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(configured["effective_oauth_client_id"], "work-client");
     let (ok, stdout, stderr) = fixture.cli(&["source", "config", "auth", "work"]).await;
     assert!(ok, "{stderr} {stdout}");
     assert!(fixture.credentials_dir.join("work.json").is_file());
+    let (ok, stdout, stderr) = fixture
+        .cli(&[
+            "source",
+            "config",
+            "set",
+            "personal",
+            "--source",
+            NAME,
+            "--oauth-client-id",
+            "personal-client",
+        ])
+        .await;
+    assert!(ok, "{stdout} {stderr}");
+    let (ok, stdout, stderr) = fixture.cli(&["source", "config", "auth", "personal"]).await;
+    assert!(ok, "{stdout} {stderr}");
+    fixture.provider.expires_in.store(3600, Ordering::SeqCst);
     assert!(
         !fixture
             .credentials_dir
@@ -445,7 +505,21 @@ async fn a_named_source_configuration_signs_in_once_and_its_miners_use_only_its_
         ])
         .await;
     assert!(ok, "{stderr} {stdout}");
-    for name in ["work-a", "work-b"] {
+    let (ok, stdout, stderr) = fixture
+        .cli(&[
+            "miner",
+            "set",
+            "personal-a",
+            "--source",
+            NAME,
+            "--source-config",
+            "personal",
+            "--locator",
+            tree.path().to_str().unwrap(),
+        ])
+        .await;
+    assert!(ok, "{stdout} {stderr}");
+    for name in ["work-a", "work-b", "personal-a"] {
         let (ok, stdout, stderr) = fixture.cli(&["miner", "run", name]).await;
         assert!(ok, "{stderr} {stdout}");
         let submitted: Job = serde_json::from_str(&stdout).unwrap();
@@ -463,6 +537,64 @@ async fn a_named_source_configuration_signs_in_once_and_its_miners_use_only_its_
         shown["auth"]["signed_in"], false,
         "the source default remains separate"
     );
+    for client in ["work-client", "personal-client"] {
+        assert!(
+            fixture.provider.seen.lock().unwrap().iter().any(|form| {
+                form.get("grant_type").map(String::as_str) == Some("refresh_token")
+                    && form["client_id"] == client
+            }),
+            "the real component must refresh with {client}"
+        );
+    }
+    let (ok, stdout, stderr) = fixture
+        .cli(&[
+            "source",
+            "config",
+            "set",
+            "work",
+            "--oauth-client-id",
+            "replacement-client",
+        ])
+        .await;
+    assert!(ok, "{stdout} {stderr}");
+    let changed: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(changed["credential_available"], false);
+    let (ok, stdout, stderr) = fixture.cli(&["source", "config", "get", "personal"]).await;
+    assert!(ok, "{stdout} {stderr}");
+    let untouched: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(untouched["credential_available"], true);
+    fixture.daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_keeps_its_original_grant_and_cannot_adopt_a_replacement_sign_in() {
+    let fixture = Fixture::start().await;
+    fixture.install().await;
+    fixture.provider.expires_in.store(30, Ordering::SeqCst);
+    assert!(fixture.cli(&["source", "auth", NAME]).await.0);
+    fixture.provider.revoke.store(true, Ordering::SeqCst);
+    let failed = fixture.mine(tree().path()).await;
+    assert_eq!(failed.status, JobStatus::Failed);
+    fixture.provider.revoke.store(false, Ordering::SeqCst);
+    fixture.provider.expires_in.store(3600, Ordering::SeqCst);
+    assert!(fixture.cli(&["source", "auth", NAME]).await.0);
+    let refreshes = fixture.provider.refreshes.load(Ordering::SeqCst);
+    let (ok, stdout, stderr) = fixture.cli(&["job", "retry", &failed.id.to_string()]).await;
+    assert!(ok, "{stdout} {stderr}");
+    let retried = common::wait_for_job_status(
+        &fixture.client,
+        &fixture.daemon.base_url,
+        failed.id,
+        JobStatus::Failed,
+    )
+    .await;
+    assert!(retried.error.unwrap().contains("submit a new run"));
+    assert_eq!(
+        fixture.provider.refreshes.load(Ordering::SeqCst),
+        refreshes,
+        "stale work must fail before using the new grant"
+    );
+    assert!(fixture.search("access-").await.is_empty());
     fixture.daemon.shutdown().await;
 }
 

@@ -792,6 +792,7 @@ impl AppServices {
             });
         }
         let preset = crate::domain::MiningPreset {
+            oauth: self.pin_oauth(&configuration).await?,
             miner: Some(miner.name.clone()),
             credential: miner
                 .credential
@@ -1041,7 +1042,6 @@ impl AppServices {
         &self,
         miner: &MinerDefinition,
     ) -> std::result::Result<(), String> {
-        let requirement = self.oauth_requirement(&miner.source).await;
         let config = self
             .source_config(
                 miner.source_config.as_deref().unwrap_or(&miner.source),
@@ -1049,6 +1049,10 @@ impl AppServices {
             )
             .await
             .map_err(|e| e.to_string())?;
+        let requirement = self.effective_oauth_requirement(&config).await;
+        if config.oauth_client_id.is_some() && requirement.is_none() {
+            return Err("the configured OAuth client requires a source declaring OAuth".into());
+        }
         if config.id != miner.source
             && requirement.is_some()
             && miner.locator.is_none()
@@ -1102,9 +1106,14 @@ impl AppServices {
             && (!requirement.on_demand || matches!(credential, Some(CredentialRef::Oauth)))
             && !self.signed_in(&config.id, requirement).await
         {
+            let command = if config.id == config.source {
+                format!("memcastle source auth {}", config.source)
+            } else {
+                format!("memcastle source config auth {}", config.id)
+            };
             return Err(format!(
-                "the source `{0}` is not signed in; run `memcastle source auth {0}`",
-                miner.source
+                "the source configuration `{}` is not signed in; run `{command}`",
+                config.id,
             ));
         }
         Ok(())
@@ -1211,7 +1220,10 @@ impl AppServices {
             Some(record) => self.store.count_source_documents(record.id).await?,
             None => 0,
         };
-        let requirement = self.oauth_requirement(&miner.source).await;
+        let requirement = match &config {
+            Some(config) => self.effective_oauth_requirement(config).await,
+            None => None,
+        };
         let effective = miner.credential.as_ref().or_else(|| {
             config
                 .as_ref()

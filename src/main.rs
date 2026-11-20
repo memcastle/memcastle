@@ -1479,10 +1479,14 @@ async fn cmd_source(
                     credential_env,
                     credential_file,
                     credential_oauth,
+                    oauth_client_id,
+                    unset_oauth_client_id,
                     allow_broaden,
                 } => {
                     let mut patch = memcastle::app::SourceConfigurationPatch {
                         source,
+                        oauth_client_id,
+                        unset_oauth_client_id,
                         allow_broaden,
                         ..Default::default()
                     };

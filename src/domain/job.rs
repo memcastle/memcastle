@@ -127,6 +127,9 @@ pub struct MiningPreset {
     /// Selected reference, pinned for retries; the resolved value is never persisted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<super::CredentialRef>,
+    /// `None` is legacy/unbound; an explicit binding without a grant is offline-only OAuth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<super::OAuthBinding>,
     /// Fixed destination room, or the adapter's room when absent.
     pub room: Option<String>,
     /// Dynamic destination mapping pinned with the job.

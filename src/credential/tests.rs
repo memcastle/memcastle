@@ -37,6 +37,34 @@ async fn fixture() -> Fixture {
 }
 
 impl Fixture {
+    async fn authorize(&self, binding: OAuthBinding) -> OAuthBinding {
+        let key = binding.configuration.clone();
+        let challenge = self.credentials.begin_bound(binding.clone()).await.unwrap();
+        if challenge.kind == FlowKind::Browser {
+            let asked = authorization(challenge.url.as_deref().unwrap());
+            assert_eq!(asked["client_id"], binding.client_id);
+            assert_eq!(
+                call_back(
+                    &asked["redirect_uri"],
+                    &[("code", "good-code"), ("state", &asked["state"])]
+                )
+                .await,
+                200
+            );
+        }
+        loop {
+            match self
+                .credentials
+                .wait(&key, &challenge.flow, Duration::from_millis(100))
+                .await
+                .unwrap()
+            {
+                FlowStatus::SignedIn(_) => break,
+                FlowStatus::Pending => {}
+            }
+        }
+        self.credentials.binding(binding).unwrap()
+    }
     /// The device flow, from the challenge to the end.
     async fn sign_in(&self) -> SignedIn {
         let requirement = self.provider.requirement();
@@ -74,6 +102,271 @@ impl Fixture {
     fn stored(&self) -> Option<StoredCredential> {
         self.files.load(SOURCE).unwrap()
     }
+}
+
+fn binding(provider: &Provider, key: &str, client: &str) -> OAuthBinding {
+    OAuthBinding {
+        explicit_configuration: false,
+        source: SOURCE.into(),
+        configuration: key.into(),
+        declared: provider.requirement(),
+        client_id: client.into(),
+        grant_id: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_an_explicit_default_while_stopped_does_not_restore_implicit_authority() {
+    let fixture = fixture().await;
+    let configs = Arc::new(Mutex::new(vec![SourceConfiguration {
+        id: SOURCE.into(),
+        source: SOURCE.into(),
+        credential: None,
+        oauth_client_id: None,
+        options: Default::default(),
+    }]));
+    let read = configs.clone();
+    fixture
+        .credentials
+        .with_configuration_reader(Arc::new(move || Ok(locked(&read).clone())));
+    fixture.sign_in().await;
+    let pinned = fixture.stored().unwrap().binding.unwrap();
+    assert!(pinned.explicit_configuration);
+    locked(&configs).clear();
+    // A restarted daemon has no old configuration snapshot from which to infer removal.
+    let restarted = Credentials::new(Box::new(FileStore::new(
+        fixture._dir.path().join("credentials"),
+    )));
+    restarted.with_configuration_reader(Arc::new(|| Ok(vec![])));
+    assert!(restarted.validate_binding(&pinned).is_err());
+    assert!(
+        !restarted
+            .state(SOURCE, &fixture.provider.requirement())
+            .unwrap()
+            .signed_in
+    );
+    assert!(fixture.stored().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saving_an_implicit_default_preserves_its_grant_but_records_subsequent_removal() {
+    let fixture = fixture().await;
+    let configs = Arc::new(Mutex::new(vec![]));
+    let read = configs.clone();
+    fixture
+        .credentials
+        .with_configuration_reader(Arc::new(move || Ok(locked(&read).clone())));
+    fixture.sign_in().await;
+    let original = fixture.stored().unwrap().binding.unwrap();
+    assert!(!original.explicit_configuration);
+    locked(&configs).push(SourceConfiguration {
+        id: SOURCE.into(),
+        source: SOURCE.into(),
+        credential: None,
+        oauth_client_id: None,
+        options: Default::default(),
+    });
+    fixture.credentials.validate_binding(&original).unwrap();
+    let saved = fixture.stored().unwrap().binding.unwrap();
+    assert!(saved.explicit_configuration);
+    assert_eq!(saved.grant_id, original.grant_id);
+    locked(&configs).clear();
+    assert!(fixture.credentials.validate_binding(&original).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refresh_rotation_preserves_a_default_definition_observed_during_provider_io() {
+    let fixture = fixture().await;
+    fixture.provider.set(|behaviour| {
+        behaviour.expires_in = 1;
+        behaviour.rotate = true;
+    });
+    let configs = Arc::new(Mutex::new(vec![]));
+    let read = configs.clone();
+    fixture
+        .credentials
+        .with_configuration_reader(Arc::new(move || Ok(locked(&read).clone())));
+    fixture.sign_in().await;
+    assert!(
+        !fixture
+            .stored()
+            .unwrap()
+            .binding
+            .unwrap()
+            .explicit_configuration
+    );
+    let changed = configs.clone();
+    *fixture.provider.on_refresh.lock().unwrap() = Some(Box::new(move || {
+        locked(&changed).push(SourceConfiguration {
+            id: SOURCE.into(),
+            source: SOURCE.into(),
+            credential: None,
+            oauth_client_id: None,
+            options: Default::default(),
+        });
+    }));
+    fixture.token().await.unwrap();
+    let stored = fixture.stored().unwrap();
+    assert_eq!(stored.refresh_token.as_deref(), Some("refresh-2"));
+    assert!(stored.binding.unwrap().explicit_configuration);
+    locked(&configs).clear();
+    assert!(
+        !fixture
+            .credentials
+            .state(SOURCE, &fixture.provider.requirement())
+            .unwrap()
+            .signed_in
+    );
+}
+
+#[tokio::test]
+async fn a_legacy_credential_is_not_adopted_even_when_its_client_and_terms_match() {
+    let fixture = fixture().await;
+    fixture.sign_in().await;
+    let mut legacy = fixture.stored().unwrap();
+    legacy.binding = None;
+    fixture.files.save(SOURCE, &legacy).unwrap();
+    assert!(
+        !fixture
+            .credentials
+            .state(SOURCE, &fixture.provider.requirement())
+            .unwrap()
+            .signed_in
+    );
+    assert!(
+        fixture.token().await.is_err(),
+        "a warm cache cannot revive unbound authority"
+    );
+    assert!(fixture.stored().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn independent_clients_exchange_and_refresh_without_borrowing_each_others_grants() {
+    let fixture = fixture().await;
+    fixture.provider.set(|b| {
+        b.expires_in = 1;
+        b.rotate = true;
+    });
+    let work = fixture
+        .authorize(binding(&fixture.provider, "work", "work-client"))
+        .await;
+    let mut personal = binding(&fixture.provider, "personal", "personal-client");
+    personal.declared = fixture.provider.browser_requirement();
+    let personal = fixture.authorize(personal).await;
+    assert_ne!(work.grant_id, personal.grant_id);
+    for expected in [&work, &personal, &work] {
+        let credentials = fixture.credentials.clone();
+        let expected = expected.clone();
+        tokio::task::spawn_blocking(move || credentials.bound_access_token(&expected))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let restarted = Credentials::new(Box::new(FileStore::new(
+        fixture._dir.path().join("credentials"),
+    )));
+    // The persisted binding survives refresh rotation and process-local cache loss.
+    assert_eq!(fixture.credentials.binding(work.clone()).unwrap(), work);
+    assert_eq!(
+        fixture.files.load("personal").unwrap().unwrap().binding,
+        Some(personal.clone())
+    );
+    assert_eq!(restarted.binding(work.clone()).unwrap(), work);
+    let mut borrowed = work.clone();
+    borrowed.configuration = "personal".into();
+    assert!(fixture.credentials.validate_binding(&borrowed).is_err());
+    assert!(fixture.credentials.validate_binding(&personal).is_ok());
+    let seen = fixture.provider.seen.lock().unwrap();
+    assert!(
+        seen.iter()
+            .any(
+                |form| form.get("grant_type").map(String::as_str) == Some("authorization_code")
+                    && form["client_id"] == "personal-client"
+            )
+    );
+    for client in ["work-client", "personal-client"] {
+        assert!(
+            seen.iter()
+                .any(
+                    |form| form.get("grant_type").map(String::as_str) == Some("refresh_token")
+                        && form["client_id"] == client
+                )
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reauthorization_replaces_a_grant_even_when_the_client_is_unchanged() {
+    let fixture = fixture().await;
+    let original = binding(&fixture.provider, "work", "work-client");
+    let before = fixture.authorize(original.clone()).await;
+    let after = fixture.authorize(original).await;
+    assert_ne!(before.grant_id, after.grant_id);
+    assert!(fixture.credentials.validate_binding(&before).is_err());
+    assert!(fixture.credentials.bound_access_token(&before).is_err());
+    assert!(fixture.credentials.validate_binding(&after).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backend_replacement_cannot_reuse_the_previous_grants_cached_access_token() {
+    let mut fixture = fixture().await;
+    let original = binding(&fixture.provider, "work", "work-client");
+    let before = fixture.authorize(original.clone()).await;
+    let previous = fixture.credentials.clone();
+    assert_eq!(
+        previous.bound_access_token(&before).unwrap().expose(),
+        "access-1"
+    );
+    fixture.credentials = Credentials::new(Box::new(FileStore::new(
+        fixture._dir.path().join("credentials"),
+    )));
+    let after = fixture.authorize(original).await;
+    assert!(previous.bound_access_token(&before).is_err());
+    let token = tokio::task::spawn_blocking(move || previous.bound_access_token(&after))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(token.expose(), "access-1");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn observed_client_edits_invalidate_cached_grants_without_touching_other_configurations() {
+    let fixture = fixture().await;
+    let configs = Arc::new(Mutex::new(vec![
+        SourceConfiguration {
+            id: "work".into(),
+            source: SOURCE.into(),
+            credential: None,
+            oauth_client_id: Some("work-client".into()),
+            options: Default::default(),
+        },
+        SourceConfiguration {
+            id: "personal".into(),
+            source: SOURCE.into(),
+            credential: None,
+            oauth_client_id: Some("personal-client".into()),
+            options: Default::default(),
+        },
+    ]));
+    let read = configs.clone();
+    fixture
+        .credentials
+        .with_configuration_reader(Arc::new(move || Ok(locked(&read).clone())));
+    let work = fixture
+        .authorize(binding(&fixture.provider, "work", "work-client"))
+        .await;
+    let personal = fixture
+        .authorize(binding(&fixture.provider, "personal", "personal-client"))
+        .await;
+    locked(&configs)[0].oauth_client_id = Some("changed-client".into());
+    assert!(fixture.credentials.validate_binding(&work).is_err());
+    assert!(fixture.credentials.validate_binding(&personal).is_ok());
+    locked(&configs)[0].oauth_client_id = Some("work-client".into());
+    assert!(
+        fixture.credentials.validate_binding(&work).is_err(),
+        "observed changes cannot revive an old grant"
+    );
+    assert!(fixture.files.load("work").unwrap().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

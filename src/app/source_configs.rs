@@ -52,6 +52,10 @@ pub struct SourceConfigurationView {
     pub credential_kind: Option<String>,
     /// Whether the credential resolves right now.
     pub credential_available: bool,
+    /// Configured public override, if any.
+    pub oauth_client_id: Option<String>,
+    /// Public client used for authorization and refresh, or absent for a non-OAuth source.
+    pub effective_oauth_client_id: Option<String>,
 }
 
 /// One administrative change; omitted fields are kept.
@@ -68,6 +72,10 @@ pub struct SourceConfigurationPatch {
     pub unset_options: Vec<String>,
     /// Forget the reference.
     pub unset_credential: bool,
+    /// Public client ID; never a client secret.
+    pub oauth_client_id: Option<String>,
+    /// Restore the manifest client.
+    pub unset_oauth_client_id: bool,
     /// Confirm an intentional change that may select more material for every miner using this instance.
     pub allow_broaden: bool,
 }
@@ -80,6 +88,7 @@ struct ConfigState {
 /// The global TOML file is the source of truth; only the daemon rewrites its source-configuration section.
 pub struct SourceConfigRegistry {
     path: Option<PathBuf>,
+    initial: Vec<SourceConfiguration>,
     state: Mutex<ConfigState>,
 }
 
@@ -89,6 +98,7 @@ impl SourceConfigRegistry {
     pub fn new(path: Option<PathBuf>, initial: Vec<SourceConfiguration>) -> Self {
         Self {
             path,
+            initial: initial.clone(),
             state: Mutex::new(ConfigState {
                 configs: initial,
                 stamp: None,
@@ -96,22 +106,73 @@ impl SourceConfigRegistry {
         }
     }
 
-    fn refresh(&self, state: &mut ConfigState) -> Result<()> {
+    /// Install the application's reader before recovered jobs can request credentials.
+    pub fn configure_credentials(&self, credentials: &crate::credential::Credentials) {
+        let path = self.path.clone();
+        let initial = self.initial.clone();
+        credentials.with_configuration_reader(Arc::new(move || {
+            path.as_ref().map_or_else(
+                || Ok(initial.clone()),
+                |path| miners_file::read_source_configs(path).map(|(configs, _)| configs),
+            )
+        }));
+    }
+
+    async fn refresh(
+        &self,
+        state: &mut ConfigState,
+        credentials: &crate::credential::Credentials,
+    ) -> Result<()> {
         let Some(path) = &self.path else {
             return Ok(());
         };
         let stamp = miners_file::stamp(path)?;
         if state.stamp != Some(stamp) {
             let (configs, read_stamp) = miners_file::read_source_configs(path)?;
+            let mut changed = Vec::new();
+            for before in &state.configs {
+                if configs
+                    .iter()
+                    .find(|config| config.id == before.id)
+                    .is_none_or(|after| {
+                        before.source != after.source
+                            || before.oauth_client_id != after.oauth_client_id
+                    })
+                {
+                    changed.push(before.id.clone());
+                }
+            }
+            for after in &configs {
+                if !state.configs.iter().any(|before| before.id == after.id)
+                    && (after.id != after.source || after.oauth_client_id.is_some())
+                {
+                    changed.push(after.id.clone());
+                }
+            }
+            // Reconciliation runs before publishing the new snapshot, including edits made outside REST.
+            let credentials = credentials.clone();
+            tokio::task::spawn_blocking(move || {
+                for id in changed {
+                    credentials.forget(&id)?;
+                }
+                Ok::<_, Error>(())
+            })
+            .await
+            .map_err(|error| Error::CredentialStoreFailed {
+                message: error.to_string(),
+            })??;
             state.configs = configs;
             state.stamp = Some(read_stamp);
         }
         Ok(())
     }
 
-    async fn snapshot(&self) -> Result<Vec<SourceConfiguration>> {
+    async fn snapshot(
+        &self,
+        credentials: &crate::credential::Credentials,
+    ) -> Result<Vec<SourceConfiguration>> {
         let mut state = self.state.lock().await;
-        self.refresh(&mut state)?;
+        self.refresh(&mut state, credentials).await?;
         Ok(state.configs.clone())
     }
 }
@@ -143,20 +204,23 @@ fn view(config: &SourceConfiguration) -> SourceConfigurationView {
         options: config.options.clone(),
         credential_kind,
         credential_available,
+        oauth_client_id: config.oauth_client_id.clone(),
+        effective_oauth_client_id: None,
     }
 }
 
 impl AppServices {
     async fn source_config_view(&self, config: &SourceConfiguration) -> SourceConfigurationView {
         let mut answer = view(config);
-        if let Some(requirement) = self.oauth_requirement(&config.source).await
-            && !matches!(
+        if let Some(requirement) = self.effective_oauth_requirement(config).await {
+            answer.effective_oauth_client_id = Some(requirement.client_id.clone());
+            if !matches!(
                 config.credential,
                 Some(CredentialRef::Env { .. } | CredentialRef::File { .. })
-            )
-        {
-            answer.credential_kind = Some("oauth".into());
-            answer.credential_available = self.signed_in(&config.id, requirement).await;
+            ) {
+                answer.credential_kind = Some("oauth".into());
+                answer.credential_available = self.signed_in(&config.id, requirement).await;
+            }
         }
         answer
     }
@@ -164,7 +228,7 @@ impl AppServices {
         let mut ids = vec![source.to_string()];
         ids.extend(
             self.source_configs
-                .snapshot()
+                .snapshot(&self.credentials)
                 .await?
                 .into_iter()
                 .filter(|config| config.source == source && config.id != source)
@@ -175,6 +239,7 @@ impl AppServices {
     #[must_use]
     /// Configure the daemon to read these source configurations from its own file.
     pub fn with_source_configs(mut self, configs: SourceConfigRegistry) -> Self {
+        configs.configure_credentials(&self.credentials);
         self.source_configs = Arc::new(configs);
         self
     }
@@ -185,13 +250,14 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<SourceConfigurationView>> {
         Self::require_read(mode, "source_config_list")?;
-        let mut configs = self.source_configs.snapshot().await?;
+        let mut configs = self.source_configs.snapshot(&self.credentials).await?;
         for source in crate::mining::list_adapters(&self.store, &self.mining).await? {
             if !configs.iter().any(|config| config.id == source.name) {
                 configs.push(SourceConfiguration {
                     id: source.name.clone(),
                     source: source.name,
                     credential: None,
+                    oauth_client_id: None,
                     options: Map::new(),
                 });
             }
@@ -221,7 +287,7 @@ impl AppServices {
         id: &str,
         source: Option<&str>,
     ) -> Result<SourceConfiguration> {
-        let configs = self.source_configs.snapshot().await?;
+        let configs = self.source_configs.snapshot(&self.credentials).await?;
         if let Some(config) = configs.iter().find(|config| config.id == id) {
             if source.is_some_and(|source| source != config.source) {
                 return Err(Error::invalid_input(
@@ -253,6 +319,7 @@ impl AppServices {
                 id: id.into(),
                 source: name.into(),
                 credential: None,
+                oauth_client_id: None,
                 options: Map::new(),
             });
         }
@@ -280,7 +347,9 @@ impl AppServices {
                     .into(),
             })?;
         let mut state = self.source_configs.state.lock().await;
-        self.source_configs.refresh(&mut state)?;
+        self.source_configs
+            .refresh(&mut state, &self.credentials)
+            .await?;
         let old = state.configs.iter().find(|config| config.id == id).cloned();
         let source = if let Some(source) = patch
             .source
@@ -304,9 +373,22 @@ impl AppServices {
             id: id.into(),
             source: source.clone(),
             credential: None,
+            oauth_client_id: None,
             options: Map::new(),
         });
         config.source = source;
+        if patch.oauth_client_id.is_some() && patch.unset_oauth_client_id {
+            return Err(Error::invalid_input(
+                "oauth_client_id",
+                "set or unset the client ID, not both",
+            ));
+        }
+        if patch.unset_oauth_client_id {
+            config.oauth_client_id = None;
+        }
+        if patch.oauth_client_id.is_some() {
+            config.oauth_client_id = patch.oauth_client_id;
+        }
         if config.id != config.source
             && crate::mining::registry::option_specs_for(&self.store, &self.mining, &config.id)
                 .await
@@ -341,6 +423,15 @@ impl AppServices {
             crate::mining::registry::option_specs_for(&self.store, &self.mining, &config.source)
                 .await
                 .ok();
+        if specs.is_some()
+            && config.oauth_client_id.is_some()
+            && self.oauth_requirement(&config.source).await.is_none()
+        {
+            return Err(Error::invalid_input(
+                "oauth_client_id",
+                "this installed source does not declare OAuth",
+            ));
+        }
         if let Some(specs) = &specs
             && let Some(message) = crate::domain::unknown_option(&new_options, specs)
         {
@@ -368,6 +459,19 @@ impl AppServices {
             all.push(config.clone());
         }
         let stamp = miners_file::write_source_configs(path, state.stamp.flatten(), &all)?;
+        let before = state.configs.iter().find(|before| before.id == id);
+        if before.is_some_and(|before| {
+            before.source != config.source || before.oauth_client_id != config.oauth_client_id
+        }) || (before.is_none() && config.oauth_client_id.is_some())
+        {
+            let credentials = self.credentials.clone();
+            let id = id.to_string();
+            tokio::task::spawn_blocking(move || credentials.forget(&id))
+                .await
+                .map_err(|error| Error::CredentialStoreFailed {
+                    message: error.to_string(),
+                })??;
+        }
         state.configs = all;
         state.stamp = Some(stamp);
         drop(state);
@@ -385,7 +489,9 @@ impl AppServices {
                 reason: "a daemon configuration file is needed".into(),
             })?;
         let mut state = self.source_configs.state.lock().await;
-        self.source_configs.refresh(&mut state)?;
+        self.source_configs
+            .refresh(&mut state, &self.credentials)
+            .await?;
         if !state.configs.iter().any(|config| config.id == id) {
             return Err(Error::invalid_input(
                 "source_config",
@@ -426,6 +532,7 @@ mod tests {
             id: "example".into(),
             source: "example".into(),
             credential: None,
+            oauth_client_id: None,
             options: Map::new(),
         };
         let specs = [

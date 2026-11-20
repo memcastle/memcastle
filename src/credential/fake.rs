@@ -58,6 +58,10 @@ pub(crate) struct Provider {
     /// Every form the token endpoint received.
     pub seen: Mutex<Vec<HashMap<String, String>>>,
     pub refresh_calls: AtomicUsize,
+    /// Deterministically edit configuration while the credential caller is waiting on provider I/O.
+    pub on_refresh: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    /// A fake must reject mixing public clients, rather than merely recording incorrect requests.
+    clients: Mutex<HashMap<String, String>>,
     issued: AtomicUsize,
 }
 
@@ -110,10 +114,21 @@ fn oauth_error(code: &str) -> (StatusCode, Json<serde_json::Value>) {
     )
 }
 
-async fn device(State(provider): State<Arc<Provider>>) -> impl IntoResponse {
+async fn device(
+    State(provider): State<Arc<Provider>>,
+    Form(form): Form<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let client = form.get("client_id").cloned().unwrap_or_default();
+    let code = format!("device-secret-{client}");
+    provider
+        .clients
+        .lock()
+        .unwrap()
+        .insert(code.clone(), client);
+    provider.seen.lock().unwrap().push(form);
     let expires_in = provider.behaviour.lock().unwrap().device_expires_in;
     Json(json!({
-        "device_code": "device-secret",
+        "device_code": code,
         "user_code": "ABCD-1234",
         "verification_uri": format!("{}/activate", provider.base),
         "expires_in": expires_in,
@@ -131,6 +146,13 @@ async fn token(
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     let grant = form.get("grant_type").map(String::as_str).unwrap_or("");
+    if let Some(token) = form
+        .get("refresh_token")
+        .or_else(|| form.get("device_code"))
+        && provider.clients.lock().unwrap().get(token) != form.get("client_id")
+    {
+        return oauth_error("invalid_grant").into_response();
+    }
     match grant {
         "urn:ietf:params:oauth:grant-type:device_code" => {
             if behaviour.deny {
@@ -152,6 +174,9 @@ async fn token(
         }
         "refresh_token" => {
             provider.refresh_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(on_refresh) = &*provider.on_refresh.lock().unwrap() {
+                on_refresh();
+            }
             if behaviour.revoke {
                 return oauth_error("invalid_grant").into_response();
             }
@@ -167,7 +192,13 @@ async fn token(
     });
     // A first sign-in always gets a refresh token when the provider issues them; a refresh only when it rotates.
     if behaviour.issue_refresh && (grant != "refresh_token" || behaviour.rotate) {
-        answer["refresh_token"] = json!(format!("refresh-{n}"));
+        let refresh = format!("refresh-{n}");
+        provider
+            .clients
+            .lock()
+            .unwrap()
+            .insert(refresh.clone(), form["client_id"].clone());
+        answer["refresh_token"] = json!(refresh);
     }
     Json(answer).into_response()
 }
@@ -181,6 +212,8 @@ pub(crate) async fn start() -> Arc<Provider> {
         behaviour: Mutex::new(Behaviour::default()),
         seen: Mutex::default(),
         refresh_calls: AtomicUsize::new(0),
+        on_refresh: Mutex::default(),
+        clients: Mutex::default(),
         issued: AtomicUsize::new(0),
     });
     let app = Router::new()

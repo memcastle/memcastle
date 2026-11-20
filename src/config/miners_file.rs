@@ -497,6 +497,7 @@ mod tests {
             id: "work".into(),
             source: "directory".into(),
             credential: None,
+            oauth_client_id: None,
             options: serde_json::Map::from_iter([("include".into(), json!("docs/**"))]),
         };
         write_source_configs(&path, stamp, std::slice::from_ref(&config)).unwrap();

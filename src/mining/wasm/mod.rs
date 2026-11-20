@@ -86,8 +86,8 @@ struct Inner {
     description: String,
     capabilities: SourceCapabilities,
     permissions: Permissions,
-    /// Who has the access tokens of a source that signs in. `None` where there are none to give (a conformance run, a
-    /// check at install), which a source that asks for one is told.
+    /// Who has the access tokens of a source that signs in. Absent at install and in conformance unless explicitly
+    /// supplied by the synthetic fixture provider; no missing provider ever falls back to ambient credentials.
     tokens: Option<Arc<dyn AccessTokens>>,
     engine: &'static Engine,
     pre: SourcePre<HostState>,

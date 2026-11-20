@@ -22,7 +22,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::CredentialsConfig;
-use crate::domain::{AccessTokens, OAuthRequirement, Secret};
+use crate::domain::{AccessTokens, OAuthBinding, OAuthRequirement, Secret, SourceConfiguration};
 use crate::error::{Error, Result};
 
 pub use flow::{Challenge, FlowKind, FlowStatus};
@@ -86,6 +86,7 @@ struct Cached {
     token: Secret,
     expires_at: DateTime<Utc>,
     fingerprint: String,
+    binding: OAuthBinding,
 }
 
 struct Inner {
@@ -97,7 +98,12 @@ struct Inner {
     refreshing: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     flows: Mutex<flow::Flows>,
     timing: Timing,
+    configuration_reader: Mutex<Option<ConfigurationReader>>,
+    /// Reserved before provider I/O, so cancelled startup/completion cannot resurrect a grant.
+    generations: Mutex<HashMap<String, String>>,
 }
+
+type ConfigurationReader = Arc<dyn Fn() -> Result<Vec<SourceConfiguration>> + Send + Sync>;
 
 /// The daemon's OAuth credentials: sign-in, storage and renewal for every source that needs them.
 #[derive(Clone)]
@@ -135,6 +141,8 @@ impl Credentials {
                 refreshing: Mutex::default(),
                 flows: Mutex::default(),
                 timing,
+                configuration_reader: Mutex::default(),
+                generations: Mutex::default(),
             }),
         }
     }
@@ -145,6 +153,87 @@ impl Credentials {
         Self::new(store::from_config(config))
     }
 
+    /// The application owns configuration I/O; token calls recheck it even during a long-running job.
+    pub fn with_configuration_reader(&self, reader: ConfigurationReader) {
+        *locked(&self.inner.configuration_reader) = Some(reader);
+    }
+
+    fn is_explicit_configuration(&self, key: &str) -> Result<bool> {
+        let reader = locked(&self.inner.configuration_reader).clone();
+        reader.map_or(Ok(false), |read| {
+            Ok(read()?.iter().any(|config| config.id == key))
+        })
+    }
+
+    fn configuration_matches(&self, binding: &OAuthBinding) -> Result<bool> {
+        let reader = locked(&self.inner.configuration_reader).clone();
+        let Some(reader) = reader else {
+            return Ok(true);
+        };
+        let configs = reader()?;
+        Ok(
+            match configs
+                .iter()
+                .find(|config| config.id == binding.configuration)
+            {
+                Some(config) => {
+                    config.source == binding.source
+                        && config
+                            .oauth_client_id
+                            .as_deref()
+                            .unwrap_or(&binding.declared.client_id)
+                            == binding.client_id
+                }
+                None => {
+                    !binding.explicit_configuration
+                        && binding.configuration == binding.source
+                        && binding.client_id == binding.declared.client_id
+                }
+            },
+        )
+    }
+
+    /// Remove only a slot whose *stored* authority is obsolete, never a newer grant an old job asks for.
+    fn current(&self, source: &str) -> Result<Option<StoredCredential>> {
+        let stored = self.inner.store.load(source)?;
+        if let Some(mut stored) = stored {
+            if let Some(binding) = &mut stored.binding
+                && binding.configuration == source
+                && binding.grant_id.is_some()
+                && self.configuration_matches(binding)?
+            {
+                if !binding.explicit_configuration && self.is_explicit_configuration(source)? {
+                    // Saving an implicit default does not require another sign-in, but its later removal must revoke it.
+                    binding.explicit_configuration = true;
+                    self.inner.store.save(source, &stored)?;
+                }
+                return Ok(Some(stored));
+            }
+            self.forget_locked(source)?;
+        }
+        Ok(None)
+    }
+
+    /// Snapshot a slot for a newly submitted job; no grant means deliberately offline-only.
+    pub fn binding(&self, mut binding: OAuthBinding) -> Result<OAuthBinding> {
+        binding.grant_id = None;
+        binding.explicit_configuration = self.is_explicit_configuration(&binding.configuration)?;
+        let guard = self.lock_for(&binding.configuration);
+        let _held = locked(&guard);
+        let stored = self.current(&binding.configuration)?;
+        if !self.configuration_matches(&binding)? {
+            return Err(binding.required());
+        }
+        if let Some(stored) = stored
+            && let Some(saved) = stored.binding
+            && saved.source == binding.source
+            && stored.fingerprint == binding.requirement().fingerprint()
+        {
+            binding.grant_id = saved.grant_id;
+        }
+        Ok(binding)
+    }
+
     fn lock_for(&self, source: &str) -> Arc<Mutex<()>> {
         Arc::clone(
             locked(&self.inner.refreshing)
@@ -153,20 +242,30 @@ impl Credentials {
         )
     }
 
-    fn cached(&self, source: &str, fingerprint: &str) -> Option<Secret> {
+    fn cached(&self, source: &str, fingerprint: &str, binding: &OAuthBinding) -> Option<Secret> {
         let cache = locked(&self.inner.cache);
         let entry = cache.get(source)?;
-        (entry.fingerprint == fingerprint && entry.expires_at - Utc::now() > REFRESH_MARGIN)
+        (entry.fingerprint == fingerprint
+            && entry.binding.same_authority(binding)
+            && entry.expires_at - Utc::now() > REFRESH_MARGIN)
             .then(|| entry.token.clone())
     }
 
-    fn remember(&self, source: &str, fingerprint: &str, token: &Secret, expires_at: DateTime<Utc>) {
+    fn remember(
+        &self,
+        source: &str,
+        fingerprint: &str,
+        token: &Secret,
+        expires_at: DateTime<Utc>,
+        binding: &OAuthBinding,
+    ) {
         locked(&self.inner.cache).insert(
             source.to_string(),
             Cached {
                 token: token.clone(),
                 expires_at,
                 fingerprint: fingerprint.to_string(),
+                binding: binding.clone(),
             },
         );
     }
@@ -181,6 +280,7 @@ impl Credentials {
         tokens: &TokenSet,
         previous_refresh: Option<&str>,
         save: bool,
+        binding: &OAuthBinding,
     ) -> Result<(DateTime<Utc>, &'static str, Vec<String>)> {
         let now = Utc::now();
         let expires_at = now
@@ -202,6 +302,7 @@ impl Credentials {
         let mut stored_in = "memory";
         if save {
             let credential = StoredCredential {
+                binding: Some(binding.clone()),
                 fingerprint: fingerprint.clone(),
                 // With no refresh token the access token is all there is to keep, and it is kept until it expires.
                 access_token: refresh_token
@@ -214,7 +315,13 @@ impl Credentials {
             };
             stored_in = self.inner.store.save(source, &credential)?;
         }
-        self.remember(source, &fingerprint, &tokens.access_token, expires_at);
+        self.remember(
+            source,
+            &fingerprint,
+            &tokens.access_token,
+            expires_at,
+            binding,
+        );
         Ok((expires_at, stored_in, scopes))
     }
 
@@ -224,12 +331,14 @@ impl Credentials {
     ///
     /// [`Error::CredentialStoreFailed`] when the store cannot be read.
     pub fn state(&self, source: &str, requirement: &OAuthRequirement) -> Result<SignInState> {
+        let guard = self.lock_for(source);
+        let _held = locked(&guard);
         let signed_out = SignInState {
             signed_in: false,
             expires_at: None,
             scopes: Vec::new(),
         };
-        let Some(stored) = self.inner.store.load(source)? else {
+        let Some(stored) = self.current(source)? else {
             return Ok(signed_out);
         };
         if stored.fingerprint != requirement.fingerprint() {
@@ -241,7 +350,13 @@ impl Credentials {
                 .is_some_and(|at| at - Utc::now() > REFRESH_MARGIN);
         let cached = locked(&self.inner.cache)
             .get(source)
-            .filter(|entry| entry.fingerprint == stored.fingerprint)
+            .filter(|entry| {
+                entry.fingerprint == stored.fingerprint
+                    && stored
+                        .binding
+                        .as_ref()
+                        .is_some_and(|binding| binding.same_authority(&entry.binding))
+            })
             .map(|entry| entry.expires_at);
         Ok(SignInState {
             signed_in: usable,
@@ -256,41 +371,63 @@ impl Credentials {
     ///
     /// [`Error::CredentialStoreFailed`] when the store cannot be written.
     pub fn forget(&self, source: &str) -> Result<()> {
+        let guard = self.lock_for(source);
+        let _held = locked(&guard);
+        self.forget_locked(source)
+    }
+
+    fn forget_locked(&self, source: &str) -> Result<()> {
         locked(&self.inner.cache).remove(source);
+        locked(&self.inner.generations).remove(source);
         self.cancel_flow(source);
         self.inner.store.delete(source)
     }
 
     /// Renew `source`'s access token. Holds the source's lock, so a caller that arrives meanwhile waits for this
     /// renewal and then finds its result in the cache.
-    fn renew(&self, source: &str, requirement: &OAuthRequirement) -> Result<Secret> {
+    fn renew(
+        &self,
+        source: &str,
+        requirement: &OAuthRequirement,
+        expected: Option<&OAuthBinding>,
+    ) -> Result<Secret> {
         let fingerprint = requirement.fingerprint();
         let guard = self.lock_for(source);
         let _held = locked(&guard);
-        // Another caller may have renewed while this one waited for the lock.
-        if let Some(token) = self.cached(source, &fingerprint) {
-            return Ok(token);
-        }
         let required = |reason: &str| Error::CredentialRequired {
             source_name: source.to_string(),
             reason: reason.to_string(),
         };
         let stored = self
-            .inner
-            .store
-            .load(source)?
+            .current(source)?
             .ok_or_else(|| required("it has never been signed in"))?;
+        let binding = stored
+            .binding
+            .as_ref()
+            .ok_or_else(|| required("sign in again to bind this legacy credential"))?;
+        if let Some(expected) = expected
+            && !self.configuration_matches(expected)?
+        {
+            return Err(expected.required());
+        }
+        if expected.is_some_and(|expected| !expected.same_authority(binding)) {
+            return Err(expected.expect("checked above").required());
+        }
         if stored.fingerprint != fingerprint {
             return Err(required(
                 "it was signed in under other terms than the installed source asks for now (client, endpoints or scopes)",
             ));
+        }
+        // Store and grant validation precede cache lookup, so a warm cache cannot borrow a replacement sign-in.
+        if let Some(token) = self.cached(source, &fingerprint, binding) {
+            return Ok(token);
         }
         let Some(refresh_token) = stored.refresh_token.clone() else {
             // No refresh token: the access token is all there was, and it is used until it expires.
             return match (&stored.access_token, stored.expires_at) {
                 (Some(token), Some(at)) if at - Utc::now() > REFRESH_MARGIN => {
                     let token = Secret::new(token.clone());
-                    self.remember(source, &fingerprint, &token, at);
+                    self.remember(source, &fingerprint, &token, at, binding);
                     Ok(token)
                 }
                 _ => Err(required(
@@ -298,14 +435,32 @@ impl Credentials {
                 )),
             };
         };
-        match refresh_blocking(requirement.clone(), refresh_token.clone()) {
+        let refreshed = refresh_blocking(requirement.clone(), refresh_token.clone());
+        // Provider I/O can overlap a file edit or another backend user's sign-in; obsolete results carry no authority.
+        let current_binding = self
+            .current(source)?
+            .and_then(|stored| stored.binding)
+            .ok_or_else(|| binding.required())?;
+        if !current_binding.same_authority(binding) {
+            return Err(binding.required());
+        }
+        // Provider I/O may have promoted an implicit default; rotation must keep that newly observed provenance.
+        let binding = &current_binding;
+        match refreshed {
             Ok(tokens) => {
                 let rotated = tokens
                     .refresh_token
                     .as_ref()
                     .is_some_and(|new| new.expose() != refresh_token);
                 // The store is written only when there is something new to keep: most renewals rotate nothing.
-                self.install(source, requirement, &tokens, Some(&refresh_token), rotated)?;
+                self.install(
+                    source,
+                    requirement,
+                    &tokens,
+                    Some(&refresh_token),
+                    rotated,
+                    binding,
+                )?;
                 tracing::debug!(source, rotated, "renewed an access token");
                 Ok(tokens.access_token)
             }
@@ -334,17 +489,43 @@ impl Credentials {
 }
 
 impl AccessTokens for Credentials {
-    fn access_token(&self, source: &str, requirement: &OAuthRequirement) -> Result<Secret> {
-        match self.cached(source, &requirement.fingerprint()) {
-            Some(token) => Ok(token),
-            None => self.renew(source, requirement),
+    fn validate_binding(&self, binding: &OAuthBinding) -> Result<()> {
+        let current = self.binding(OAuthBinding {
+            grant_id: None,
+            ..binding.clone()
+        })?;
+        if binding.grant_id.is_none()
+            || !current.same_authority(binding)
+            || !self.configuration_matches(binding)?
+            || !self
+                .state(&binding.configuration, &binding.requirement())?
+                .signed_in
+        {
+            return Err(binding.required());
         }
+        Ok(())
+    }
+
+    fn bound_access_token(&self, binding: &OAuthBinding) -> Result<Secret> {
+        if binding.grant_id.is_none() {
+            return Err(binding.required());
+        }
+        self.renew(
+            &binding.configuration,
+            &binding.requirement(),
+            Some(binding),
+        )
+        .map_err(|error| match error {
+            Error::CredentialRequired { reason, .. } => binding.unavailable(reason),
+            other => other,
+        })
+    }
+
+    fn access_token(&self, source: &str, requirement: &OAuthRequirement) -> Result<Secret> {
+        self.renew(source, requirement, None)
     }
 
     fn is_signed_in(&self, source: &str, requirement: &OAuthRequirement) -> bool {
-        if self.cached(source, &requirement.fingerprint()).is_some() {
-            return true;
-        }
         self.state(source, requirement)
             .is_ok_and(|state| state.signed_in)
     }

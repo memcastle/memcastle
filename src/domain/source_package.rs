@@ -484,6 +484,9 @@ pub struct TestSection {
     /// developer's real environment, file, or OAuth token.
     #[serde(default, skip_serializing_if = "is_false")]
     pub fixture_credential: bool,
+    /// Conformance-only OAuth provider; never reads a developer's sign-in or grants OAuth permission itself.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fixture_access_token: bool,
 }
 
 /// The `(major, minor)` of a contract version written as `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`.
