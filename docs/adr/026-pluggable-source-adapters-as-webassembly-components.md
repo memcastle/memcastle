@@ -59,10 +59,10 @@ a source whoever wrote it.
   `default-room`, `discover`, `read`, `normalize`, the same six methods) and imports `host` (`run-process`).
   Cursors and metadata cross as JSON text, so the contract does not change when a source carries a richer cursor.
   `description` and the capabilities are the manifest's, not calls: they are needed to list a source that is disabled.
-  Components are `wasm32-wasip2`: Rust compiles to one directly, and TypeScript and Python go through a component
-  toolchain that embeds their runtime.
+  Components are `wasm32-wasip3` / WASI 0.3.0, built with Rust 1.100 or newer.
 - **The contract is versioned and compatibility is a policy, not a hope.**
-  `CONTRACT_VERSION` (`0.1.0`) is the version of the WIT file.
+  `CONTRACT_VERSION` (`0.5.0`) is the version of the WIT file.
+  Acquisition is async-typed so WASI 0.3 operations can suspend; normalization and capability exports stay synchronous.
   Before `1.0` a source runs only on a host of the same minor version; from `1.0`, on any host of the same major whose minor
   is at least the source's; a patch version never matters.
   A source also declares the MemCastle versions it runs on as a semver requirement.
@@ -81,8 +81,8 @@ a source whoever wrote it.
   There is no write access to the filesystem.
   Every grant is built in one function (`host::state`) from the manifest's permissions and nothing else, and
   `normalize` runs with none, so its purity is enforced rather than requested.
-  Memory is capped, and one call's time is bounded by the engine's epoch interruption, so a source stuck in a loop is
-  stopped rather than trusted to return.
+  Memory is capped; engine epochs timeslice CPU loops so a wall-clock deadline can stop either a spinning guest
+  or one suspended in WASI I/O without starving other tasks.
   Each call gets a fresh store, which is what keeps a source stateless.
 - **Installing needs consent to exactly those permissions.**
   `source install` shows what the package asks for and asks.
@@ -161,7 +161,7 @@ a source whoever wrote it.
   that ships in the binary.
   The contract is logical, and the conformance suite is what keeps the two kinds from drifting.
 - **A host allow-list for the network.**
-  It needs `wasi:http` outbound filtering, which is not what a `wasm32-wasip2` component's sockets go through.
+  It needs `wasi:http` outbound filtering, which is not what a `wasm32-wasip3` component's sockets go through.
   All-or-nothing is honest about what is enforced today and is stated in the consent prompt; the manifest format leaves
   room for a list later.
 - **Gating install by a memory mode.**
@@ -174,8 +174,10 @@ a source whoever wrote it.
 ## Consequences
 
 - The core links `wasmtime` and `wasmtime-wasi`, built without default features.
-  The release binary and the cold build grow, and the engine's Rust version sets the floor: `41` is the newest line that
-  supports the crate's MSRV of 1.90, and moving to a newer one is a deliberate MSRV bump.
+  The release binary and the cold build grow; the coordinated baseline is Rust 1.100 and Wasmtime 50.0.3.
+  Both source and embedding hosts use p3 asynchronous execution, with epochs bounding CPU loops and wall-clock
+  deadlines bounding suspended I/O.
+  Wasmtime's p3 implementation remains experimental upstream; Rust's default target cannot yet spawn threads.
   Cranelift is optimised even in debug builds (`[profile.dev.package.*]`), because compiling a component unoptimised takes
   tens of seconds.
 - A component is compiled when first used and cached by digest, so the first mine after a daemon start pays for it.
@@ -185,10 +187,9 @@ a source whoever wrote it.
   reads it from an environment variable it listed.
   Credentials stay references ([ADR-023](023-unified-source-model-for-mining.md)): a value is only ever in the process
   environment the user started the daemon with.
-- TypeScript and Python sources embed a language runtime, so their components are megabytes larger and slower to start
-  than a Rust one, and only their standard library (plus pure packages bundled with them) is available.
-  Their scaffolds are provided and documented, and checked only structurally by the suite: the toolchains are not
-  installed in CI.
+- Internal fixtures retain only the execution-tested Rust and CLI-wrapper generators.
+  Legacy TypeScript/Python generators were removed with the WASI 0.3 migration because their toolchains were not
+  execution-tested in CI.
 - A changed WIT contract is a new contract version,
   and every installed source of the old one becomes `unavailable` with a reason that says to rebuild it,
   never a mysterious failure at the first mine.

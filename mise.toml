@@ -18,7 +18,7 @@ idiomatic_version_file_enable_tools = []
 [tools]
 # Keep the install request stable and lockable; runtime selection lives in env.
 # Explicit runtime selection bypasses rust-toolchain.toml's automatic target provisioning.
-rust = { version = "stable", components = ["rustfmt", "clippy"], targets = ["wasm32-wasip2"], mr_boxington = true }
+rust = { version = "stable", components = ["rustfmt", "clippy"], targets = ["wasm32-wasip3"], mr_boxington = true }
 mr-boxington = "latest"
 actionlint = "latest"
 # actionlint silently skips its shellcheck integration when the binary is absent
@@ -40,6 +40,7 @@ uv = "latest"
 # must install the same pinned ast-grep binary on developer machines and CI.
 "aqua:ast-grep/ast-grep" = "latest"
 bun = "latest"
+"cargo:wasm-tools" = "1.263.0"
 # --- end project-specific tools ---
 
 [env]
@@ -251,13 +252,17 @@ description = "Test plugin catalogue validation and documentation generation"
 run = "uv run --no-project --python 3 python -B -m unittest discover -s packaging/docs -p 'test_*.py'"
 
 [tasks."test:wasm"]
-description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, needs the wasm32-wasip2 target)"
+description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, needs the wasm32-wasip3 target)"
 # `raw_args` so nextest selectors reach it, like `test`. The `wasm` profile selects the `wasm_` binaries
 # (.config/nextest.toml); `test` excludes them, which is what keeps the everyday loop fast.
 # `--test 'wasm_*'` is the same prefix as a Cargo glob, and it keeps Cargo from compiling and linking the other thirty
 # test binaries (about 600 MB each) just for nextest to skip them.
 raw_args = true
 run = "cargo nextest run --profile wasm --test 'wasm_*'"
+
+[tasks."components:check"]
+description = "Compile and validate every reference/example/test component as WASI 0.3.0"
+run = "uv run --no-project --python 3 python -B packaging/plugins/validate_components.py"
 
 [tasks."test:fast"]
 description = "Run basic tests without compiling WebAssembly or Linux-only slow test binaries"
@@ -332,7 +337,7 @@ dir = "web"
 [tasks."sources:check"]
 description = "Build and conformance-test every reference WebAssembly source under sources/"
 # `memcastle source build` is what a source author runs, so this is also the proof that it works on the reference
-# sources. It needs the `wasm32-wasip2` target, which rust-toolchain.toml requests.
+# sources. It needs the `wasm32-wasip3` target, which rust-toolchain.toml requests.
 run = """
 #!/usr/bin/env bash
 set -euo pipefail

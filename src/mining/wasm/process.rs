@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use tokio_util::sync::CancellationToken;
+
 /// The most output of either stream a program may produce. A source has a memory limit of its own; this keeps one
 /// chatty program from filling it with a single answer.
 const MAX_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
@@ -41,9 +43,13 @@ pub(super) struct ProcessGrant {
     pub excluded_env: Option<String>,
     /// How long one run may take.
     pub timeout: Duration,
+    /// Acquisition already spent part of its budget before asking for a program.
+    pub deadline: Option<Instant>,
+    /// A dropped host call must not leave a blocking worker running its child.
+    pub cancelled: CancellationToken,
 }
 
-/// An anonymous scratch file for one of a program's output streams.
+/// An anonymous scratch file for one of a program's standard streams.
 fn scratch_file(program: &str) -> Result<File, ProcessError> {
     tempfile::tempfile().map_err(|source| {
         ProcessError::Failed(format!(
@@ -95,6 +101,19 @@ pub(super) fn run(
             }
         )));
     }
+    let deadline = grant
+        .deadline
+        .unwrap_or_else(|| Instant::now() + grant.timeout);
+    let check_live = || {
+        if grant.cancelled.is_cancelled() || Instant::now() >= deadline {
+            Err(ProcessError::Failed(format!(
+                "`{program}` was not started because the source call has ended"
+            )))
+        } else {
+            Ok(())
+        }
+    };
+    check_live()?;
     // Output goes to anonymous files, not pipes: a CLI built on Bun (OpenCode) can exit before a large write to a pipe
     // has drained, so the answer is cut at a multiple of 64 KiB while the exit status is still 0, and a source then
     // parses half a document. A file is written synchronously, so what the program printed is what we read. The files
@@ -102,6 +121,28 @@ pub(super) fn run(
     // something the guest is granted.
     let mut stdout_file = scratch_file(program)?;
     let mut stderr_file = scratch_file(program)?;
+    // A descendant can keep a stdin pipe open after its parent exits, leaving a writer thread unjoinable.
+    // The input is already a complete byte buffer, so an anonymous file preserves it without a blocking writer.
+    let input = if let Some(bytes) = stdin {
+        let mut file = scratch_file(program)?;
+        for chunk in bytes.chunks(64 * 1024) {
+            // Large inputs must not keep being copied after the invocation has ended.
+            check_live()?;
+            file.write_all(chunk).map_err(|source| {
+                ProcessError::Failed(format!(
+                    "the input of `{program}` could not be prepared: {source}"
+                ))
+            })?;
+        }
+        file.rewind().map_err(|source| {
+            ProcessError::Failed(format!(
+                "the input of `{program}` could not be rewound: {source}"
+            ))
+        })?;
+        Stdio::from(file)
+    } else {
+        Stdio::null()
+    };
     // If PATH itself is the selected credential, resolve the granted program on the host first,
     // rather than passing the credential on to the child just so Command can find its executable.
     let executable = if grant.excluded_env.as_deref() == Some("PATH")
@@ -133,11 +174,7 @@ pub(super) fn run(
     command
         .args(args)
         .env_clear()
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
+        .stdin(input)
         .stdout(Stdio::from(clone_file(&stdout_file, program)?))
         .stderr(Stdio::from(clone_file(&stderr_file, program)?));
     // `PATH` so the program is found, `HOME` (and `SystemRoot` on Windows) so tools find their own configuration.
@@ -153,19 +190,10 @@ pub(super) fn run(
     }
     command.envs(grant.env.iter().map(|(k, v)| (k, v)));
 
+    check_live()?;
     let mut child = command.spawn().map_err(|source| {
         ProcessError::Failed(format!("`{program}` could not be started: {source}"))
     })?;
-    let writer = stdin.map(|bytes| {
-        let mut pipe = child.stdin.take();
-        let bytes = bytes.to_vec();
-        std::thread::spawn(move || {
-            if let Some(pipe) = pipe.as_mut() {
-                // A program that exits without reading its input closes the pipe: that is its answer, not ours.
-                let _ = pipe.write_all(&bytes);
-            }
-        })
-    });
     let too_much = || {
         ProcessError::Failed(format!(
             "`{program}` produced more than {} MiB of output",
@@ -173,8 +201,15 @@ pub(super) fn run(
         ))
     };
 
-    let deadline = Instant::now() + grant.timeout;
     let status = loop {
+        // Dropping a spawn_blocking handle does not stop it; the worker must kill and reap its own child.
+        if grant.cancelled.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ProcessError::Failed(format!(
+                "`{program}` was cancelled and was stopped"
+            )));
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() >= deadline => {
@@ -198,15 +233,14 @@ pub(super) fn run(
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
             Err(source) => {
+                let _ = child.kill();
+                let _ = child.wait();
                 return Err(ProcessError::Failed(format!(
                     "waiting for `{program}` failed: {source}"
                 )));
             }
         }
     };
-    if let Some(writer) = writer {
-        let _ = writer.join();
-    }
     let stdout = read_back(&mut stdout_file, program)?;
     let stderr = read_back(&mut stderr_file, program)?;
     // The program may have written its last bytes between the final size check and its exit.
@@ -230,6 +264,7 @@ mod tests {
             env: vec![],
             excluded_env: None,
             timeout: Duration::from_secs(5),
+            ..ProcessGrant::default()
         }
     }
 
@@ -279,6 +314,31 @@ mod tests {
     }
 
     #[test]
+    fn a_descendant_inheriting_stdin_does_not_hold_the_worker_open() {
+        // More than a pipe can buffer; the descendant deliberately never consumes its inherited input.
+        let input = vec![b'x'; 2 * 1024 * 1024];
+        let started = Instant::now();
+        let output = run(
+            &grant(&["sh"]),
+            "sh",
+            &[
+                "-c".into(),
+                "sleep 5 <&0 >/dev/null 2>&1 & printf '%s' \"$!\"".into(),
+            ],
+            Some(&input),
+        )
+        .unwrap();
+        let pid = String::from_utf8(output.stdout).unwrap();
+        // The descendant is intentionally outside the direct-child handle; clean up this test's helper explicitly.
+        let _ = Command::new("kill").arg(pid).stderr(Stdio::null()).status();
+        assert_eq!(output.status, 0);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the worker waited for the descendant's stdin"
+        );
+    }
+
+    #[test]
     fn the_child_sees_only_the_environment_it_was_granted() {
         let mut granted = grant(&["env"]);
         granted.env = vec![("ALLOWED".into(), "yes".into())];
@@ -296,6 +356,57 @@ mod tests {
         assert!(
             matches!(error, ProcessError::Failed(ref m) if m.contains("did not finish")),
             "{error:?}"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_blocking_worker_stops_and_reaps_its_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("child.pid");
+        let granted = grant(&["sh"]);
+        let cancelled = granted.cancelled.clone();
+        // Also stop the child if an assertion fails before the explicit cancellation.
+        let _cancel_on_drop = cancelled.clone().drop_guard();
+        let argument = pid_file.display().to_string();
+        let worker = std::thread::spawn(move || {
+            run(
+                &granted,
+                "sh",
+                &[
+                    "-c".into(),
+                    "printf '%s' \"$$\" > \"$1\"; exec sleep 10".into(),
+                    "process-cancellation".into(),
+                    argument,
+                ],
+                None,
+            )
+        });
+        let wait_until = Instant::now() + Duration::from_secs(2);
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pid_file)
+                && !pid.is_empty()
+            {
+                break Some(pid);
+            }
+            if Instant::now() >= wait_until {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        cancelled.cancel();
+        let result = worker.join().unwrap();
+        let pid = pid.expect("the child never started");
+        assert!(
+            matches!(result, Err(ProcessError::Failed(ref message)) if message.contains("cancelled"))
+        );
+        assert!(
+            !Command::new("kill")
+                .args(["-0", &pid])
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success(),
+            "a cancelled worker left its native child alive or unreaped"
         );
     }
 

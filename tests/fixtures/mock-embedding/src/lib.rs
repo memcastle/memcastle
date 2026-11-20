@@ -3,6 +3,8 @@
 wit_bindgen::generate!({
     path: "../../../wit/embedding/memcastle-embedding.wit",
     world: "embedding-provider",
+    // Stackful bindings let ordinary std I/O suspend through the async-typed component export.
+    sync: true,
 });
 
 use exports::memcastle::embedding::provider::{Guest, Model};
@@ -40,6 +42,14 @@ impl Guest for Mock {
             let port: u16 = port.parse().map_err(|_| "invalid port".to_string())?;
             std::net::TcpStream::connect(("127.0.0.1", port))
                 .map_err(|_| "network refused".to_string())?;
+        }
+        if let Some(port) = settings.strip_prefix("tcp-read:") {
+            use std::io::Read;
+            let port: u16 = port.parse().map_err(|_| "invalid port".to_string())?;
+            let mut socket = std::net::TcpStream::connect(("127.0.0.1", port))
+                .map_err(|_| "network refused".to_string())?;
+            let mut byte = [0];
+            socket.read_exact(&mut byte).map_err(|_| "read refused".to_string())?;
         }
         if settings.contains("require_token") {
             let _token = memcastle::embedding::host::access_token()?;

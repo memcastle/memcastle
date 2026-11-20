@@ -1,7 +1,7 @@
 //! Source projects end to end: local fixtures, `memcastle source build`, `test` and `package`, the sandbox a component runs
 //! in, and installing the result through the CLI (docs/adr/026, docs/writing-sources.md).
 //!
-//! Every project here is built for real with `cargo build --target wasm32-wasip2`, into one shared target directory
+//! Every project here is built for real with `cargo build --target wasm32-wasip3`, into one shared target directory
 //! and from one shared lockfile (`common::wasm`), so the dependencies compile once and nothing resolves against the
 //! network. A test that drives the CLI must call `share_target_of` after creating a fixture: forgetting it builds in release
 //! into a `target/` of its own and recompiles every dependency, which was two of the slowest tests here. Where a test needs a misbehaving source it scaffolds a project and patches the
@@ -366,9 +366,9 @@ async fn optional_selected_credentials_allow_public_and_shared_account_miners() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_component_built_against_the_original_zero_four_host_interface_still_links() {
+async fn a_component_without_the_optional_source_credential_import_still_links() {
     let dir = tempfile::tempdir().unwrap();
-    let (root, _) = init(dir.path(), "original-zero-four", Template::Rust).unwrap();
+    let (root, _) = init(dir.path(), "without-optional-credential", Template::Rust).unwrap();
     let wit = root.join("wit/memcastle-source.wit");
     let original = std::fs::read_to_string(&wit).unwrap();
     std::fs::write(
@@ -381,7 +381,7 @@ async fn a_component_built_against_the_original_zero_four_host_interface_still_l
         &manifest,
         share_target(
             &std::fs::read_to_string(&manifest).unwrap(),
-            "original-zero-four",
+            "without-optional-credential",
         ),
     )
     .unwrap();
@@ -390,7 +390,10 @@ async fn a_component_built_against_the_original_zero_four_host_interface_still_l
     project.build().unwrap();
     let adapter = load(&Built { _dir: dir, project });
     let tree = tempfile::tempdir().unwrap();
-    assert_eq!(source(&adapter, tree.path()).source, "original-zero-four");
+    assert_eq!(
+        source(&adapter, tree.path()).source,
+        "without-optional-credential"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -785,6 +788,78 @@ async fn a_source_can_read_only_the_directory_it_was_asked_to_mine_and_sees_no_e
     );
 }
 
+#[tokio::test]
+async fn a_source_suspended_in_wasi_io_is_stopped_at_its_time_limit() {
+    let built = scaffold(
+        "suspended-source",
+        Template::Rust,
+        |lib| {
+            lib.replace("let after = parse_cursor(&cursor)?;", "std::thread::sleep(std::time::Duration::from_secs(5));\n        let after = parse_cursor(&cursor)?;")
+        },
+        |manifest| format!("{manifest}\n[limits]\ntimeout_secs = 1\n"),
+    );
+    let adapter = load(&built);
+    let tree = tempfile::tempdir().unwrap();
+    let identified = source(&adapter, tree.path());
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        adapter.discover(&identified, &Cursor::Null, 1).await,
+        Err(Error::SourceTimeout { .. })
+    ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(4));
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_source_timeout_stops_its_native_child_before_returning() {
+    let built = scaffold(
+        "process-deadline",
+        Template::Cli,
+        |lib| {
+            lib.replace(
+                "let after = parse_cursor(&cursor)?;",
+                r#"
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        run_process("sh", &[
+            "-c".into(),
+            "printf '%s' \"$$\" > \"$1/child.pid\"; exec sleep 10".into(),
+            "source-process-deadline".into(), source.locator.clone(),
+        ], None).map_err(SourceError::Failed)?;
+        let after = parse_cursor(&cursor)?;
+        "#,
+            )
+        },
+        |manifest| {
+            format!(
+                "{}\n[limits]\ntimeout_secs = 2\n",
+                manifest.replace(
+                    "process = [\"ls\", \"cat\"]",
+                    "process = [\"ls\", \"cat\", \"sh\"]"
+                )
+            )
+        },
+    );
+    let adapter = load(&built);
+    let tree = tempfile::tempdir().unwrap();
+    let identified = source(&adapter, tree.path());
+    let result = adapter.discover(&identified, &Cursor::Null, 1).await;
+    assert!(
+        matches!(result, Err(Error::SourceTimeout { .. })),
+        "{result:?}"
+    );
+    let pid = std::fs::read_to_string(tree.path().join("child.pid")).unwrap();
+    // `kill -0` also finds zombies, so this checks reaping as well as termination.
+    assert!(
+        !std::process::Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success(),
+        "the source timed out while its native child was still alive or unreaped"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_source_that_never_returns_is_stopped_at_its_time_limit() {
     let built = scaffold(
@@ -989,7 +1064,11 @@ fn manifest_text(contract: &str) -> String {
 
 #[test]
 fn bytes_that_are_not_a_component_or_do_not_fit_the_contract_are_incompatible_not_a_panic() {
-    let manifest = memcastle::source::manifest::parse(&manifest_text("0.4"), &[]).unwrap();
+    let manifest = memcastle::source::manifest::parse(
+        &manifest_text(memcastle::domain::CONTRACT_VERSION),
+        &[],
+    )
+    .unwrap();
     let config = MiningConfig::default();
 
     // The component header, then nonsense.
@@ -1229,9 +1308,9 @@ fn an_internal_project_fixture_is_written_to_the_requested_parent() {
     let here = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
 
-    init(elsewhere.path(), "placed", Template::Python).unwrap();
+    init(elsewhere.path(), "placed", Template::Rust).unwrap();
 
-    assert!(elsewhere.path().join("placed/app.py").is_file());
+    assert!(elsewhere.path().join("placed/src/lib.rs").is_file());
     assert!(!here.path().join("placed").exists());
 }
 

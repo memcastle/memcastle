@@ -1,5 +1,4 @@
 //! Internal project fixtures used to exercise the runtime; new providers scaffold through memcastle-source.tpl.
-//! as soon as it is created.
 //!
 //! Every template is a complete, tiny source with the same behaviour (the `.txt` files of a flat directory) so that
 //! the same fixtures check all of them, and so that what differs between templates is only the language and the
@@ -19,12 +18,8 @@ use super::{CONTRACT_WIT, MANIFEST_FILE};
 /// Which language, runtime and toolchain a new source is written for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Template {
-    /// Rust, compiled straight to a component for `wasm32-wasip2`.
+    /// Rust, compiled straight to a component for `wasm32-wasip3`.
     Rust,
-    /// TypeScript, compiled to JavaScript and componentized with `jco` (an embedded JavaScript engine).
-    Typescript,
-    /// Python, componentized with `componentize-py` (an embedded CPython).
-    Python,
     /// A Rust component that wraps a command-line program through the host's `run-process`.
     Cli,
 }
@@ -35,8 +30,6 @@ impl Template {
     pub fn name(self) -> &'static str {
         match self {
             Self::Rust => "rust",
-            Self::Typescript => "typescript",
-            Self::Python => "python",
             Self::Cli => "cli",
         }
     }
@@ -103,23 +96,13 @@ fn manifest_text(name: &str, template: Template) -> String {
     let (permissions, build, output) = match template {
         Template::Rust => (
             "# Nothing is granted that is not listed. This source reads the directory it is asked to mine, and nothing else.\n[permissions.filesystem]\nread = [\"locator\"]\n".to_string(),
-            "[\"cargo\", \"build\", \"--release\", \"--target\", \"wasm32-wasip2\", \"--target-dir\", \"target\"]".to_string(),
-            format!("target/wasm32-wasip2/release/{}.wasm", name.replace('-', "_")),
+            "[\"cargo\", \"build\", \"--release\", \"--target\", \"wasm32-wasip3\", \"--target-dir\", \"target\"]".to_string(),
+            format!("target/wasm32-wasip3/release/{}.wasm", name.replace('-', "_")),
         ),
         Template::Cli => (
             "# The programs this source may run, by exact name and without a shell. It reads no files itself.\n[permissions]\nprocess = [\"ls\", \"cat\"]\n".to_string(),
-            "[\"cargo\", \"build\", \"--release\", \"--target\", \"wasm32-wasip2\", \"--target-dir\", \"target\"]".to_string(),
-            format!("target/wasm32-wasip2/release/{}.wasm", name.replace('-', "_")),
-        ),
-        Template::Typescript => (
-            "# Nothing is granted that is not listed. This source reads the directory it is asked to mine, and nothing else.\n[permissions.filesystem]\nread = [\"locator\"]\n".to_string(),
-            "[\"npm\", \"run\", \"build\"]".to_string(),
-            "dist/source.wasm".to_string(),
-        ),
-        Template::Python => (
-            "# Nothing is granted that is not listed. This source reads the directory it is asked to mine, and nothing else.\n[permissions.filesystem]\nread = [\"locator\"]\n".to_string(),
-            "[\"componentize-py\", \"-d\", \"wit\", \"-w\", \"source\", \"componentize\", \"app\", \"-o\", \"dist/source.wasm\"]".to_string(),
-            "dist/source.wasm".to_string(),
+            "[\"cargo\", \"build\", \"--release\", \"--target\", \"wasm32-wasip3\", \"--target-dir\", \"target\"]".to_string(),
+            format!("target/wasm32-wasip3/release/{}.wasm", name.replace('-', "_")),
         ),
     };
     format!(
@@ -137,13 +120,7 @@ fn manifest_text(name: &str, template: Template) -> String {
 fn readme(name: &str, template: Template) -> String {
     let toolchain = match template {
         Template::Rust | Template::Cli => {
-            "Needs a Rust toolchain with the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`)."
-        }
-        Template::Typescript => {
-            "Needs Node.js and npm; `npm install` fetches TypeScript and `jco`. TypeScript is not compiled to WebAssembly directly: `jco componentize` embeds a JavaScript engine in the component."
-        }
-        Template::Python => {
-            "Needs Python and `pip install componentize-py`. Python is not compiled to WebAssembly directly: `componentize-py` embeds CPython in the component, so only the standard library and pure-Python packages are available."
+            "Needs Rust 1.100 or newer with the `wasm32-wasip3` target (`rustup target add wasm32-wasip3`)."
         }
     };
     format!(
@@ -208,26 +185,6 @@ pub fn init(parent: &Path, name: &str, template: Template) -> Result<(PathBuf, V
                 include_str!("templates/cli-lib.rs").replace("__NAME__", name),
             );
         }
-        Template::Typescript => {
-            files.add(
-                "package.json",
-                include_str!("templates/typescript-package.json").replace("__NAME__", name),
-            );
-            files.add(
-                "tsconfig.json",
-                include_str!("templates/typescript-tsconfig.json"),
-            );
-            files.add(
-                "src/index.ts",
-                include_str!("templates/typescript-index.ts").replace("__NAME__", name),
-            );
-        }
-        Template::Python => {
-            files.add(
-                "app.py",
-                include_str!("templates/python-app.py").replace("__NAME__", name),
-            );
-        }
     }
 
     let mut written = Vec::new();
@@ -250,12 +207,7 @@ mod tests {
 
     #[test]
     fn every_template_scaffolds_a_manifest_that_passes_validation() {
-        for template in [
-            Template::Rust,
-            Template::Typescript,
-            Template::Python,
-            Template::Cli,
-        ] {
+        for template in [Template::Rust, Template::Cli] {
             let dir = tempfile::tempdir().unwrap();
             let (root, files) = init(dir.path(), "my-source", template).unwrap();
 
@@ -279,6 +231,23 @@ mod tests {
             CONTRACT_WIT
         );
         assert!(CONTRACT_WIT.contains(&format!("memcastle:source@{CONTRACT_VERSION}")));
+    }
+
+    #[test]
+    fn example_modules_carry_the_same_contract_as_core() {
+        // Examples keep compact formatting; comments/whitespace must not conceal contract drift.
+        let declarations = |wit: &str| -> String {
+            wit.lines()
+                .flat_map(|line| line.split("//").next().unwrap_or("").chars())
+                .filter(|character| !character.is_whitespace())
+                .collect()
+        };
+        for example in [
+            include_str!("../../plugins/example/modules/files-one/wit/memcastle-source.wit"),
+            include_str!("../../plugins/example/modules/files-two/wit/memcastle-source.wit"),
+        ] {
+            assert_eq!(declarations(example), declarations(CONTRACT_WIT));
+        }
     }
 
     #[test]

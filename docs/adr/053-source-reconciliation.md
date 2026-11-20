@@ -15,7 +15,8 @@ Job leases prevent two workers claiming one job but do not prevent different job
 
 ## Decision
 
-Keep the original `memcastle:source@0.4.0` world binary-compatible.
+The extension shares the `memcastle:source@0.5.0` package's async acquisition baseline.
+The WASI 0.3 migration intentionally breaks the earlier synchronous 0.4.0 contract.
 An explicit `compatibility.reconciliation = "0.1.0"` selects an additional exported interface and the
 `reconciled-source` world.
 Older hosts reject the new compatibility key rather than silently losing reconciliation semantics.

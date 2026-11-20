@@ -33,13 +33,13 @@ pub fn share_target(manifest: &str, name: &str) -> String {
         )
         .replace(
             &format!(
-                "output = \"target/wasm32-wasip2/release/{}.wasm\"",
+                "output = \"target/wasm32-wasip3/release/{}.wasm\"",
                 name.replace('-', "_")
             ),
             &format!(
                 "output = '{}'",
                 target
-                    .join("wasm32-wasip2/debug")
+                    .join("wasm32-wasip3/debug")
                     .join(format!("{}.wasm", name.replace('-', "_")))
                     .display()
             ),
@@ -80,7 +80,7 @@ pub fn mock_component() -> (Vec<u8>, String) {
     let dir = mock_dir();
     let target = shared_target();
     let status = Command::new("cargo")
-        .args(["build", "--target", "wasm32-wasip2", "--target-dir"])
+        .args(["build", "--target", "wasm32-wasip3", "--target-dir"])
         .arg(&target)
         .arg("--manifest-path")
         .arg(dir.join("Cargo.toml"))
@@ -88,10 +88,10 @@ pub fn mock_component() -> (Vec<u8>, String) {
         .expect("cargo starts");
     assert!(
         status.success(),
-        "the mock source builds; `rustup target add wasm32-wasip2` provides its target"
+        "the mock source builds; `rustup target add wasm32-wasip3` provides its target"
     );
     let component =
-        std::fs::read(target.join("wasm32-wasip2/debug/memcastle_test_mock_source.wasm"))
+        std::fs::read(target.join("wasm32-wasip3/debug/memcastle_test_mock_source.wasm"))
             .expect("the build produced the mock component");
     let manifest = std::fs::read_to_string(dir.join("memcastle-source.toml")).unwrap();
     (component, manifest)

@@ -43,7 +43,7 @@ jobs:
 
       # The channel comes from the action ref, not rust-toolchain.toml,
       # and each job installs the components it needs.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: rustfmt, clippy
 
@@ -103,7 +103,7 @@ jobs:
             flag: macos
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: llvm-tools-preview
 
@@ -188,7 +188,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: llvm-tools-preview
       - uses: rui314/setup-mold@v1
@@ -220,15 +220,15 @@ jobs:
     name: 🧬 WebAssembly tests
     runs-on: ubuntu-latest
     env:
-      # Rust 1.100's WASI imports exceed Wasmtime 41's contract; keep fixture builds on the last green compiler.
-      RUSTUP_TOOLCHAIN: "1.99.1"
+      # Spawned component builds must use the same compiler as the host.
+      RUSTUP_TOOLCHAIN: "1.100.0"
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: llvm-tools-preview
           # The test components are built for this target.
-          targets: wasm32-wasip2
+          targets: wasm32-wasip3
       - uses: rui314/setup-mold@v1
 
       - uses: jdx/mise-action@v5
@@ -239,7 +239,10 @@ jobs:
         with:
           cache-generation: wasm-v1
 
-      # If instrumenting breaks the `wasm32-wasip2` builds (`can't find crate for profiler_builtins` has been seen
+      - name: Compile and validate WASI 0.3 components
+        run: mise run components:check
+
+      # If instrumenting breaks the `wasm32-wasip3` builds (`can't find crate for profiler_builtins` has been seen
       # locally), run this step with plain `cargo nextest run --profile ci-wasm` and drop the coverage steps.
       # `--test 'wasm_*'` is the `wasm_` prefix as a Cargo glob: without it every other test binary is compiled and
       # linked, instrumented, only for the profile's filter to skip it. Cargo still builds the `memcastle` binary these
@@ -268,16 +271,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Match the component compiler used by the Wasm suite, including Cargo spawned by source tooling.
-      RUSTUP_TOOLCHAIN: "1.99.1"
+      RUSTUP_TOOLCHAIN: "1.100.0"
     strategy:
       fail-fast: false
       matrix:
         source: [directory]
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
-          targets: wasm32-wasip2
+          targets: wasm32-wasip3
       - uses: rui314/setup-mold@v1
 
       - uses: jdx/mise-action@v5
@@ -300,11 +303,14 @@ jobs:
   example_plugin:
     name: 🧩 Example plugin tooling
     runs-on: ubuntu-latest
+    env:
+      # Direct Cargo invocations must not switch back to the checkout's local development channel.
+      RUSTUP_TOOLCHAIN: "1.100.0"
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
-          targets: wasm32-wasip2
+          targets: wasm32-wasip3
       - uses: rui314/setup-mold@v1
       # This job builds through rustup directly rather than mise's Cargo wrapper.
       - uses: jdx/mr-boxington-action@v1
@@ -344,7 +350,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: rui314/setup-mold@v1
 
       - uses: jdx/mise-action@v5
@@ -465,6 +471,8 @@ jobs:
             select(tag == "!!str" and . != "")
           ' Cargo.toml)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The version file otherwise overrides rustup's default in this job and its compiler cache setup.
+          echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -489,6 +497,8 @@ jobs:
     runs-on: ${{ matrix.build.runner }}
     env:
       RUSTFLAGS: -D warnings
+      # The cross-target std libraries below are installed on this toolchain, not local `stable`.
+      RUSTUP_TOOLCHAIN: "1.100.0"
     strategy:
       fail-fast: false
       matrix:
@@ -502,7 +512,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: ${{ matrix.build.target }}
       # Bootstrap the toolchain before relocating temporary storage, but keep cache cleanup before drive teardown.

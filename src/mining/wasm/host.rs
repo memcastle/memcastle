@@ -7,11 +7,11 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wasmtime::StoreLimits;
 use wasmtime::component::ResourceTable;
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::domain::{AccessTokens, OAuthRequirement, Permissions, Secret};
 
@@ -20,6 +20,11 @@ use super::process::{self, ProcessError, ProcessGrant};
 wasmtime::component::bindgen!({
     path: "wit/memcastle-source.wit",
     world: "source",
+    exports: { default: async | store },
+    imports: {
+        "memcastle:source/host.run-process": async,
+        "memcastle:source/host.access-token": async,
+    },
 });
 
 /// What lets one call into a source ask for an access token: the sign-in its manifest declares, and who has the tokens.
@@ -46,6 +51,10 @@ pub(super) struct HostState {
     pub limits: StoreLimits,
     /// What `run-process` may do.
     process: ProcessGrant,
+    /// Keep the handle in the store so a timed-out import can still be drained before returning.
+    process_worker: Option<tokio::task::JoinHandle<Result<process::Output, ProcessError>>>,
+    /// Shared with native children so their timeout never restarts the invocation's budget.
+    pub deadline: Instant,
     /// The first permission the source asked for and was refused, so that a failure that follows can be reported as
     /// a permission problem rather than as whatever error the source made of it.
     pub denied: Option<String>,
@@ -62,6 +71,28 @@ pub(super) struct HostState {
     pub credential_failure: Option<crate::Error>,
 }
 
+impl HostState {
+    /// An elapsed call returns only after its native child has been stopped and reaped.
+    pub async fn stop_process(&mut self) {
+        self.process.cancelled.cancel();
+        if let Some(worker) = self.process_worker.take() {
+            // Abort prevents a queued closure from starting; running closures observe the cancellation token.
+            worker.abort();
+            let _ = worker.await;
+        }
+    }
+}
+
+impl Drop for HostState {
+    fn drop(&mut self) {
+        // Caller cancellation can drop the entire store, where async cleanup cannot be awaited.
+        self.process.cancelled.cancel();
+        if let Some(worker) = &self.process_worker {
+            worker.abort();
+        }
+    }
+}
+
 impl WasiView for HostState {
     fn ctx(&mut self) -> WasiCtxView<'_> {
         WasiCtxView {
@@ -75,13 +106,31 @@ impl WasiView for HostState {
 impl memcastle::source::types::Host for HostState {}
 
 impl memcastle::source::host::Host for HostState {
-    fn run_process(
+    async fn run_process(
         &mut self,
         program: String,
         args: Vec<String>,
         stdin: Option<Vec<u8>>,
     ) -> Result<memcastle::source::host::ProcessOutput, String> {
-        match process::run(&self.process, &program, &args, stdin.as_deref()) {
+        // A guest may abandon an import and make another one in the same invocation.
+        if let Some(previous) = self.process_worker.take() {
+            previous.abort();
+            let _ = previous.await;
+        }
+        let mut grant = self.process.clone();
+        grant.cancelled = grant.cancelled.child_token();
+        // Cancelling one import must stop its worker without cancelling later imports in the same store.
+        let _cancel_on_drop = grant.cancelled.clone().drop_guard();
+        // A native child has blocking pipe/process APIs; only that work belongs on a blocking worker.
+        let worker = self
+            .process_worker
+            .insert(tokio::task::spawn_blocking(move || {
+                process::run(&grant, &program, &args, stdin.as_deref())
+            }));
+        let outcome = worker.await;
+        self.process_worker.take();
+        let outcome = outcome.map_err(|_| "source process worker failed".to_string())?;
+        match outcome {
             Ok(output) => Ok(memcastle::source::host::ProcessOutput {
                 status: output.status,
                 stdout: output.stdout,
@@ -95,7 +144,7 @@ impl memcastle::source::host::Host for HostState {
         }
     }
 
-    fn access_token(&mut self) -> Result<String, String> {
+    async fn access_token(&mut self) -> Result<String, String> {
         let Some(grant) = &self.tokens else {
             let message =
                 "no access token is available here: the source declared no `[permissions.oauth]`, or this call is not given credentials"
@@ -103,10 +152,16 @@ impl memcastle::source::host::Host for HostState {
             self.denied.get_or_insert_with(|| message.clone());
             return Err(message);
         };
-        match grant
-            .provider
-            .access_token(&grant.source, &grant.requirement)
-        {
+        let grant = grant.clone();
+        // Credential backends can block on files/keyrings or provider renewal.
+        let outcome = tokio::task::spawn_blocking(move || {
+            grant
+                .provider
+                .access_token(&grant.source, &grant.requirement)
+        })
+        .await
+        .map_err(|_| "source credential worker failed".to_string())?;
+        match outcome {
             Ok(token) => Ok(token.expose().to_string()),
             Err(error) => {
                 let message = error.to_string();
@@ -187,12 +242,13 @@ pub(super) fn state(
     selection: CredentialSelection,
     selected_env: Option<&str>,
 ) -> Result<HostState, String> {
+    let deadline = Instant::now() + timeout;
     let mut wasi = WasiCtxBuilder::new();
     for directory in readable_directories(permissions, locator) {
         // Guest path = host path, so a source written against ordinary paths (`std::fs` on the locator it was
         // given) works unchanged and the same code runs natively. Read-only: the host offers no write access.
         let guest = directory.display().to_string();
-        wasi.preopened_dir(&directory, &guest, DirPerms::READ, FilePerms::READ)
+        wasi.preopened_dir(&directory, &guest, FsPerms::ReadOnly)
             .map_err(|source| format!("cannot open `{guest}` for the source: {source}"))?;
     }
     let mut env = Vec::new();
@@ -202,8 +258,12 @@ pub(super) fn state(
             env.push((name.clone(), value));
         }
     }
+    // Wasmtime 50 denies protocols as well as addresses by default; grant both explicitly.
     if permissions.network {
-        wasi.inherit_network().allow_ip_name_lookup(true);
+        wasi.inherit_network()
+            .allow_tcp(true)
+            .allow_udp(true)
+            .allow_ip_name_lookup(true);
     }
     Ok(HostState {
         wasi: wasi.build(),
@@ -219,7 +279,11 @@ pub(super) fn state(
                 .filter(|name| !permissions.env.iter().any(|allowed| allowed == name))
                 .map(str::to_string),
             timeout,
+            deadline: Some(deadline),
+            cancelled: tokio_util::sync::CancellationToken::new(),
         },
+        process_worker: None,
+        deadline,
         denied: None,
         tokens,
         credential: selection.value,
@@ -435,9 +499,9 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn running_a_program_through_the_host_is_denied_failed_or_answered_and_a_denial_is_remembered()
-    {
+    #[tokio::test]
+    async fn running_a_program_through_the_host_is_denied_failed_or_answered_and_a_denial_is_remembered()
+     {
         use self::memcastle::source::host::Host as _;
 
         let permissions = Permissions {
@@ -448,6 +512,7 @@ mod tests {
 
         let denied = state
             .run_process("cat".to_string(), vec![], None)
+            .await
             .unwrap_err();
         assert!(denied.contains("not permitted"), "{denied}");
         assert_eq!(
@@ -458,6 +523,7 @@ mod tests {
 
         let failed = state
             .run_process("memcastle-no-such-program".to_string(), vec![], None)
+            .await
             .unwrap_err();
         assert!(failed.contains("could not be started"), "{failed}");
 
@@ -468,6 +534,7 @@ mod tests {
         let mut state = host_state(&permissions);
         let answered = state
             .run_process("echo".to_string(), vec!["hi".to_string()], None)
+            .await
             .unwrap();
         assert_eq!(answered.status, 0);
         assert_eq!(String::from_utf8_lossy(&answered.stdout).trim(), "hi");

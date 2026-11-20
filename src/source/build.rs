@@ -264,7 +264,7 @@ fn check_is_component(bytes: &[u8], path: &Path) -> Result<()> {
         Some([0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00]) => Ok(()),
         Some([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]) => Err(Error::SourceBuildFailed {
             message: format!(
-                "{} is a core WebAssembly module, not a component; build for `wasm32-wasip2`, or wrap it with `wasm-tools component new`",
+                "{} is a core WebAssembly module, not a component; build for `wasm32-wasip3` with Rust 1.100 or newer",
                 path.display()
             ),
         }),
@@ -286,7 +286,7 @@ mod tests {
         let module = check_is_component(b"\0asm\x01\0\0\0rest", path)
             .unwrap_err()
             .to_string();
-        assert!(module.contains("wasm32-wasip2"), "{module}");
+        assert!(module.contains("wasm32-wasip3"), "{module}");
         assert!(check_is_component(b"#!/bin/sh", path).is_err());
         assert!(check_is_component(b"\0as", path).is_err());
     }

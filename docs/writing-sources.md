@@ -66,8 +66,8 @@ A trap, a timeout and an out-of-memory are reported by the host as `memcastle::s
 
 Remote synchronizing sources can implement the optional `reconciled-source` world from the same WIT file.
 Declare `reconciliation = "0.1.0"` under `[compatibility]` and export
-`memcastle:source/reconciliation@0.4.0` alongside the original adapter interface.
-The extension version is independent of the unchanged base WIT package version.
+`memcastle:source/reconciliation@0.5.0` alongside the adapter interface.
+The extension capability version remains `0.1.0`, independently of the base WIT package version `0.5.0`.
 An older host rejects the new manifest key instead of silently treating retirement as a skip.
 Components without the declaration retain the original six-function behavior and identities.
 
@@ -123,7 +123,7 @@ homepage = "https://example.org/my-notes"        # optional
 repository = "https://example.org/my-notes.git"  # optional: where the code is
 
 [compatibility]
-contract = "0.4"             # the WIT contract version it was built against
+contract = "0.5"             # the WIT contract version it was built against
 memcastle = ">=0.4.0, <0.5.0"  # this release line; change it when targeting another release
 
 [capabilities]               # the same three as a built-in adapter; all default to false
@@ -162,8 +162,8 @@ memory_mib = 64              # at most mining.source_memory_mib
 timeout_secs = 30            # per call; at most mining.source_timeout_secs
 
 [build]                      # development only; the daemon never runs it
-command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
-output = "target/wasm32-wasip2/release/my_notes.wasm"
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip3", "--target-dir", "target"]
+output = "target/wasm32-wasip3/release/my_notes.wasm"
 
 [test]                       # development only
 fixtures = "fixtures"
@@ -374,7 +374,7 @@ Built-in sources are always enabled and cannot be disabled or removed.
 
 ## Compatibility
 
-The contract has a version (`wit/memcastle-source.wit`, currently `0.4.0`), and a source declares the one it was built
+The contract has a version (`wit/memcastle-source.wit`, currently `0.5.0`), and a source declares the one it was built
 against.
 
 | Host contract | A source built for it runs on |
@@ -389,21 +389,24 @@ Use a revision of `memcastle-source.tpl` whose contract matches the MemCastle re
 
 ## Templates and their toolchains
 
-The maintained GitTPL source template is Rust/Wasm.
-The other implementations below describe existing legacy source projects and their toolchains; GitTPL does not generate
-those variants.
+The maintained GitTPL source template is Rust/Wasm, requiring Rust 1.100 or newer and WASI 0.3.0.
+Execution is verified against the host's embedded Wasmtime 50.0.3 with native Component Model async support.
+Use wit-bindgen 0.63.0 for the Rust bindings and wasm-tools 1.263.0 for component validation.
+The source WIT package is `memcastle:source@0.5.0`; acquisition functions are `async func` so they can suspend on I/O.
+Rust components using ordinary `std` I/O can set `sync: true` in `wit_bindgen::generate!` for stackful bindings.
+This changes Rust bindings, not the asynchronous WIT function type.
+Core exercises both a Rust source and a Rust CLI wrapper as internal fixtures.
 
 | Template | Written in | Toolchain | Notes |
 |---|---|---|---|
-| `rust` | Rust | `rustup target add wasm32-wasip2` | Compiles straight to a component. Smallest and fastest to start. |
+| `rust` | Rust | `rustup target add wasm32-wasip3` | Compiles straight to a component. Smallest and fastest to start. |
 | `cli` | Rust | The same | Wraps a command-line program through `run-process`; the manifest lists the programs. For a source that is easiest written as a script or an existing tool. |
-| `typescript` | TypeScript | Node.js, `npm install` (`jco`, `typescript`) | Compiled to JavaScript, then componentized with `jco`, which embeds a JavaScript engine: the component is megabytes and slower to start. |
-| `python` | Python | `pip install componentize-py` | Componentized with `componentize-py`, which embeds CPython: only the standard library and pure-Python packages bundled with it are available. |
 
-TypeScript and Python are not compiled directly to WebAssembly, and these templates are provided as starting points:
-their toolchains are not installed in MemCastle's CI, so the suite checks that they scaffold a valid project but does not
-build them.
 Rust and `cli` sources are built and run for real by the test suite.
+Legacy TypeScript/Python scaffolds have been removed; they did not have execution-tested WASI 0.3 toolchains.
+Rebuild older components for the new target and reinstall their matching plugin release.
+See the [migration baseline](development.md#component-migration-baseline) for runtime maturity,
+threading limitations and the conditional WASI SDK requirement.
 
 ## Conformance
 
@@ -504,7 +507,7 @@ same package contract that provider plugins use.
 ## Testing your source in CI
 
 `memcastle source test` needs no daemon and builds the component first, so it is all a CI job has to run.
-In a project of your own, install the `wasm32-wasip2` target (or your template's toolchain), build `memcastle`,
+In a project of your own, install the `wasm32-wasip3` target, build `memcastle`,
 and run `memcastle source test .`.
 In this repository Core CI explicitly runs `mise run sources:test -- directory` for the maintained reference source.
 Adding another reference source to CI requires an entry in the `sources` matrix in `.github/workflows/ci.yaml`.

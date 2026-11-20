@@ -2019,7 +2019,7 @@ mod tests {
         let now = Utc::now();
         let manifest: crate::domain::SourceManifest = toml::from_str(
             "[source]\nname = \"plain\"\nversion = \"1.0.0\"\ndescription = \"demo\"\n\
-             [compatibility]\ncontract = \"0.4\"\nmemcastle = \">=0.1\"\n",
+             [compatibility]\ncontract = \"0.5\"\nmemcastle = \">=0.1\"\n",
         )
         .expect("a manifest");
         app.store

@@ -30,15 +30,49 @@ See [Build locally](container.md#build-locally)
 for local assembly and the inline daemon status check.
 
 - Bun for `web/`, installed globally by mise; the Rust build does not need it.
-- Rust via `rustup`, with mise 2026.9.2+ providing native Mr Boxington wrapping for Cargo builds.
+- Rust 1.100 or newer via `rustup`, with mise 2026.9.2+ providing native Mr Boxington wrapping for Cargo builds.
   `rust-toolchain.toml` and mise declare the stable channel; explicit `RUSTUP_TOOLCHAIN` selections still win.
-  Mise also installs `wasm32-wasip2` for the reference sources and WebAssembly tests.
+  Mise also installs `wasm32-wasip3` for the reference sources and WebAssembly tests.
 - The remaining tools (nextest, prek, ast-grep, typos, ...) via `mise` — run `mise install` once.
 
-The source-conformance and WebAssembly CI jobs pin Rust 1.99.1 while the host uses Wasmtime 41.
-Rust 1.100 emits WASI imports that this runtime does not implement, so moving those jobs to a newer compiler
-requires validating its generated components against the host first.
-Other CI jobs continue to exercise the current stable compiler.
+CI and releases build with Rust 1.100.0; the MSRV job reads the minimum from `Cargo.toml`.
+The embedded Wasmtime 50.0.3 host executes WASI 0.3 components with Component Model async support.
+`mise run components:check` builds every reference/example/test component, validates it with wasm-tools 1.263.0,
+and checks that its WASI imports are version 0.3.0.
+The WebAssembly and source-conformance jobs also execute these components against the host.
+
+### Component migration baseline
+
+Older WASI components must be rebuilt for `wasm32-wasip3` and reinstalled with matching plugin releases.
+Core has no older WASI linker fallback.
+The source contract is now 0.5.0 and the embedding contract is 0.2.0.
+Acquisition functions and `embed` are async-typed in WIT: a synchronous Component Model function cannot suspend
+on WASI 0.3 I/O, even when the host calls it asynchronously.
+Rust guests may use wit-bindgen's `sync: true` stackful bindings to retain ordinary `std` I/O implementations;
+the exported WIT function type remains asynchronous.
+Pure normalization and capability functions remain synchronous in WIT.
+Native process calls share the invocation's remaining deadline;
+a timed-out invocation stops and reaps its direct child before returning.
+Wasmtime's p3 implementation is still marked experimental upstream.
+Rust 1.100's default p3 target cannot spawn threads with `std::thread::spawn`;
+Component Model async does not imply native threading or enabled cooperative threading.
+Normal Rust target installation is sufficient: WASI SDK 34+ is needed only when building Rust/LLVM
+or linking through an external SDK.
+
+The coordinated official plugin migrations are
+[Anthropic #19](https://github.com/memcastle/memcastle-anthropic/issues/19),
+[OpenCode #20](https://github.com/memcastle/memcastle-opencode/issues/20),
+[OpenAI #21](https://github.com/memcastle/memcastle-openai/issues/21),
+[Pi #22](https://github.com/memcastle/memcastle-pi/issues/22),
+[GitHub #19](https://github.com/memcastle/memcastle-github/issues/19),
+[Slack #12](https://github.com/memcastle/memcastle-slack/issues/12),
+[Google #5](https://github.com/memcastle/memcastle-google/issues/5), and
+[Notion #2](https://github.com/memcastle/memcastle-notion/issues/2).
+The corresponding template migrations are
+[source #2](https://github.com/memcastle/memcastle-source.tpl/issues/2),
+[embedding provider #1](https://github.com/memcastle/memcastle-embedding-provider.tpl/issues/1), and
+[plugin #18](https://github.com/memcastle/memcastle-plugin.tpl/issues/18).
+These are release dependencies of [Core #387](https://github.com/memcastle/memcastle/issues/387).
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
 so the storage engine itself needs no C/C++ toolchain.
@@ -50,7 +84,8 @@ so the storage engine itself needs no C/C++ toolchain.
 mise run build      # cargo build
 mise run docker     # build the local daemon image from the Rust/frontend outputs
 mise run test       # the basic suite: cargo nextest run, without the WebAssembly tests (accepts nextest selectors)
-mise run test:wasm  # the WebAssembly suite: every tests/wasm_*.rs binary (slow; needs the wasm32-wasip2 target)
+mise run test:wasm  # the WebAssembly suite: every tests/wasm_*.rs binary (slow; needs the wasm32-wasip3 target)
+mise run components:check   # compile and validate WASI 0.3 imports before runtime execution
 mise run sources:check      # build and conformance-test every source under sources/
 mise run sources:test -- directory   # the same for one source, which is what each CI leg runs
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
@@ -180,7 +215,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/wasm_oauth.rs` — a source that signs in with OAuth against a real daemon and the real CLI, with a fake
     provider: consent to the sign-in, `source auth` through the device flow, the token a run is given, renewal, a revoked
     credential, a miner that needs the sign-in, and no refresh token anywhere but the credentials file (needs the
-    `wasm32-wasip2` target).
+    `wasm32-wasip3` target).
   - `tests/config_assets.rs` — the assets override is honoured and checked, and a standalone binary starts with no assets
     (subprocess).
   - `tests/dependencies.rs` — the lockfile never pulls a second storage engine into the binary (ADR-001), nor a
@@ -264,7 +299,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/wasm_projects.rs` — local source fixtures and `memcastle source build`, `test` and `package` for real, the sandbox
     (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
     unlisted program) and installing through the CLI.
-    It builds components with Cargo for `wasm32-wasip2` (subprocess, WebAssembly suite);
+    It builds components with Cargo for `wasm32-wasip3` (subprocess, WebAssembly suite);
     see [Building components in tests](#building-components-in-tests).
   - `tests/in_process/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable,
     and every tool, CLI command and REST route it names exists in this release
@@ -383,7 +418,7 @@ have no hook, because what they forbid is not something a grep over the whole tr
 adapter, no file access and no WebAssembly runtime; adapters, the WebAssembly host and `src/source/` never reach the store
 or the jobs (at any depth); only `src/mining/wasm/` names the engine; and the host calls nothing that hands a guest the
 daemon's environment, standard streams, arguments or a writable directory.
-Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which
+Building the reference WebAssembly sources needs the `wasm32-wasip3` target (`rustup target add wasm32-wasip3`, which
 `rust-toolchain.toml` requests); `mise run sources:check` builds and tests every source under `sources/`.
 `tests/source_isolation.rs` builds nothing and runs in the basic suite on every OS.
 

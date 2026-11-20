@@ -339,7 +339,7 @@ mod tests {
             name: name.to_string(), state: SourcePackageState::Installed,
             digest: "b".repeat(64),
             manifest: crate::source::manifest::parse(
-                &format!("[source]\nname = '{name}'\nversion = '0.1.0'\ndescription = 'one'\n[compatibility]\ncontract = '0.4.0'\nmemcastle = '>=0.4'\n"), &[],
+                &format!("[source]\nname = '{name}'\nversion = '0.1.0'\ndescription = 'one'\n[compatibility]\ncontract = '0.5.0'\nmemcastle = '>=0.4'\n"), &[],
             ).unwrap(),
             installed_at: now, updated_at: now, origin: SourceOrigin::Plugin,
             registry: None, archive_digest: Some(plugin.digest.clone()), signed_by: None,
@@ -423,7 +423,7 @@ mod tests {
             state: SourcePackageState::Installed,
             digest: "b".repeat(64),
             manifest: crate::source::manifest::parse(
-                "[source]\nname = 'shared'\nversion = '0.1.0'\ndescription = 'shared'\n[compatibility]\ncontract = '0.4.0'\nmemcastle = '>=0.4'\n",
+                "[source]\nname = 'shared'\nversion = '0.1.0'\ndescription = 'shared'\n[compatibility]\ncontract = '0.5.0'\nmemcastle = '>=0.4'\n",
                 &[],
             )
             .unwrap(),
@@ -469,7 +469,7 @@ mod tests {
         let legacy = SourcePackageRecord {
             name: "legacy".into(),
             manifest: crate::source::manifest::parse(
-                "[source]\nname = 'legacy'\nversion = '0.1.0'\ndescription = 'legacy'\n[compatibility]\ncontract = '0.4.0'\nmemcastle = '>=0.4'\n",
+                "[source]\nname = 'legacy'\nversion = '0.1.0'\ndescription = 'legacy'\n[compatibility]\ncontract = '0.5.0'\nmemcastle = '>=0.4'\n",
                 &[],
             )
             .unwrap(),

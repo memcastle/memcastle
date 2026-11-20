@@ -14,8 +14,9 @@ OpenAI-compatible endpoint depend on an OpenAI product plugin.
 
 ## Decision
 
-An `embedding_provider` module supplies `memcastle-embedding.toml` and a `wasm32-wasip2`
-`embedding.wasm` component implementing `memcastle:embedding@0.1.0`.
+An `embedding_provider` module supplies `memcastle-embedding.toml` and a `wasm32-wasip3`
+`embedding.wasm` component implementing `memcastle:embedding@0.2.0`.
+The `embed` function is async-typed so WASI 0.3 I/O can suspend; `models` remains synchronous.
 Its own manifest declares the module ID, version, contract, supported model IDs and dimensions,
 an optional restricted JSON schema for non-secret settings, and whether it needs network and
 host-scoped credential access.

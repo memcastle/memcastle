@@ -36,7 +36,7 @@ Pick what fits the user's system and ask which they prefer when several apply.
 - Arch Linux: `paru -S memcastle-bin`
 - Debian, Ubuntu, Fedora and other Linux: a `.deb` or `.rpm` from the GitHub release page, or the raw
   `memcastle_<version>_<platform>` binary renamed to `memcastle` and put on `PATH`
-- From source, with Rust 1.90 or newer, in a checkout of the repository: `cargo install --path .`
+- From source, with Rust 1.100 or newer, in a checkout of the repository: `cargo install --path .`
 
 Run `memcastle --version` again to confirm.
 The installation page of the MemCastle documentation lists every method, including checksum and attestation checks.

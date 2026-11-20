@@ -3,7 +3,7 @@
 use std::path::Path;
 use serde_json::{Value, json};
 
-wit_bindgen::generate!({ path: "wit", world: "source" });
+wit_bindgen::generate!({ path: "wit", world: "source", sync: true });
 
 use exports::memcastle::source::adapter::Guest;
 use memcastle::source::types::{Candidate, CanonicalDocument, Discovery, RawDocument, Segment, SourceError, SourceKind, SourceRef};

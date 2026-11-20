@@ -63,7 +63,7 @@ Source modules retain their `memcastle-source.toml` and `source.wasm` contract;
 integration modules retain their `memcastle-integration.toml` and agent assets.
 Embedding modules use `embeddings/<id>/memcastle-embedding.toml` and `embeddings/<id>/embedding.wasm`
 (the legacy `modules/<id>/` root is also accepted).
-Their manifests declare a version, `contract = "0.1.0"`, one or more `[[models]]` with `id` and `dimensions`,
+Their manifests declare a version, `contract = "0.2.0"`, one or more `[[models]]` with `id` and `dimensions`,
 optional `network` and `credential` permissions, and an optional restricted `config_schema`.
 For example, a plugin project can add this module to its root `plugin.toml`:
 
@@ -73,7 +73,7 @@ id = "vendor-embeddings"
 type = "embedding_provider"
 manifest = "embeddings/vendor-embeddings/memcastle-embedding.toml"
 entry = "embeddings/vendor-embeddings/embedding.wasm"
-contract = "0.1.0"
+contract = "0.2.0"
 
 [modules.config_schema]
 type = "object"
@@ -89,7 +89,7 @@ The module's `memcastle-embedding.toml` then describes what that particular comp
 ```toml
 id = "vendor-embeddings"
 version = "0.1.0"
-contract = "0.1.0"
+contract = "0.2.0"
 network = true
 credential = true
 
@@ -106,8 +106,10 @@ additionalProperties = false
 type = "string"
 ```
 
-Compile the `memcastle:embedding@0.1.0` world in `wit/embedding/memcastle-embedding.wit` as a
-`wasm32-wasip2` component before `plugin package`; the packager does not compile module code.
+Compile the `memcastle:embedding@0.2.0` world in `wit/embedding/memcastle-embedding.wit` as a
+`wasm32-wasip3` component with Rust 1.100 or newer before `plugin package`; the packager does not compile module code.
+The `embed` export is async-typed to permit WASI I/O suspension.
+Rust implementations using ordinary `std` I/O can select wit-bindgen's `sync: true` stackful bindings.
 `models` must return the same models and dimensions as the manifest; `embed` receives a model, dimension,
 JSON settings object and ordered text batch, returning one vector per input.
 The host checks counts, lengths and finite coordinates, limits calls to 64 MiB and each connection's timeout,

@@ -35,7 +35,7 @@ fn release() -> Vec<u8> {
             entry: format!("sources/{name}/source.wasm"),
             sha256: sha256_hex(&component),
             optional: false,
-            contract: Some("0.4".into()),
+            contract: Some(memcastle::domain::CONTRACT_VERSION.into()),
             config_schema: None,
         });
         files.insert(format!("sources/{name}/memcastle-source.toml"), manifest);

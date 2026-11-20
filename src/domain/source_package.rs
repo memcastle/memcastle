@@ -17,7 +17,7 @@ use super::{OptionKind, OptionSpec, SourceCapabilities, sha256_hex};
 /// While the major version is `0`, a source built for `0.N` runs only on a host that implements `0.N`; from `1.0` a
 /// source runs on any host of the same major version whose minor is at least the source's. A patch version is
 /// documentation only and never affects compatibility. See [`contract_compatibility`].
-pub const CONTRACT_VERSION: &str = "0.4.0";
+pub const CONTRACT_VERSION: &str = "0.5.0";
 
 /// What a source package declares about itself: `memcastle-source.toml`.
 ///
@@ -980,12 +980,13 @@ mod tests {
 
     #[test]
     fn contracts_are_compatible_by_minor_before_one_point_zero() {
-        assert!(contract_compatibility("0.4").is_ok());
-        assert!(contract_compatibility("0.4.7").is_ok());
+        assert!(contract_compatibility("0.5").is_ok());
+        assert!(contract_compatibility("0.5.7").is_ok());
         assert!(contract_compatibility("0.1").is_err());
         assert!(contract_compatibility("0.2").is_err());
         assert!(contract_compatibility("0.3").is_err());
-        assert!(contract_compatibility("0.5").is_err());
+        assert!(contract_compatibility("0.4").is_err());
+        assert!(contract_compatibility("0.6").is_err());
         assert!(contract_compatibility("0.0").is_err());
         assert!(contract_compatibility("1.1").is_err());
         assert!(contract_compatibility("nonsense").is_err());
@@ -1047,6 +1048,10 @@ mod tests {
             "{too_new}"
         );
         assert!(version_compatibility("9.9", ">=0.1", &running).is_err());
+        assert!(
+            version_compatibility("0.4", ">=0.1", &running).is_err(),
+            "sync-typed acquisition cannot run on the async contract"
+        );
         assert!(
             version_compatibility(current, "lots", &running)
                 .unwrap_err()

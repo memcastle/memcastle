@@ -1,4 +1,4 @@
-//! Optional typed exports leave existing source@0.4.0 components binary-compatible.
+//! Optional typed exports share source@0.5.0's async acquisition contract.
 use super::{Inner, to_wit, wit};
 use crate::domain::{Candidate, Cursor, SourceRef};
 use crate::error::Result;
@@ -22,13 +22,12 @@ impl Extension {
         if version != "0.1.0" {
             return Err("unsupported source reconciliation extension; use compatibility.reconciliation = '0.1.0'".into());
         }
-        let (_, interface) = component
-            .get_export(None, "memcastle:source/reconciliation@0.4.0")
+        let interface = component
+            .get_export_index(None, "memcastle:source/reconciliation@0.5.0")
             .ok_or("source declares reconciliation but does not export its interface")?;
         let export = |name| {
             component
-                .get_export(Some(&interface), name)
-                .map(|(_, index)| index)
+                .get_export_index(Some(&interface), name)
                 .ok_or_else(|| format!("source reconciliation interface has no `{name}` export"))
         };
         Ok(Some(Self {
@@ -81,21 +80,38 @@ struct Page {
     cursor_after: Option<String>,
 }
 
+type Answer<T> = (std::result::Result<T, wit::SourceError>,);
+
 impl Inner {
-    pub(super) fn validate_reconciliation(&self) -> Result<()> {
+    pub(super) async fn validate_reconciliation(&self) -> Result<()> {
         let Some(extension) = &self.reconciliation else {
             return Ok(());
         };
-        self.invoke(false, None, |store| {
-            let instance = self.raw_pre.instantiate(&mut *store)?;
-            instance.get_typed_func::<(wit::SourceRef, Known), (std::result::Result<Decision, wit::SourceError>,)>(&mut *store, &extension.reconcile)?;
-            instance.get_typed_func::<(wit::SourceRef, String, u32), (std::result::Result<Page, wit::SourceError>,)>(&mut *store, &extension.discover)?;
-            instance.get_typed_func::<(wit::SourceRef, wit::Candidate), (std::result::Result<Acquired, wit::SourceError>,)>(&mut *store, &extension.acquire)?;
-            Ok(Ok(()))
+        let pre = self.raw_pre.clone();
+        let (reconcile, discover, acquire) =
+            (extension.reconcile, extension.discover, extension.acquire);
+        self.invoke(false, None, move |store| {
+            Box::pin(async move {
+                let instance = pre.instantiate_async(&mut *store).await?;
+                instance.get_typed_func::<(wit::SourceRef, Known), Answer<Decision>>(
+                    &mut *store,
+                    &reconcile,
+                )?;
+                instance.get_typed_func::<(wit::SourceRef, String, u32), Answer<Page>>(
+                    &mut *store,
+                    &discover,
+                )?;
+                instance.get_typed_func::<(wit::SourceRef, wit::Candidate), Answer<Acquired>>(
+                    &mut *store,
+                    &acquire,
+                )?;
+                Ok(Ok(()))
+            })
         })
+        .await
     }
 
-    pub(super) fn reconcile_document(
+    pub(super) async fn reconcile_document(
         &self,
         source: &SourceRef,
         known: &KnownDocument,
@@ -103,13 +119,36 @@ impl Inner {
         let Some(extension) = &self.reconciliation else {
             return Ok(Reconciliation::Unchanged);
         };
-        let decision = self.invoke(true, Some(&source.locator), |store| {
-            let instance = self.raw_pre.instantiate(&mut *store)?;
-            let function = instance.get_typed_func::<(wit::SourceRef, Known), (std::result::Result<Decision, wit::SourceError>,)>(&mut *store, &extension.reconcile)?;
-            let (result,) = function.call(&mut *store, (to_wit(source), Known { pending: known.pending, retired: known.retired, external_id: known.external_id.clone(), revision: known.revision.clone(), metadata: known.metadata.to_string() }))?;
-            function.post_return(&mut *store)?;
-            Ok(result)
-        })?;
+        let pre = self.raw_pre.clone();
+        let index = extension.reconcile;
+        let argument = to_wit(source);
+        let known = Known {
+            pending: known.pending,
+            retired: known.retired,
+            external_id: known.external_id.clone(),
+            revision: known.revision.clone(),
+            metadata: known.metadata.to_string(),
+        };
+        let decision = self
+            .invoke(true, Some(&source.locator), move |store| {
+                Box::pin(async move {
+                    let instance = pre.instantiate_async(&mut *store).await?;
+                    let function = instance
+                        .get_typed_func::<(wit::SourceRef, Known), Answer<Decision>>(
+                            &mut *store,
+                            &index,
+                        )?;
+                    // Concurrent calls perform post-return as part of task completion.
+                    store
+                        .run_concurrent(async move |access| {
+                            let (result,) =
+                                function.call_concurrent(access, (argument, known)).await?;
+                            Ok(result)
+                        })
+                        .await?
+                })
+            })
+            .await?;
         Ok(match decision {
             Decision::Unchanged => Reconciliation::Unchanged,
             Decision::Refresh(handle) => Reconciliation::Refresh(handle),
@@ -117,7 +156,7 @@ impl Inner {
         })
     }
 
-    pub(super) fn discover_reconciled(
+    pub(super) async fn discover_reconciled(
         &self,
         source: &SourceRef,
         cursor: &Cursor,
@@ -127,13 +166,31 @@ impl Inner {
             .reconciliation
             .as_ref()
             .expect("only called for a reconciling source");
-        let page = self.invoke(true, Some(&source.locator), |store| {
-            let instance = self.raw_pre.instantiate(&mut *store)?;
-            let function = instance.get_typed_func::<(wit::SourceRef, String, u32), (std::result::Result<Page, wit::SourceError>,)>(&mut *store, &extension.discover)?;
-            let (result,) = function.call(&mut *store, (to_wit(source), cursor.to_string(), u32::try_from(limit).unwrap_or(u32::MAX)))?;
-            function.post_return(&mut *store)?;
-            Ok(result)
-        })?;
+        let pre = self.raw_pre.clone();
+        let index = extension.discover;
+        let args = (
+            to_wit(source),
+            cursor.to_string(),
+            u32::try_from(limit).unwrap_or(u32::MAX),
+        );
+        let page = self
+            .invoke(true, Some(&source.locator), move |store| {
+                Box::pin(async move {
+                    let instance = pre.instantiate_async(&mut *store).await?;
+                    let function = instance
+                        .get_typed_func::<(wit::SourceRef, String, u32), Answer<Page>>(
+                            &mut *store,
+                            &index,
+                        )?;
+                    store
+                        .run_concurrent(async move |access| {
+                            let (result,) = function.call_concurrent(access, args).await?;
+                            Ok(result)
+                        })
+                        .await?
+                })
+            })
+            .await?;
         let parse_cursor = |value: &str| {
             serde_json::from_str(value)
                 .map_err(|_| self.failed("source returned a non-JSON page checkpoint"))
@@ -156,7 +213,7 @@ impl Inner {
         })
     }
 
-    pub(super) fn acquire_document(
+    pub(super) async fn acquire_document(
         &self,
         source: &SourceRef,
         candidate: &Candidate,
@@ -165,13 +222,34 @@ impl Inner {
             .reconciliation
             .as_ref()
             .expect("only called for a reconciling source");
-        let acquired = self.invoke(true, Some(&source.locator), |store| {
-            let instance = self.raw_pre.instantiate(&mut *store)?;
-            let function = instance.get_typed_func::<(wit::SourceRef, wit::Candidate), (std::result::Result<Acquired, wit::SourceError>,)>(&mut *store, &extension.acquire)?;
-            let (result,) = function.call(&mut *store, (to_wit(source), wit::Candidate { external_id: candidate.external_id.clone(), handle: candidate.handle.clone(), cursor_after: candidate.cursor_after.to_string() }))?;
-            function.post_return(&mut *store)?;
-            Ok(result)
-        })?;
+        let pre = self.raw_pre.clone();
+        let index = extension.acquire;
+        let args = (
+            to_wit(source),
+            wit::Candidate {
+                external_id: candidate.external_id.clone(),
+                handle: candidate.handle.clone(),
+                cursor_after: candidate.cursor_after.to_string(),
+            },
+        );
+        let acquired = self
+            .invoke(true, Some(&source.locator), move |store| {
+                Box::pin(async move {
+                    let instance = pre.instantiate_async(&mut *store).await?;
+                    let function = instance
+                        .get_typed_func::<(wit::SourceRef, wit::Candidate), Answer<Acquired>>(
+                            &mut *store,
+                            &index,
+                        )?;
+                    store
+                        .run_concurrent(async move |access| {
+                            let (result,) = function.call_concurrent(access, args).await?;
+                            Ok(result)
+                        })
+                        .await?
+                })
+            })
+            .await?;
         Ok(match acquired {
             Acquired::Skip => Acquisition::Skip,
             Acquired::Retire(reason) => Acquisition::Retire(reason),
