@@ -303,6 +303,9 @@ jobs:
   example_plugin:
     name: 🧩 Example plugin tooling
     runs-on: ubuntu-latest
+    env:
+      # Direct Cargo invocations must not switch back to the checkout's local development channel.
+      RUSTUP_TOOLCHAIN: "1.100.0"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.100.0
@@ -468,6 +471,8 @@ jobs:
             select(tag == "!!str" and . != "")
           ' Cargo.toml)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The version file otherwise overrides rustup's default in this job and its compiler cache setup.
+          echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -492,6 +497,8 @@ jobs:
     runs-on: ${{ matrix.build.runner }}
     env:
       RUSTFLAGS: -D warnings
+      # The cross-target std libraries below are installed on this toolchain, not local `stable`.
+      RUSTUP_TOOLCHAIN: "1.100.0"
     strategy:
       fail-fast: false
       matrix:
