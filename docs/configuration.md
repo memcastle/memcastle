@@ -899,8 +899,8 @@ The common `mining.max_documents` default (zero for unlimited) is overridden by 
 `embedding_profile` selects a runnable named embedding profile for drawers this miner files.
 The resolved vector space is pinned to its durable job; an explicit embedding-job profile outranks the miner override,
 which outranks the global default.
-Credentials and their paths are never returned by a configuration view; OAuth sign-ins for the default configuration
-retain the existing source-keyed credential so upgrades do not lose them.
+Credentials and their paths are never returned by a configuration view.
+OAuth credentials use a separate slot for each configuration, with the source ID remaining the default slot.
 ChatGPT's current web authorization can select only the default account: an additional named ChatGPT web configuration
 cannot authenticate yet; export-import miners remain usable without an account.
 Legacy miner `credential` references still load, but put new reusable credentials on the source configuration.
@@ -910,6 +910,48 @@ reference.
 If `needs_credentials = true`, an enabled miner must select a resolvable reference through its miner definition or
 source configuration.
 Any selected env/file reference must resolve for either kind of source; the daemon pins that reference to each job.
+
+#### OAuth public clients
+
+A source's manifest supplies the default public OAuth client ID.
+Set `oauth_client_id` on a source configuration to use your own public client:
+
+```toml
+[[source_configs]]
+id = "gmail-work"
+source = "gmail"
+oauth_client_id = "your-public-desktop-client-id"
+
+[[miners]]
+name = "work-mail"
+source = "gmail"
+source_config = "gmail-work"
+```
+
+The source must declare OAuth; the override changes only the public client ID, never endpoints, scopes, callback or PKCE.
+Authorization, code exchange, device polling and later refresh all use the effective client.
+Named configurations do not inherit another configuration's client or sign-in.
+Several miners selecting one configuration deliberately share its authorization.
+`source auth <SOURCE>` uses the source's default configuration, including its override;
+`source config auth <ID>` authorizes the selected named configuration.
+Configuration views expose `oauth_client_id` and `effective_oauth_client_id`, both public identifiers, without tokens.
+
+Changing a configuration's source or client, or removing it, invalidates its sign-in and pending authorization.
+Edits through the daemon and observed direct TOML edits have the same effect, without invalidating other configurations.
+Removing the override restores the manifest client and requires sign-in again.
+A change and reversal entirely between observations cannot be detected.
+Credentials retain the existing machine/backend scope; configuration IDs should identify the same account across palaces
+that share a credential backend.
+
+Mining jobs pin their configuration, OAuth terms, effective client and completed sign-in identity.
+Refresh preserves that identity; signing in again creates a new one even when the client ID is unchanged.
+Queued, retried or resumed jobs with obsolete authority fail before acquisition instead of switching accounts:
+sign in and submit a new run rather than retrying the old one.
+The diagnostic `memcastle::credential::authority_changed` names the selected configuration and its sign-in command.
+Already issued tokens cannot be retracted from an executing component.
+Optional-OAuth jobs submitted without a sign-in remain offline-only, even if someone signs in before they execute.
+Existing credentials without the identity metadata require fresh sign-in; legacy jobs requiring OAuth need a new run.
+Non-OAuth jobs and optional offline acquisition continue to work.
 
 For a source named `team-feed` whose manifest declares `needs_credentials = true`,
 `[permissions] credential = true` and the network permission it needs to fetch its feed,

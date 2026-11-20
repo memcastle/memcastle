@@ -157,13 +157,19 @@ impl Project {
         let fixture_credential = test
             .fixture_credential
             .then(|| crate::domain::Secret::new("memcastle-source-test-credential"));
+        let tokens = test.fixture_access_token.then(|| {
+            std::sync::Arc::new(FixtureAccessTokens {
+                source: manifest.source.name.clone(),
+                requirement: manifest.permissions.oauth.clone(),
+            }) as std::sync::Arc<dyn crate::domain::AccessTokens>
+        });
         let mining = mining.clone();
         let adapter = tokio::task::spawn_blocking(move || {
             WasmAdapter::load_with_credential(
                 &manifest,
                 &component,
                 &mining,
-                None,
+                tokens,
                 None,
                 fixture_credential,
                 None,
@@ -213,6 +219,38 @@ impl Project {
                 path.display()
             ),
         })
+    }
+}
+
+/// Local tooling supplies only a synthetic value; constructing the real credential backend here would leak authority.
+struct FixtureAccessTokens {
+    source: String,
+    requirement: Option<crate::domain::OAuthRequirement>,
+}
+
+impl crate::domain::AccessTokens for FixtureAccessTokens {
+    fn access_token(
+        &self,
+        source: &str,
+        requirement: &crate::domain::OAuthRequirement,
+    ) -> Result<crate::domain::Secret> {
+        if !self.is_signed_in(source, requirement) {
+            return Err(Error::CredentialRequired {
+                source_name: source.into(),
+                reason: "no declared fixture OAuth grant".into(),
+            });
+        }
+        Ok(crate::domain::Secret::new(
+            "memcastle-source-test-access-token",
+        ))
+    }
+
+    fn is_signed_in(&self, source: &str, requirement: &crate::domain::OAuthRequirement) -> bool {
+        source == self.source
+            && self
+                .requirement
+                .as_ref()
+                .is_some_and(|declared| declared.fingerprint() == requirement.fingerprint())
     }
 }
 

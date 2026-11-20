@@ -34,7 +34,7 @@ mod source_package;
 mod trigger;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
-pub use credential::{AccessTokens, SourceAuth};
+pub use credential::{AccessTokens, OAuthBinding, SourceAuth};
 pub use drawer::{
     Drawer, DrawerHistory, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex,
 };

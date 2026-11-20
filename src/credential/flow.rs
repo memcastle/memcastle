@@ -20,7 +20,7 @@ use tokio::sync::watch;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
-use crate::domain::OAuthRequirement;
+use crate::domain::{OAuthBinding, OAuthRequirement};
 use crate::error::{Error, Result};
 
 use super::oauth::{self, DeviceAuthorization, OAuthError, Pkce, Poll, TokenSet};
@@ -119,7 +119,37 @@ impl Credentials {
     /// [`Error::CredentialFlowFailed`] when the provider cannot be reached or refuses to start one, or when the
     /// loopback listener cannot be opened.
     pub async fn begin(&self, source: &str, requirement: &OAuthRequirement) -> Result<Challenge> {
+        self.begin_bound(OAuthBinding {
+            explicit_configuration: false,
+            source: source.to_string(),
+            configuration: source.to_string(),
+            declared: requirement.clone(),
+            client_id: requirement.client_id.clone(),
+            grant_id: None,
+        })
+        .await
+    }
+
+    /// Authorize exactly the selected source/configuration/client, independently of other slots.
+    pub async fn begin_bound(&self, mut binding: OAuthBinding) -> Result<Challenge> {
+        binding.explicit_configuration = self.is_explicit_configuration(&binding.configuration)?;
+        let source = binding.configuration.clone();
+        let source = source.as_str();
+        let requirement = binding.requirement();
+        let requirement = &requirement;
         let flow = oauth::random_token(16).map_err(|m| failed(source, m))?;
+        binding.grant_id = Some(flow.clone());
+        {
+            let guard = self.lock_for(source);
+            let _held = locked(&guard);
+            if !self.configuration_matches(&binding)? {
+                return Err(binding.required());
+            }
+            // Clean obsolete legacy/client authority before reserving this flow; a status read must not cancel it later.
+            self.current(source)?;
+            self.cancel_flow(source);
+            locked(&self.inner.generations).insert(source.to_string(), flow.clone());
+        }
         let (sender, receiver) = watch::channel(None);
         let client = oauth::client().map_err(|e| failed(source, e.to_string()))?;
         let (challenge, task) = if requirement.supports_device() {
@@ -134,13 +164,9 @@ impl Credentials {
                 url: device.verification_uri_complete.clone(),
                 expires_in: device.expires_in,
             };
-            let run = self.clone().run_device(
-                source.to_string(),
-                requirement.clone(),
-                client,
-                device,
-                sender,
-            );
+            let run = self
+                .clone()
+                .run_device(binding.clone(), client, device, sender);
             (challenge, tokio::spawn(run))
         } else {
             let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|e| {
@@ -168,8 +194,7 @@ impl Credentials {
                 expires_in: BROWSER_WINDOW.as_secs(),
             };
             let run = self.clone().run_browser(
-                source.to_string(),
-                requirement.clone(),
+                binding,
                 client,
                 listener,
                 Redirect {
@@ -182,6 +207,15 @@ impl Credentials {
             );
             (challenge, tokio::spawn(run))
         };
+        let guard = self.lock_for(source);
+        let _held = locked(&guard);
+        if locked(&self.inner.generations).get(source) != Some(&flow) {
+            task.abort();
+            return Err(failed(
+                source,
+                "the configuration or sign-in changed; start sign-in again",
+            ));
+        }
         // Replaces, and so stops, an earlier attempt for the same source.
         locked(&self.inner.flows).by_source.insert(
             source.to_string(),
@@ -219,12 +253,12 @@ impl Credentials {
             Ok(Ok(done)) => (*done).clone(),
             // The task went away without an answer, which only a stopped daemon or a replaced flow does.
             Ok(Err(_)) => {
-                self.cancel_flow(source);
+                self.cancel_matching_flow(source, flow);
                 return Err(failed(source, "the sign-in stopped without an answer"));
             }
         };
         // The answer is given once; asking again for it is asking about a sign-in that no longer exists.
-        self.cancel_flow(source);
+        self.cancel_matching_flow(source, flow);
         match result {
             Some(Ok(signed_in)) => Ok(FlowStatus::SignedIn(signed_in)),
             Some(Err(message)) => Err(failed(source, message)),
@@ -232,16 +266,43 @@ impl Credentials {
         }
     }
 
+    fn cancel_matching_flow(&self, source: &str, id: &str) {
+        let mut flows = locked(&self.inner.flows);
+        if flows
+            .by_source
+            .get(source)
+            .is_some_and(|pending| pending.id == id)
+        {
+            flows.by_source.remove(source);
+        }
+    }
+
     /// Keep what a finished sign-in produced, off the async runtime: the store may be a system service.
     async fn finish(
         self,
-        source: String,
-        requirement: OAuthRequirement,
+        binding: OAuthBinding,
         tokens: TokenSet,
     ) -> std::result::Result<SignedIn, String> {
         tokio::task::spawn_blocking(move || {
+            let source = binding.configuration.clone();
+            let guard = self.lock_for(&source);
+            let _held = locked(&guard);
+            if locked(&self.inner.generations).get(&source) != binding.grant_id.as_ref()
+                || !self
+                    .configuration_matches(&binding)
+                    .map_err(|e| e.to_string())?
+            {
+                return Err("the configuration or sign-in changed; start sign-in again".to_string());
+            }
             let (expires_at, stored_in, scopes) = self
-                .install(&source, &requirement, &tokens, None, true)
+                .install(
+                    &source,
+                    &binding.requirement(),
+                    &tokens,
+                    None,
+                    true,
+                    &binding,
+                )
                 .map_err(|e| e.to_string())?;
             tracing::info!(source = %source, stored_in, "signed a source in");
             Ok(SignedIn {
@@ -258,12 +319,12 @@ impl Credentials {
 
     async fn run_device(
         self,
-        source: String,
-        requirement: OAuthRequirement,
+        binding: OAuthBinding,
         client: reqwest::Client,
         device: DeviceAuthorization,
         outcome: watch::Sender<Outcome>,
     ) {
+        let requirement = binding.requirement();
         let result = async {
             let timing = self.inner.timing;
             let deadline = Instant::now() + Duration::from_secs(device.expires_in);
@@ -291,9 +352,7 @@ impl Credentials {
                     Err(error) => return Err(error.to_string()),
                 }
             };
-            self.clone()
-                .finish(source.clone(), requirement, tokens)
-                .await
+            self.clone().finish(binding, tokens).await
         }
         .await;
         // `send_replace`, since nobody may be listening yet and the answer must still be there for `wait`.
@@ -302,13 +361,13 @@ impl Credentials {
 
     async fn run_browser(
         self,
-        source: String,
-        requirement: OAuthRequirement,
+        binding: OAuthBinding,
         client: reqwest::Client,
         listener: TcpListener,
         redirect: Redirect,
         outcome: watch::Sender<Outcome>,
     ) {
+        let requirement = binding.requirement();
         let result = async {
             let code = tokio::time::timeout(
                 BROWSER_WINDOW,
@@ -327,9 +386,7 @@ impl Credentials {
             )
             .await
             .map_err(|e| e.to_string())?;
-            self.clone()
-                .finish(source.clone(), requirement, tokens)
-                .await
+            self.clone().finish(binding, tokens).await
         }
         .await;
         outcome.send_replace(Some(result));
@@ -456,4 +513,65 @@ async fn respond(stream: &mut TcpStream, status: &str, message: &str) {
     // Best effort: the browser having gone away must not fail a sign-in that already has its code.
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::credential::{
+        fake,
+        store::{CredentialStore, FileStore},
+    };
+    use crate::domain::Secret;
+
+    #[tokio::test]
+    async fn an_already_running_completion_cannot_restore_a_forgotten_or_replaced_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials");
+        let credentials = Credentials::new(Box::new(FileStore::new(path.clone())));
+        let provider = fake::start().await;
+        let mut binding = OAuthBinding {
+            explicit_configuration: false,
+            source: "demo".into(),
+            configuration: "work".into(),
+            declared: provider.requirement(),
+            client_id: "custom-client".into(),
+            grant_id: Some("old-flow".into()),
+        };
+        let tokens = || TokenSet {
+            access_token: Secret::new("synthetic-access"),
+            refresh_token: Some(Secret::new("synthetic-refresh")),
+            expires_in: Some(3600),
+            scopes: vec!["read".into()],
+        };
+        locked(&credentials.inner.generations).insert("work".into(), "old-flow".into());
+        credentials.forget("work").unwrap();
+        // Calling finish directly models a spawn_blocking closure that task abortion could not cancel.
+        assert!(
+            credentials
+                .clone()
+                .finish(binding.clone(), tokens())
+                .await
+                .is_err()
+        );
+        locked(&credentials.inner.generations).insert("work".into(), "new-flow".into());
+        assert!(
+            credentials
+                .clone()
+                .finish(binding.clone(), tokens())
+                .await
+                .is_err()
+        );
+        assert!(FileStore::new(path.clone()).load("work").unwrap().is_none());
+        binding.grant_id = Some("new-flow".into());
+        credentials
+            .clone()
+            .finish(binding.clone(), tokens())
+            .await
+            .unwrap();
+        assert_eq!(
+            FileStore::new(path).load("work").unwrap().unwrap().binding,
+            Some(binding)
+        );
+    }
 }

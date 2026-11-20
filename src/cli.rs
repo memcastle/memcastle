@@ -406,6 +406,12 @@ pub enum SourceConfigCommand {
         credential_file: Option<String>,
         #[arg(long, conflicts_with_all = ["credential_env", "credential_file"])]
         credential_oauth: bool,
+        /// Override the source's public OAuth client ID for this configuration.
+        #[arg(long, conflicts_with = "unset_oauth_client_id")]
+        oauth_client_id: Option<String>,
+        /// Restore the installed manifest's public OAuth client ID.
+        #[arg(long)]
+        unset_oauth_client_id: bool,
         /// Confirm a change that may broaden every miner using this configuration.
         #[arg(long)]
         allow_broaden: bool,

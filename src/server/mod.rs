@@ -110,6 +110,9 @@ pub async fn run(config: Config) -> Result<()> {
     // and report whether they are). Nothing is read or written until a source that signs in is touched, so a daemon
     // with no such source never starts the platform keyring.
     let credentials = Credentials::from_config(&config.credentials);
+    let source_configs =
+        SourceConfigRegistry::new(config.config_file.clone(), config.source_configs.clone());
+    source_configs.configure_credentials(&credentials);
     // One bus for the scheduler (job changes, the handlers' writes) and the services (their own writes), so
     // `GET /api/events` hears both.
     let events = EventBus::new();
@@ -164,10 +167,7 @@ pub async fn run(config: Config) -> Result<()> {
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())
         .with_preferences(config.effective_preferences())
-        .with_source_configs(SourceConfigRegistry::new(
-            config.config_file.clone(),
-            config.source_configs.clone(),
-        ))
+        .with_source_configs(source_configs)
         // Starts from what the file held at startup and reads the file again whenever it changes, so the daemon
         // and a hand edit never disagree for long (`docs/adr/037`).
         .with_miners(

@@ -719,6 +719,7 @@ memcastle source config get <ID>
 memcastle source config auth <ID>
 memcastle source config set <ID> [--source <SOURCE>] [--option KEY=VALUE]...
                                  [--credential-env <NAME> | --credential-file <PATH> | --credential-oauth]
+                                 [--oauth-client-id <ID> | --unset-oauth-client-id]
                                  [--allow-broaden]
 memcastle source config remove <ID>
 ```
@@ -729,6 +730,22 @@ The three credential flags are mutually exclusive: choose an environment variabl
 The source ID is always an implicit default configuration ID.
 `source show <SOURCE>` lists that source's configuration IDs and, when it signs in, its default sign-in status.
 Changes are administrative REST calls; MCP can inspect configurations but cannot change or sign them in.
+
+`--oauth-client-id` selects a public client for this configuration's OAuth authorization and refresh.
+The source's declared endpoints, scopes and PKCE behavior remain in force.
+`--unset-oauth-client-id` restores the manifest default; it cannot be combined with `--oauth-client-id`.
+Both changes require a fresh sign-in, and jobs pinned to earlier authorization need a new run.
+For example, after installing an OAuth source named `gmail`:
+
+```sh
+memcastle source config set gmail-work --source gmail --oauth-client-id YOUR_PUBLIC_CLIENT_ID
+memcastle source config get gmail-work
+memcastle source config auth gmail-work
+memcastle source config set gmail-work --unset-oauth-client-id
+```
+
+`get` and `list` show the configured override and effective public client ID, never tokens.
+See [OAuth public clients](configuration.md#oauth-public-clients) for identity isolation and queued/resumed behavior.
 
 ### `trigger`
 

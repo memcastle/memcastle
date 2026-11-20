@@ -1280,12 +1280,31 @@ pub enum Error {
         reason: String,
     },
 
+    /// A durable run cannot substitute a configuration's newer client or account grant.
+    #[error(
+        "OAuth authority for configuration `{configuration}` is unavailable: {reason}; run `{command}` and submit a new run"
+    )]
+    #[diagnostic(
+        code(memcastle::credential::authority_changed),
+        help(
+            "sign in with `{command}` and submit a new run; retrying preserves the original OAuth identity"
+        )
+    )]
+    CredentialAuthorityChanged {
+        /// Reusable account slot, never a credential value.
+        configuration: String,
+        /// What prevented the pinned authority from being used.
+        reason: String,
+        /// The default-source or named-configuration sign-in command.
+        command: String,
+    },
+
     /// A stored credential could not be renewed, and is kept so that a later attempt can.
     #[error("the credential for source `{source_name}` could not be refreshed: {message}")]
     #[diagnostic(
         code(memcastle::credential::refresh_failed),
         help(
-            "this is usually the provider or the network being unreachable, so run the miner again later; if it persists, sign in again with `memcastle source auth {source_name}`"
+            "this is usually the provider or the network being unreachable, so run the miner again later; if it persists, sign in again with `memcastle source config auth {source_name}`"
         )
     )]
     CredentialRefreshFailed {
@@ -2112,6 +2131,11 @@ mod tests {
                 source_name: "slack".to_string(),
                 message: "timeout".to_string(),
             },
+            Error::CredentialAuthorityChanged {
+                configuration: "work".into(),
+                reason: "grant replaced".into(),
+                command: "memcastle source config auth work".into(),
+            },
             Error::CredentialFlowFailed {
                 source_name: "slack".to_string(),
                 message: "denied".to_string(),
@@ -2271,6 +2295,7 @@ mod tests {
             | Error::SourceTimeout { .. }
             | Error::SourcePermissionDenied { .. }
             | Error::CredentialRequired { .. }
+            | Error::CredentialAuthorityChanged { .. }
             | Error::CredentialRefreshFailed { .. }
             | Error::CredentialFlowFailed { .. }
             | Error::CredentialOauthUnsupported { .. }

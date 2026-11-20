@@ -28,6 +28,9 @@ pub const FILE: &str = "file";
 /// is short-lived and cheap to obtain again, is kept only when the provider issued no refresh token to obtain it from.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredCredential {
+    /// Legacy records deserialize but cannot be silently adopted into an account slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<crate::domain::OAuthBinding>,
     /// [`crate::domain::OAuthRequirement::fingerprint`] of what this was obtained under.
     pub fingerprint: String,
     /// What a new access token is obtained with.
@@ -336,6 +339,7 @@ mod tests {
 
     pub(crate) fn sample() -> StoredCredential {
         StoredCredential {
+            binding: None,
             fingerprint: "f".into(),
             refresh_token: Some("refresh-secret".into()),
             access_token: None,

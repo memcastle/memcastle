@@ -417,6 +417,77 @@ async fn source_configuration_lifecycle_keeps_defaults_and_never_returns_credent
 }
 
 #[tokio::test]
+async fn source_configuration_client_flags_round_trip_and_reject_ambiguous_or_incompatible_overrides()
+ {
+    let daemon = TestDaemon::start().await;
+    let (ok, stdout, stderr) = cli(
+        &daemon,
+        &[
+            "source",
+            "config",
+            "set",
+            "mail-work",
+            "--source",
+            "mail-provider",
+            "--oauth-client-id",
+            "public-work-client",
+        ],
+    )
+    .await;
+    assert!(ok, "{stdout} {stderr}");
+    let (_, view) = get(&daemon, "/api/source-configs/mail-work").await;
+    assert_eq!(view["oauth_client_id"], "public-work-client");
+    assert!(
+        view["effective_oauth_client_id"].is_null(),
+        "effective terms require an installed manifest"
+    );
+    let (ok, stdout, stderr) = cli(
+        &daemon,
+        &[
+            "source",
+            "config",
+            "set",
+            "mail-work",
+            "--unset-oauth-client-id",
+        ],
+    )
+    .await;
+    assert!(ok, "{stdout} {stderr}");
+    assert!(stdout["oauth_client_id"].is_null());
+    for args in [
+        vec![
+            "source",
+            "config",
+            "set",
+            "mail-work",
+            "--oauth-client-id",
+            "client",
+            "--unset-oauth-client-id",
+        ],
+        vec![
+            "source",
+            "config",
+            "set",
+            "directory",
+            "--oauth-client-id",
+            "client",
+        ],
+        vec![
+            "source",
+            "config",
+            "set",
+            "mail-work",
+            "--oauth-client-id",
+            " ",
+        ],
+    ] {
+        let (ok, _, stderr) = cli(&daemon, &args).await;
+        assert!(!ok, "{args:?}: {stderr}");
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn different_fixed_wings_keep_separate_document_records_for_the_same_input() {
     let daemon = TestDaemon::start().await;
     let dir = notes_dir();

@@ -19,6 +19,50 @@ use super::AppServices;
 pub const MAX_WAIT: Duration = Duration::from_secs(30);
 
 impl AppServices {
+    /// Pin a grant from the same configuration snapshot as the run's options.
+    pub(super) async fn pin_oauth(
+        &self,
+        config: &crate::domain::SourceConfiguration,
+    ) -> Result<Option<crate::domain::OAuthBinding>> {
+        let Some(declared) = self.oauth_requirement(&config.source).await else {
+            if config.oauth_client_id.is_some() {
+                return Err(Error::invalid_input(
+                    "oauth_client_id",
+                    "this source does not declare OAuth",
+                ));
+            }
+            return Ok(None);
+        };
+        let binding = crate::domain::OAuthBinding {
+            explicit_configuration: false,
+            source: config.source.clone(),
+            configuration: config.id.clone(),
+            client_id: config
+                .oauth_client_id
+                .clone()
+                .unwrap_or_else(|| declared.client_id.clone()),
+            declared,
+            grant_id: None,
+        };
+        let credentials = self.credentials.clone();
+        tokio::task::spawn_blocking(move || credentials.binding(binding))
+            .await
+            .map_err(|error| Error::CredentialStoreFailed {
+                message: error.to_string(),
+            })?
+            .map(Some)
+    }
+    /// Only the public client is configurable; local settings never widen manifest permissions.
+    pub(super) async fn effective_oauth_requirement(
+        &self,
+        config: &crate::domain::SourceConfiguration,
+    ) -> Option<OAuthRequirement> {
+        let mut requirement = self.oauth_requirement(&config.source).await?;
+        if let Some(client) = &config.oauth_client_id {
+            requirement.client_id.clone_from(client);
+        }
+        Some(requirement)
+    }
     /// The installed source `name`, and what it declares to sign in with.
     ///
     /// Enabled or not: signing in before turning a source on is a reasonable order.
@@ -52,14 +96,19 @@ impl AppServices {
     /// [`Error::SourceNotFound`], [`Error::CredentialOauthUnsupported`] when the source declares no sign-in, and
     /// [`Error::CredentialFlowFailed`] when the provider cannot be reached.
     pub async fn begin_source_auth(&self, name: &str) -> Result<Challenge> {
-        let (_, requirement) = self.oauth_source(name).await?;
-        self.credentials.begin(name, &requirement).await
+        // Preserve the source-level not-found/unsupported diagnostics while sharing effective configuration resolution.
+        self.oauth_source(name).await?;
+        self.begin_source_config_auth(name).await
     }
 
     /// Sign in a named configuration under its own credential key, verifying its source's OAuth declaration.
     pub async fn begin_source_config_auth(&self, id: &str) -> Result<Challenge> {
         let config = self.source_config(id, None).await?;
-        let (record, requirement) = self.oauth_source(&config.source).await?;
+        let (record, declared) = self.oauth_source(&config.source).await?;
+        let mut requirement = declared.clone();
+        if let Some(client) = &config.oauth_client_id {
+            requirement.client_id.clone_from(client);
+        }
         if record.manifest.capabilities.single_account_auth && config.id != config.source {
             return Err(Error::invalid_input(
                 "source_config",
@@ -69,7 +118,16 @@ impl AppServices {
                 ),
             ));
         }
-        self.credentials.begin(&config.id, &requirement).await
+        self.credentials
+            .begin_bound(crate::domain::OAuthBinding {
+                explicit_configuration: false,
+                source: config.source,
+                configuration: config.id,
+                declared,
+                client_id: requirement.client_id,
+                grant_id: None,
+            })
+            .await
     }
 
     /// Wait for a configuration's sign-in, without returning its token.
@@ -98,10 +156,7 @@ impl AppServices {
         flow: &str,
         window: Duration,
     ) -> Result<FlowStatus> {
-        self.oauth_source(name).await?;
-        self.credentials
-            .wait(name, flow, window.min(MAX_WAIT))
-            .await
+        self.wait_source_config_auth(name, flow, window).await
     }
 
     /// Where `record`'s source stands on signing in, or `None` when it declares no sign-in.
@@ -109,7 +164,11 @@ impl AppServices {
     /// An unreadable store is not a reason to fail a listing, so it reads as signed out here; `source auth` and a
     /// run are where the store's error is reported.
     pub(super) async fn source_auth(&self, record: &SourcePackageRecord) -> Option<SourceAuth> {
-        let requirement = record.manifest.permissions.oauth.clone()?;
+        let config = self
+            .source_config(&record.name, Some(&record.name))
+            .await
+            .ok()?;
+        let requirement = self.effective_oauth_requirement(&config).await?;
         let credentials = self.credentials.clone();
         let name = record.name.clone();
         let asked = requirement.clone();
@@ -277,6 +336,142 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn default_and_named_overrides_are_effective_and_edits_require_independent_reauthorization()
+     {
+        use crate::app::{SourceConfigRegistry, SourceConfigurationPatch};
+        use crate::domain::{AccessTokens as _, MemoryMode};
+        let mut fixture = fixture().await;
+        let path = fixture.dir.path().join("config.toml");
+        std::fs::write(&path, "# preserve this\n[web]\nenable = false\n").unwrap();
+        fixture.app = fixture
+            .app
+            .with_source_configs(SourceConfigRegistry::new(Some(path.clone()), vec![]));
+        let declared = fixture.provider.requirement();
+        install(&fixture, "demo", Some(declared.clone())).await;
+        for (id, client) in [("demo", "default-override"), ("work", "work-client")] {
+            let view = fixture
+                .app
+                .set_source_config(
+                    id,
+                    SourceConfigurationPatch {
+                        source: Some("demo".into()),
+                        oauth_client_id: Some(client.into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(view.effective_oauth_client_id.as_deref(), Some(client));
+            assert!(!view.credential_available);
+        }
+        sign_in(&fixture, "demo").await;
+        let challenge = fixture.app.begin_source_config_auth("work").await.unwrap();
+        loop {
+            if matches!(
+                fixture
+                    .app
+                    .wait_source_config_auth("work", &challenge.flow, Duration::from_millis(100))
+                    .await
+                    .unwrap(),
+                FlowStatus::SignedIn(_)
+            ) {
+                break;
+            }
+        }
+        let work = fixture.app.source_config("work", None).await.unwrap();
+        let pinned = fixture.app.pin_oauth(&work).await.unwrap().unwrap();
+        fixture.app.credentials.validate_binding(&pinned).unwrap();
+        let default = fixture
+            .app
+            .show_source("demo", MemoryMode::Full)
+            .await
+            .unwrap();
+        assert!(
+            default.auth.unwrap().signed_in,
+            "source auth must use the default override"
+        );
+        assert_eq!(
+            default.permissions.oauth.unwrap(),
+            declared,
+            "package consent stays manifest-owned"
+        );
+        let mut miner = miner("demo", None);
+        miner.source_config = Some("work".into());
+        fixture.app.check_credential(&miner).await.unwrap();
+        let changed = fixture
+            .app
+            .set_source_config(
+                "work",
+                SourceConfigurationPatch {
+                    oauth_client_id: Some("replacement-client".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!changed.credential_available);
+        assert!(fixture.app.credentials.validate_binding(&pinned).is_err());
+        assert!(
+            fixture
+                .app
+                .show_source("demo", MemoryMode::Full)
+                .await
+                .unwrap()
+                .auth
+                .unwrap()
+                .signed_in
+        );
+        let cleared = fixture
+            .app
+            .set_source_config(
+                "work",
+                SourceConfigurationPatch {
+                    unset_oauth_client_id: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            cleared.effective_oauth_client_id.as_deref(),
+            Some("test-client")
+        );
+        assert!(!cleared.credential_available);
+        assert!(
+            fixture
+                .app
+                .set_source_config(
+                    "work",
+                    SourceConfigurationPatch {
+                        oauth_client_id: Some(" ".into()),
+                        ..Default::default()
+                    }
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            fixture
+                .app
+                .set_source_config(
+                    "work",
+                    SourceConfigurationPatch {
+                        oauth_client_id: Some("client".into()),
+                        unset_oauth_client_id: true,
+                        ..Default::default()
+                    }
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            std::fs::read_to_string(path)
+                .unwrap()
+                .starts_with("# preserve this")
+        );
+    }
+
     fn miner(source: &str, credential: Option<CredentialRef>) -> MinerDefinition {
         MinerDefinition {
             name: "m".to_string(),
@@ -394,12 +589,14 @@ mod tests {
                         id: "demo-work".into(),
                         source: "demo".into(),
                         credential: Some(CredentialRef::Oauth),
+                        oauth_client_id: None,
                         options: Default::default(),
                     },
                     crate::domain::SourceConfiguration {
                         id: "demo-personal".into(),
                         source: "demo".into(),
                         credential: Some(CredentialRef::Oauth),
+                        oauth_client_id: None,
                         options: Default::default(),
                     },
                 ],

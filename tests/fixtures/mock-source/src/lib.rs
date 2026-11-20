@@ -27,7 +27,7 @@ impl Guest for Mock {
             !locator
                 .as_deref()
                 .is_some_and(|locator| locator.starts_with("reconciled:"))
-                || !["exclude", "skip", "fail", "authenticated"].contains(&key.as_str())
+                || !["exclude", "skip", "fail", "authenticated", "oauth"].contains(&key.as_str())
         }) {
             return Err(SourceError::InvalidInput(format!(
                 "unknown mock option `{key}`"
@@ -172,6 +172,12 @@ impl exports::memcastle::source::reconciliation::Guest for Mock {
         candidate: Candidate,
     ) -> Result<exports::memcastle::source::reconciliation::Acquisition, SourceError> {
         use exports::memcastle::source::reconciliation::Acquisition;
+        if source.options.iter().any(|(key, value)| key == "oauth" && value == "true") {
+            let token = memcastle::source::host::access_token().map_err(SourceError::Failed)?;
+            if token != "memcastle-source-test-access-token" {
+                return Err(SourceError::Failed("unexpected synthetic OAuth token".into()));
+            }
+        }
         if source
             .options
             .iter()

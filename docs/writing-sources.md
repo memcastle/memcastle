@@ -442,6 +442,25 @@ It never resolves a developer environment variable, token file or OAuth sign-in.
 Use the value in your fake transport; do not put a real credential in fixtures or manifests.
 The runner exercises `acquire` and page checkpoints for reconciling components and the original calls for legacy ones.
 
+For an OAuth-only production component, use the independent opt-in:
+
+```toml
+[test]
+fixtures = "fixtures"
+fixture_access_token = true
+```
+
+`memcastle source test` supplies exactly `memcastle-source-test-access-token` through the ordinary `host.access-token`.
+Your manifest must still declare `[permissions.oauth]`, and normalization never receives a token.
+Use a fake transport that accepts this synthetic value so the exact production component can run offline.
+The runner never resolves real OAuth sign-ins, environment secrets or credential files, and persists no credential.
+The option defaults to false; disable it to exercise missing-token behavior.
+`fixture_credential` does not satisfy OAuth, and neither option changes installed daemon execution.
+
+The manifest's public `client_id` is the default for installed authorization.
+Users may select another public client on a [source configuration](configuration.md#oauth-public-clients);
+Core applies it consistently while keeping your declared endpoints, scopes and PKCE behavior.
+
 The cases shipped with MemCastle:
 
 | Case | What it covers |

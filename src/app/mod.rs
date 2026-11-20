@@ -448,6 +448,7 @@ impl AppServices {
     #[must_use]
     pub fn with_credentials(mut self, credentials: crate::credential::Credentials) -> Self {
         self.credentials = credentials;
+        self.source_configs.configure_credentials(&self.credentials);
         self
     }
 
@@ -860,6 +861,7 @@ impl AppServices {
         effective.extend(options);
         // Ad-hoc runs remain jobs, never miner definitions: pin their effective defaults and limit for recovery.
         let preset = crate::domain::MiningPreset {
+            oauth: self.pin_oauth(&defaults).await?,
             configuration: Some(source_name.to_string()),
             credential: defaults.credential,
             max_documents: Some(self.mining.max_documents),

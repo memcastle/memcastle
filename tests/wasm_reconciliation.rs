@@ -18,6 +18,81 @@ fn manifest(text: &str) -> memcastle::domain::SourceManifest {
 }
 
 #[tokio::test]
+async fn offline_oauth_conformance_requires_its_own_opt_in_and_the_normal_declaration() {
+    let (component, text) = common::wasm::mock_component();
+    let mut manifest = manifest(&text);
+    manifest.permissions.credential = false;
+    manifest.permissions.oauth = Some(memcastle::domain::OAuthRequirement {
+        client_id: "offline-public-client".into(),
+        scopes: vec!["read".into()],
+        token_url: "https://offline.invalid/token".into(),
+        authorize_url: Some("https://offline.invalid/authorize".into()),
+        device_authorization_url: None,
+        callback_path: None,
+        on_demand: false,
+    });
+    manifest.test = Some(memcastle::domain::TestSection {
+        fixtures: "fixtures".into(),
+        fixture_credential: false,
+        fixture_access_token: true,
+    });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::create_dir_all(dir.path().join("fixtures/oauth")).unwrap();
+    std::fs::write(
+        dir.path().join("memcastle-source.toml"),
+        toml::to_string(&manifest).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("dist/source.wasm"), component).unwrap();
+    let case = json!({"name":"oauth","description":"OAuth-only acquisition without network or sign-ins","locator":".","opaque_locator":"reconciled:fixture","options":{"oauth":"true"},"limit":1,"documents":[
+        {"external_id":"gazebos","title":"gazebos","kind":"other","segments":["reconciled:fixture gazebos"]},
+        {"external_id":"lighthouses","title":"lighthouses","kind":"other","segments":["reconciled:fixture lighthouses"]}
+    ]});
+    std::fs::write(
+        dir.path().join("fixtures/oauth/case.json"),
+        case.to_string(),
+    )
+    .unwrap();
+    let mut project = memcastle::source::build::Project::open(dir.path()).unwrap();
+    assert!(
+        project
+            .test(&MiningConfig::default())
+            .await
+            .unwrap()
+            .passed()
+    );
+    project.manifest.test.as_mut().unwrap().fixture_access_token = false;
+    project.manifest.test.as_mut().unwrap().fixture_credential = true;
+    assert!(
+        !project
+            .test(&MiningConfig::default())
+            .await
+            .unwrap()
+            .passed(),
+        "selected credentials are not OAuth tokens"
+    );
+    project.manifest.test.as_mut().unwrap().fixture_access_token = true;
+    assert!(
+        project
+            .test(&MiningConfig::default())
+            .await
+            .unwrap()
+            .passed(),
+        "providers must not leak through the component cache"
+    );
+    project.manifest.permissions.oauth = None;
+    assert!(
+        !project
+            .test(&MiningConfig::default())
+            .await
+            .unwrap()
+            .passed(),
+        "fixture options grant no ambient OAuth permission"
+    );
+}
+
+#[tokio::test]
 async fn the_same_component_supports_legacy_and_explicit_reconciliation_calls() {
     let (component, text) = common::wasm::mock_component();
     let legacy = WasmAdapter::load(
@@ -97,6 +172,7 @@ async fn offline_conformance_preserves_opaque_locators_and_supplies_only_a_fixed
     manifest.test = Some(memcastle::domain::TestSection {
         fixtures: "fixtures".into(),
         fixture_credential: true,
+        fixture_access_token: false,
     });
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("dist")).unwrap();

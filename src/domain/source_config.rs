@@ -16,6 +16,9 @@ pub struct SourceConfiguration {
     /// Optional reference to a credential, never secret contents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<CredentialRef>,
+    /// Public client override; endpoints and scopes remain the installed source's declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
     /// Source-native option defaults, never a miner mapping or schedule.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub options: Map<String, Value>,
@@ -24,6 +27,13 @@ pub struct SourceConfiguration {
 impl SourceConfiguration {
     /// Validate without I/O; source availability and option specs are checked at activation.
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .oauth_client_id
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
+        {
+            return Err("`oauth_client_id` cannot be blank".into());
+        }
         if !is_valid_miner_name(&self.id) {
             return Err(format!(
                 "source configuration `{}` needs a lowercase slug ID",
@@ -94,6 +104,7 @@ mod tests {
             id: "work".into(),
             source: "directory".into(),
             credential: None,
+            oauth_client_id: None,
             options: Map::new(),
         };
         config

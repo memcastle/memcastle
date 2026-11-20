@@ -451,6 +451,7 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, source: &str) -> E
 /// As [`ensure_minable`] without the options, [`Error::CredentialRequired`] when a selected env/file
 /// reference cannot be resolved or required OAuth sign-in is missing, and [`Error::SourceIncompatible`]
 /// or [`Error::SourceFailed`] when the component does not load.
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve(
     store: &SurrealStore,
     mining: &MiningConfig,
@@ -458,6 +459,7 @@ pub async fn resolve(
     source: &str,
     configuration: Option<&str>,
     reference: Option<&crate::domain::CredentialRef>,
+    binding: Option<&crate::domain::OAuthBinding>,
 ) -> Result<AnySource> {
     match source {
         directory::NAME => Ok(AnySource::Directory(DirectoryAdapter::new(
@@ -471,6 +473,57 @@ pub async fn resolve(
             minable_package(&record, &dir)?;
             let bytes = read_installed_component(&dir, &record.name)?;
             let manifest = record.manifest;
+            // Bind before identify/discovery can touch inventory; the guest still sees the declared host contract.
+            let credentials: Option<Arc<dyn AccessTokens>> = if let Some(declared) =
+                &manifest.permissions.oauth
+            {
+                match binding {
+                    Some(binding) => {
+                        if binding.source != record.name
+                            || binding.configuration != configuration.unwrap_or(&record.name)
+                            || binding.declared.fingerprint() != declared.fingerprint()
+                        {
+                            return Err(binding.required());
+                        }
+                        if binding.grant_id.is_some() {
+                            let provider =
+                                credentials.cloned().ok_or_else(|| binding.required())?;
+                            let checked = binding.clone();
+                            let tokens = provider.clone();
+                            tokio::task::spawn_blocking(move || tokens.validate_binding(&checked))
+                                .await
+                                .map_err(|error| Error::SourceFailed {
+                                    name: record.name.clone(),
+                                    message: error.to_string(),
+                                })??;
+                            Some(Arc::new(BoundTokens {
+                                provider,
+                                binding: binding.clone(),
+                            }))
+                        } else if !declared.on_demand
+                            || matches!(reference, Some(crate::domain::CredentialRef::Oauth))
+                        {
+                            return Err(binding.required());
+                        } else {
+                            None
+                        }
+                    }
+                    None if !declared.on_demand
+                        || matches!(reference, Some(crate::domain::CredentialRef::Oauth)) =>
+                    {
+                        return Err(Error::CredentialRequired {
+                            source_name: record.name.clone(),
+                            reason: "this legacy job has no pinned OAuth identity; sign in and submit a new run".into(),
+                        });
+                    }
+                    // Legacy optional jobs may run offline, but cannot adopt a newer sign-in.
+                    None => None,
+                }
+            } else if let Some(binding) = binding {
+                return Err(binding.required());
+            } else {
+                None
+            };
             // A source with both permissions may select OAuth or an offline mode instead; the guest gets a
             // deterministic denial if it asks for a selected credential that this job does not have.
             let selected = if manifest.permissions.credential {
@@ -491,11 +544,10 @@ pub async fn resolve(
             ensure_signed_in(
                 configuration.unwrap_or(&record.name),
                 &manifest.permissions,
-                credentials,
+                credentials.as_ref(),
             )
             .await?;
             let mining = mining.clone();
-            let credentials = credentials.cloned();
             let configuration = configuration.map(str::to_string);
             let selected_env = match reference {
                 Some(crate::domain::CredentialRef::Env { name }) => Some(name.clone()),
@@ -520,6 +572,32 @@ pub async fn resolve(
             })??;
             Ok(AnySource::Wasm(adapter))
         }
+    }
+}
+
+struct BoundTokens {
+    provider: Arc<dyn AccessTokens>,
+    binding: crate::domain::OAuthBinding,
+}
+
+impl AccessTokens for BoundTokens {
+    fn access_token(
+        &self,
+        key: &str,
+        declared: &crate::domain::OAuthRequirement,
+    ) -> Result<crate::domain::Secret> {
+        if key != self.binding.configuration
+            || declared.fingerprint() != self.binding.declared.fingerprint()
+        {
+            return Err(self.binding.required());
+        }
+        self.provider.bound_access_token(&self.binding)
+    }
+
+    fn is_signed_in(&self, key: &str, declared: &crate::domain::OAuthRequirement) -> bool {
+        key == self.binding.configuration
+            && declared.fingerprint() == self.binding.declared.fingerprint()
+            && self.provider.validate_binding(&self.binding).is_ok()
     }
 }
 
@@ -640,6 +718,52 @@ mod tests {
     fn install_component(dir: &Path, bytes: &[u8]) {
         std::fs::create_dir_all(dir.join("demo")).unwrap();
         std::fs::write(dir.join("demo/source.wasm"), bytes).unwrap();
+    }
+
+    #[tokio::test]
+    async fn removing_a_declaration_rejects_old_oauth_jobs_before_loading_the_component() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        install_component(dir.path(), b"component");
+        store.save_source_package(&record("0.4")).await.unwrap();
+        let binding = crate::domain::OAuthBinding {
+            source: "demo".into(),
+            configuration: "demo".into(),
+            explicit_configuration: false,
+            client_id: "public-client".into(),
+            grant_id: Some("original-grant".into()),
+            declared: crate::domain::OAuthRequirement {
+                client_id: "public-client".into(),
+                scopes: vec!["read".into()],
+                token_url: "https://auth.example.com/token".into(),
+                authorize_url: Some("https://auth.example.com/authorize".into()),
+                device_authorization_url: None,
+                callback_path: None,
+                on_demand: false,
+            },
+        };
+        let mining = MiningConfig {
+            sources_dir: Some(dir.path().into()),
+            ..Default::default()
+        };
+        let error = match resolve(
+            &store,
+            &mining,
+            None,
+            "demo",
+            Some("demo"),
+            None,
+            Some(&binding),
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a pinned OAuth run cannot adopt an OAuth-free source version"),
+        };
+        assert!(
+            matches!(error, Error::CredentialAuthorityChanged { .. }),
+            "{error}"
+        );
     }
 
     #[test]

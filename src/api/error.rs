@@ -107,6 +107,7 @@ impl IntoResponse for ApiError {
             | Error::TriggerDisabled { .. }
             // The request is fine; the source has not been signed in yet.
             | Error::CredentialRequired { .. }
+            | Error::CredentialAuthorityChanged { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
             // The caller asked for something the daemon will not do (an unsafe
             // bind, or an endpoint for a database it does not embed): theirs to fix.

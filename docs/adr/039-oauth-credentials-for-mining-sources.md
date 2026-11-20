@@ -111,6 +111,31 @@ The forces:
   `login`, `logout`, `status` and `remove` are not added: the source name chooses the flow,
   `source show` is the status, `source remove` forgets the credential, and running `source auth` again replaces it.
 
+## Amendment: configuration-owned clients and durable grant identity (#388)
+
+A reusable source configuration may override only the manifest's public client ID with `oauth_client_id`.
+The installed permission declaration and its consent digest remain unchanged.
+The effective client is used throughout authorization, exchange and refresh, with one credential slot per configuration.
+Stored authority also names the actual source and a random grant ID, so reusing a configuration ID cannot transfer a grant
+between sources, and signing in to another account with the same client cannot redirect queued work.
+Fresh authorization creates a grant ID; refresh rotation preserves it.
+Jobs persist only public binding metadata and fail if their original authority is no longer available.
+Legacy unbound credentials require sign-in again; required-OAuth jobs without a binding must be resubmitted.
+Optional jobs without a grant remain offline-only.
+
+The application provides the configuration reader to the credential service, keeping configuration policy out of the
+Wasm host while allowing each token request to reject an observed edit.
+Per-configuration synchronization serializes refresh, forgetting and credential commits.
+Sign-in generations are reserved before provider I/O and checked at commit, because aborting an asynchronous task cannot
+cancel a blocking credential-store write that already started.
+The runtime checks pinned manifest terms and exposes only a job-bound token provider.
+
+Offline conformance has an explicit `[test] fixture_access_token` provider returning the public synthetic value
+`memcastle-source-test-access-token` through the same host function.
+It never opens the real credential backend or changes permission gates, and installed execution ignores it.
+The CLI/configuration and author interfaces are documented in [configuration](../configuration.md#oauth-public-clients)
+and [writing sources](../writing-sources.md#conformance).
+
 ## Alternatives rejected
 
 - **The CLI runs the flow and uploads the tokens.**

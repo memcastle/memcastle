@@ -150,6 +150,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         preset
             .as_ref()
             .and_then(|preset| preset.credential.as_ref()),
+        preset.as_ref().and_then(|preset| preset.oauth.as_ref()),
     )
     .await?;
     pipeline::mine(&adapter, ctx, job, request).await
