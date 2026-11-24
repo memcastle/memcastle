@@ -1,3 +1,8 @@
+---
+hide:
+  - navigation
+---
+
 # MemCastle
 
 <figure markdown="span">
