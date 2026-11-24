@@ -12,7 +12,10 @@ aur = true
 aur_package_name = "memcastle-bin"
 author = "Axel H. <noirbizarre@gmail.com>"
 bin_name = "memcastle"
-categories = "command-line-utilities,database"
+categories = [
+    "command-line-utilities",
+    "database",
+]
 copyright_holder = "Axel H."
 copyright_year = 2026
 crate = "memcastle"
@@ -24,6 +27,10 @@ homebrew = true
 homebrew_tap = "noirbizarre/homebrew-tap"
 keywords = "mcp,memory,agent,search,daemon"
 kind = "library-and-binary"
+logos = [
+    "wordmark",
+    "icon",
+]
 man_pages = false
 mbx = true
 msrv = true
