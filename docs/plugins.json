@@ -62,6 +62,14 @@
       "modules": [
         { "id": "notion", "type": "source" }
       ]
+    },
+    {
+      "id": "google",
+      "description": "Google services mining sources",
+      "repository": "memcastle/memcastle-google",
+      "modules": [
+        { "id": "gmail", "type": "source" }
+      ]
     }
   ]
 }
