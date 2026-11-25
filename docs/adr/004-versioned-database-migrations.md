@@ -18,7 +18,7 @@ This was sufficient only because nothing shipped yet had needed a destructive or
 schema.
 
 Three version concepts must not be conflated:
-(1) the SurrealDB *engine* version (3.x, upgraded independently via the `surrealdb` crate dependency),
+(1) the SurrealDB *engine* version (4.0, upgraded independently via the `surrealdb` crate dependency),
 (2) the embedded *storage backend* choice
 (SurrealKV today — ADR-001; a future server-side backend decision is explicitly deferred),
 and (3) MemCastle's own *application data version* — the schema/data shape MemCastle code expects,

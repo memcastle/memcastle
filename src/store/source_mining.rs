@@ -224,6 +224,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retirement_rejects_a_stale_fence_and_returns_the_committed_chunk_count() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let source = store
+            .get_or_create_source(&SourceRef::new("fixture", None, "retirement"), None)
+            .await
+            .unwrap();
+        let a = job(&store, "worker-a").await;
+        let b = job(&store, "worker-b").await;
+        let old = store
+            .claim_mining_source(source.id, &a, Some("worker-a"))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut origin = Source::new(SourceKind::Other, None, None);
+        origin.origin = Some(crate::domain::Origin {
+            source_id: source.id,
+            source: "fixture".into(),
+            document: "document".into(),
+            chunk: 0,
+            revision: "one".into(),
+            metadata: None,
+            occurred_at: None,
+        });
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            RoomId::new(),
+            "retained body".into(),
+            origin,
+            vec![],
+            Provenance {
+                requested_by: "test".into(),
+                job_id: Some(a.id),
+            },
+        );
+        old.create_drawer(&drawer).await.unwrap();
+        store
+            .renew_job_lease(a.id, "worker-a", Utc::now() - chrono::Duration::seconds(1))
+            .await
+            .unwrap();
+        let current = store
+            .claim_mining_source(source.id, &b, Some("worker-b"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            old.retire_source_document(source.id, "document", "gone")
+                .await,
+            Err(Error::LeaseLost { .. })
+        ));
+        assert!(
+            store
+                .get_drawer(drawer.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .valid_to
+                .is_none()
+        );
+        // RETURN no longer ends a 4.0 transaction: verify result position and commit.
+        assert_eq!(
+            current
+                .retire_source_document(source.id, "document", "gone")
+                .await
+                .unwrap(),
+            1
+        );
+        let stored = store.get_drawer(drawer.id).await.unwrap().unwrap();
+        assert!(stored.valid_to.is_some());
+        assert_eq!(stored.content, "retained body");
+        assert_eq!(
+            current
+                .retire_source_document(source.id, "document", "gone")
+                .await
+                .unwrap(),
+            0
+        );
+        current.release_mining_source().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn different_effective_sources_do_not_share_an_admission_lock() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let a = job(&store, "worker-a").await;

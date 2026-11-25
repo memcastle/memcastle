@@ -90,7 +90,7 @@ impl SurrealStore {
             .db
             .query(
                 "SELECT record::id(id) AS id, wing, name, description, <string>created_at AS created_at \
-                 FROM room ORDER BY name",
+                 FROM room ORDER BY name, id",
             )
             .await?;
         super::take_rows(&mut response, 0)

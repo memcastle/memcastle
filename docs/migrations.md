@@ -1,5 +1,26 @@
 # Migrations and upgrades
 
+## SurrealDB 4.0 storage baseline
+
+This release requires a fresh SurrealDB 4.0 palace, embedded or remote.
+It provides no migration from SurrealDB 3.x storage and does not enable the engine's experimental conversion option.
+For embedded storage, choose a new palace directory with `--palace`; retain the old palace and its matching binary
+separately.
+For remote storage, select a fresh database on a SurrealDB 4.0 server through `[store]`'s `url`, `namespace` and `database`
+settings; `--palace` does not change the remote database.
+Reinstall compatible plugin archives into the new palace, grant their permissions again, enable the sources and re-mine.
+Plugin ownership, source activation, permission consent and mining cursors belong to the old palace;
+keeping package files on disk does not restore those records in a fresh one.
+Configuration files and credential backends live separately and are not reset by choosing a new palace.
+This engine upgrade changes neither the plugin WIT contracts nor the Wasm ABI, so it requires no plugin-code rebuild.
+Plugins whose declared MemCastle compatibility range excludes the new Core release need updated compatibility metadata
+and republished archives before installation.
+The application migrations described below remain part of initialization and supported-palace updates;
+they do not convert the database engine's on-disk format.
+See [Storage and data](storage.md#surrealdb-version-requirement).
+
+## Application upgrades
+
 The plugin ledger is a new additive SurrealKit schema table.
 Existing `source_package` rows have no plugin owner or generation and remain valid legacy single-source installs;
 they keep their component digest, activation state, credentials and mining cursors without a data backfill.

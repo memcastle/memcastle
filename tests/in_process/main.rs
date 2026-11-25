@@ -30,6 +30,7 @@ mod native_conformance;
 mod notes;
 mod palace;
 mod plugins;
+mod remote;
 mod repair;
 mod retrieval;
 mod retrieval_eval;

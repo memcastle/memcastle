@@ -211,7 +211,7 @@ background_concurrency = 2 # mine/embed/extract jobs; leaves a slot for other jo
 drain_timeout_secs = 10
 lease_ttl_secs = 30
 
-# Embedded SurrealKV under palace.path (the default), or a remote SurrealDB.
+# Embedded SurrealKV under palace.path (the default), or a remote SurrealDB 4.0.
 [store]
 mode = "embedded"
 # When an embedded palace forces its writes to disk: "every" (each commit, the default),

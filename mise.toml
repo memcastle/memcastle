@@ -44,6 +44,9 @@ bun = "latest"
 # --- end project-specific tools ---
 
 [env]
+# SurrealDB 4's debug query VM exceeds the default test-thread stack.
+# Match the daemon's explicit 16 MiB stacks, including in CI via mise-action.
+RUST_MIN_STACK = "16777216"
 # Use local assets and the dashboard during development; daemon/installer suites unset MEMCASTLE_* first.
 MEMCASTLE_ASSETS_DIR = "{{ config_root }}"
 MEMCASTLE_WEB_ENABLE = true
@@ -295,6 +298,10 @@ run = "cargo nextest run"
 description = "Run the local checks and the additional Linux-only slow suite"
 # The template owns `check` above the project-specific marker; compose it rather than editing template content.
 depends = ["check", "test:slow"]
+
+[tasks."test:remote"]
+description = "Test a remote SurrealDB 4.0.1 service (MEMCASTLE_TEST_SURREAL_WS required)"
+run = "cargo nextest run --test in_process --run-ignored ignored-only -E 'test(remote::)'"
 
 [tasks."web:check"]
 description = "Build and test the web UI, including checkout and installed-prefix serving"

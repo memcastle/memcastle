@@ -291,7 +291,7 @@ impl SurrealStore {
             // they're distinct in SurrealQL, and `$status = NONE` never
             // matches a bound `NULL`, silently returning nothing.
             "SELECT {JOB_COLUMNS} FROM job WHERE $status = NULL OR status = $status \
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC, id DESC"
         );
         let mut response = self
             .db
@@ -313,7 +313,7 @@ impl SurrealStore {
             // `= NULL` for an absent filter: see `list_jobs`. `LIMIT` is bound, never formatted into the text.
             "SELECT {JOB_COLUMNS} FROM job \
              WHERE ($status = NULL OR status = $status) AND ($kind = NULL OR kind.type = $kind) \
-             ORDER BY created_at DESC LIMIT $limit"
+             ORDER BY created_at DESC, id DESC LIMIT $limit"
         );
         let mut response = self
             .db
@@ -373,11 +373,12 @@ impl SurrealStore {
         lease_ttl: chrono::Duration,
         include_background: bool,
     ) -> Result<Option<Job>> {
+        // Parallel scans need a unique tie-breaker for equal-age jobs.
         let sql = format!(
             "SELECT {JOB_COLUMNS} FROM job WHERE status = 'queued' \
              AND ($include_background = true OR (kind.type != 'mine' \
                   AND kind.type != 'embed' AND kind.type != 'extract')) \
-             ORDER BY priority DESC, created_at ASC LIMIT 1"
+             ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1"
         );
         let mut response = self
             .db
