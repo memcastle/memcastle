@@ -268,21 +268,28 @@ async fn a_jobs_progress_and_final_status_are_pushed_as_it_runs() {
         .expect("json");
     let id = job["id"].as_str().expect("the job has an id").to_string();
 
-    let queued = stream.until("job", |event| event["id"] == id).await;
-    assert_eq!(queued["action"], "created");
-    assert_eq!(queued["status"], "queued");
-    assert_eq!(queued["job_kind"], "demo");
-    // Every later job event follows one write the job made, so the stream and the job agree on what is next.
-    stream
-        .until("job", |event| {
-            event["id"] == id && event["status"] == "running"
-        })
-        .await;
-    stream
-        .until("job", |event| {
-            event["id"] == id && event["status"] == "completed"
-        })
-        .await;
+    // A dispatcher can observe the committed job before submit resumes and
+    // publishes Created. Require all notices without imposing a total order.
+    let (mut created, mut running, mut completed) = (false, false, false);
+    tokio::time::timeout(PATIENCE, async {
+        while !(created && running && completed) {
+            let event = stream.until("job", |event| event["id"] == id).await;
+            assert_eq!(event["job_kind"], "demo");
+            match event["action"].as_str() {
+                Some("created") => {
+                    assert_eq!(event["status"], "queued");
+                    created = true;
+                }
+                Some("updated") => {
+                    running |= event["status"] == "running";
+                    completed |= event["status"] == "completed";
+                }
+                _ => panic!("unexpected job event: {event}"),
+            }
+        }
+    })
+    .await
+    .expect("creation, progress and completion are all delivered");
     drop(stream);
     daemon.shutdown().await;
 }
