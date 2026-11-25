@@ -325,12 +325,12 @@ so platform and timing variation does not fail a build.
 
 ### Prepared test databases
 
-CI and the project-specific `test:fast`, `test:wasm` and `test:slow` tasks own a temporary fixture directory for each run.
-`mise run test:prepared -- <nextest selectors>` uses the same preparation for a selected existing test cohort.
-The wrapper builds nothing itself: it runs the supplied Cargo/nextest command once and removes fixtures after its
-test processes exit.
-Interrupted invocations terminate their process group/tree and retain the disposable fixture directory for cleanup
-after any detached descendants have stopped.
+Nextest invocations automatically prepare databases through Rust/rstest fixtures, including CI and the `test`,
+`test:fast`, `test:wasm`, `test:slow` and coverage tasks.
+`mise run test:prepared -- <nextest selectors>` is a compatibility alias for direct nextest execution.
+The Rust test suite needs no Python runner or preparation command.
+Fixtures use nextest's run identifier, workspace and producer-build identity to share templates across test processes,
+with OS file locks and atomic publication rather than a process-local singleton.
 
 Ordinary unit fixtures reuse a schema-only database, with no application migration watermark, through private
 SurrealKV copies.
@@ -343,8 +343,14 @@ The templates are closed before publication, never opened for test writes and co
 
 Fresh schema/migration, memory-engine, committed retrieval-baseline and storage-lifecycle checks retain explicit
 fresh fixtures.
-Direct `cargo test` and the generic `mise run test` keep the fresh-fixture path when no prepared-run owner is present.
+Direct `cargo test` keeps the fresh-fixture path when no nextest run identifier is present.
 No fixture is reused across invocations; fixture errors fail the run rather than silently bypassing preparation.
+
+The cache lives below `memcastle-test-fixtures-v2/` in the OS temporary directory.
+Shared templates and private unit copies remain there after successful, failed or interrupted runs for deferred cleanup;
+integration fixtures still attempt their normal per-test temporary-directory cleanup.
+No individual test process can know that every future consumer has finished, and unit-store teardown can outlive its handle.
+Remove a run's cache directory only after its nextest invocation and all descendants have stopped.
 
 ### Core and provider test boundaries
 

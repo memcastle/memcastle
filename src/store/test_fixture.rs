@@ -8,28 +8,13 @@ use super::*;
 pub(super) const PRODUCER_OUTPUT: &str = "MEMCASTLE_TEST_SCHEMA_OUTPUT";
 
 impl SurrealStore {
-    /// A private schema-only SurrealKV copy, or a fresh memory store without a runner owner.
+    /// A private schema-only SurrealKV copy, or a fresh memory store outside nextest.
     pub(crate) async fn connect_for_tests() -> Self {
-        let source = fixture::prepare("schema-only", |database| {
-            let directory = database.parent().unwrap();
-            // Reuse the existing fresh-schema test rather than add another
-            // executable target or re-enter Cargo from a running test suite.
-            let mut command = std::process::Command::new(std::env::current_exe()?);
-            fixture::isolate(&mut command, directory);
-            command
-                .args([
-                    "--exact",
-                    "store::tests::migrations_apply_cleanly_and_are_idempotent",
-                    "--nocapture",
-                ])
-                .env(PRODUCER_OUTPUT, database);
-            fixture::finish(&mut command, directory)
-        })
-        .expect("prepare the run's schema-only fixture");
-        let Some(source) = source else {
+        let Some((cache, source)) = schema_template::default() else {
             return Self::connect_memory_for_tests().await;
         };
-        let database = fixture::private_copy(&source).expect("copy schema-only database fixture");
+        let database =
+            fixture::private_copy(&cache, &source).expect("copy schema-only database fixture");
         let store = Self::open_schema_fixture(database, StoreSync::Never).await;
         // Keep the ordinary unchanged-schema check rather than introducing a
         // test-only store lifecycle that can hide an invalid prepared schema.
@@ -50,6 +35,31 @@ impl SurrealStore {
             .expect("select unit-test database");
         store
     }
+}
+
+#[rstest::fixture]
+fn schema_template(
+    #[from(fixture::run_cache)] cache: Option<fixture::RunCache>,
+) -> Option<(fixture::RunCache, PathBuf)> {
+    let cache = cache?;
+    let executable = std::env::current_exe().expect("resolve the schema producer test executable");
+    let source = fixture::prepare(&cache, "schema-only", &executable, |database| {
+        let directory = database.parent().unwrap();
+        // Reuse the existing fresh-schema test rather than add another
+        // executable target or re-enter Cargo from a running test suite.
+        let mut command = std::process::Command::new(&executable);
+        fixture::isolate(&mut command, directory);
+        command
+            .args([
+                "--exact",
+                "store::tests::migrations_apply_cleanly_and_are_idempotent",
+                "--nocapture",
+            ])
+            .env(PRODUCER_OUTPUT, database);
+        fixture::finish(&mut command, directory)
+    })
+    .expect("prepare the run's schema-only fixture");
+    Some((cache, source))
 }
 
 pub(super) async fn finish_producer() {

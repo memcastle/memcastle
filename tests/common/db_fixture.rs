@@ -7,30 +7,46 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The runner owns this directory and removes it after every test child exits.
-pub fn root() -> Option<PathBuf> {
-    std::env::var_os("MEMCASTLE_TEST_FIXTURE_ROOT").map(|root| {
-        let root = PathBuf::from(root);
-        assert!(
-            root.is_absolute() && root.is_dir(),
-            "invalid prepared-fixture root: {}",
-            root.display()
-        );
-        assert_eq!(
-            fs::read_to_string(root.join(".owner")).ok().as_deref(),
-            Some("memcastle-test-fixtures-v1\n"),
-            "prepared fixtures require the test runner owner"
-        );
-        root
-    })
+use sha2::{Digest, Sha256};
+
+pub struct RunCache {
+    pub root: PathBuf,
+}
+
+/// Nextest processes share immutable templates, but none owns whole-run teardown.
+#[rstest::fixture]
+pub fn run_cache() -> Option<RunCache> {
+    let run = std::env::var_os("NEXTEST_RUN_ID")?;
+    let workspace = fs::canonicalize(env!("CARGO_MANIFEST_DIR"))
+        .expect("resolve the fixture workspace before preparing databases");
+    let mut identity = Sha256::new();
+    identity.update(workspace.as_os_str().as_encoded_bytes());
+    identity.update([0]);
+    identity.update(run.as_encoded_bytes());
+    let root = std::env::temp_dir()
+        .join("memcastle-test-fixtures-v2")
+        .join(format!("{:x}", identity.finalize()));
+    fs::create_dir_all(&root).expect("create the run's temporary database cache");
+    Some(RunCache { root })
 }
 
 /// Generate once across nextest processes; a failed producer never publishes.
 pub fn prepare(
+    cache: &RunCache,
     kind: &str,
+    executable: &Path,
     producer: impl FnOnce(&Path) -> io::Result<()>,
-) -> io::Result<Option<PathBuf>> {
-    let Some(root) = root() else { return Ok(None) };
+) -> io::Result<PathBuf> {
+    let executable = fs::canonicalize(executable)?;
+    let metadata = fs::metadata(&executable)?;
+    // A single run may use several build artifacts; filename hashes alone do
+    // not distinguish a binary rebuilt in place. Metadata avoids hashing GBs.
+    let mut identity = Sha256::new();
+    identity.update(executable.as_os_str().as_encoded_bytes());
+    identity.update(metadata.len().to_le_bytes());
+    identity.update(format!("{:?}", metadata.modified()?));
+    let root = cache.root.join(format!("{:x}", identity.finalize()));
+    fs::create_dir_all(&root)?;
     let published = root.join(kind);
     let lock = OpenOptions::new()
         .read(true)
@@ -53,15 +69,15 @@ pub fn prepare(
             ));
         }
         fs::rename(staging.path(), &published)?;
-        // Rename publishes the whole completed fixture atomically. Its lifetime
-        // belongs to the runner, not the process that won the preparation lock.
+        // Later test processes still need this template, so publication must
+        // outlive the process that won the preparation lock.
         let _ = staging.keep();
     }
     let database = published.join("db");
     if !database.is_dir() {
         return Err(io::Error::other("published database fixture is incomplete"));
     }
-    Ok(Some(database))
+    Ok(database)
 }
 
 /// Copy bytes, never writable file inodes or an open datastore.
@@ -88,11 +104,14 @@ pub fn copy_database(source: &Path, destination: &Path) -> io::Result<()> {
 }
 
 /// Keep mutable unit-test palaces alive until their SDK processes have exited.
-pub fn private_copy(source: &Path) -> io::Result<PathBuf> {
-    let root = root().expect("a prepared database requires a fixture owner");
-    let directory = tempfile::Builder::new().prefix("unit-").tempdir_in(root)?;
+pub fn private_copy(cache: &RunCache, source: &Path) -> io::Result<PathBuf> {
+    let directory = tempfile::Builder::new()
+        .prefix("unit-")
+        .tempdir_in(&cache.root)?;
     let database = directory.path().join("db");
     copy_database(source, &database)?;
+    // The SDK may still have asynchronous teardown tasks after its handle drops.
+    // Retain private unit copies for deferred cleanup with the run's templates.
     let _ = directory.keep();
     Ok(database)
 }
@@ -100,11 +119,10 @@ pub fn private_copy(source: &Path) -> io::Result<PathBuf> {
 /// Test-owned configuration cannot inherit a developer's palace or secrets.
 pub fn isolate(command: &mut Command, directory: &Path) {
     for (key, _) in std::env::vars_os() {
-        if key
-            .to_string_lossy()
-            .to_ascii_uppercase()
-            .starts_with("MEMCASTLE_")
-        {
+        let name = key.to_string_lossy().to_ascii_uppercase();
+        // A re-executed producer must not discover its own nextest fixture and
+        // recursively wait on the lock its parent holds. Keep LLVM coverage env.
+        if name.starts_with("MEMCASTLE_") || name.starts_with("NEXTEST_") {
             command.env_remove(key);
         }
     }

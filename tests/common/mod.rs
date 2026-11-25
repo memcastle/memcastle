@@ -71,10 +71,10 @@ impl TestDaemon {
     }
 
     async fn start_fixture(configure: impl FnOnce(&mut Config), prepared: bool) -> Self {
-        // The invocation owner can clean up after SDK processes release their
-        // locks, even if Windows prevents a test's TempDir from removing itself.
-        let tempdir = match db_fixture::root() {
-            Some(root) => tempfile::tempdir_in(root),
+        // Keep any Windows-locked leftovers beside the retained run templates
+        // so they can be removed together once all test processes have exited.
+        let tempdir = match db_fixture::run_cache::default() {
+            Some(cache) => tempfile::tempdir_in(cache.root),
             None => tempfile::tempdir(),
         }
         .expect("temporary test palace");
@@ -110,24 +110,7 @@ impl TestDaemon {
         // database, and every caller retains its own configuration and assets.
         if prepared
             && matches!(config.store, StoreConfig::Embedded { .. })
-            && let Some(source) = db_fixture::prepare("migrated", |database| {
-                let directory = database.parent().unwrap();
-                let config = directory.join("config.toml");
-                std::fs::write(&config, "# isolated fixture producer\n")?;
-                let executable = std::env::var_os("NEXTEST_BIN_EXE_memcastle")
-                    .or_else(|| std::env::var_os("CARGO_BIN_EXE_memcastle"))
-                    .unwrap_or_else(|| env!("CARGO_BIN_EXE_memcastle").into());
-                let mut command = std::process::Command::new(executable);
-                db_fixture::isolate(&mut command, directory);
-                command
-                    .arg("--config")
-                    .arg(config)
-                    .arg("--palace")
-                    .arg(directory)
-                    .args(["--json", "migrate"]);
-                db_fixture::finish(&mut command, directory)
-            })
-            .expect("prepare the run's migrated fixture")
+            && let Some(source) = migrated_template::default()
         {
             db_fixture::copy_database(&source, &config.palace.path.join("db"))
                 .expect("copy the private migrated palace");
@@ -166,6 +149,35 @@ impl TestDaemon {
             .expect("daemon task panicked")
             .expect("daemon returned an error");
     }
+}
+
+#[rstest::fixture]
+fn migrated_template(
+    #[from(db_fixture::run_cache)] cache: Option<db_fixture::RunCache>,
+) -> Option<std::path::PathBuf> {
+    let cache = cache?;
+    // Resolve the already-built binary before stripping nextest context from
+    // its environment; producers must not recursively request run fixtures.
+    let executable = std::env::var_os("NEXTEST_BIN_EXE_memcastle")
+        .or_else(|| std::env::var_os("CARGO_BIN_EXE_memcastle"))
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_memcastle").into());
+    let executable = std::path::PathBuf::from(executable);
+    let source = db_fixture::prepare(&cache, "migrated", &executable, |database| {
+        let directory = database.parent().unwrap();
+        let config = directory.join("config.toml");
+        std::fs::write(&config, "# isolated fixture producer\n")?;
+        let mut command = std::process::Command::new(&executable);
+        db_fixture::isolate(&mut command, directory);
+        command
+            .arg("--config")
+            .arg(config)
+            .arg("--palace")
+            .arg(directory)
+            .args(["--json", "migrate"]);
+        db_fixture::finish(&mut command, directory)
+    })
+    .expect("prepare the run's migrated fixture");
+    Some(source)
 }
 
 /// Poll the registry file for `palace_path` until a live daemon has written

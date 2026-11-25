@@ -258,7 +258,7 @@ description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, ne
 # `--test 'wasm_*'` is the same prefix as a Cargo glob, and it keeps Cargo from compiling and linking the other thirty
 # test binaries (about 600 MB each) just for nextest to skip them.
 raw_args = true
-run = "uv run --no-project --python 3 python -B packaging/tests/run.py cargo nextest run --profile wasm --test 'wasm_*'"
+run = "cargo nextest run --profile wasm --test 'wasm_*'"
 
 [tasks."components:check"]
 description = "Compile and validate every reference/example/test component as WASI 0.3.0"
@@ -279,17 +279,17 @@ for file in tests/*.rs; do
     *) targets+=(--test "$name") ;;
   esac
 done
-uv run --no-project --python 3 python -B packaging/tests/run.py cargo nextest run "${targets[@]}"
+cargo nextest run "${targets[@]}"
 """
 
 [tasks."test:slow"]
 description = "Run the process-boundary and retrieval-baseline tests (Linux CI gate)"
-run = "uv run --no-project --python 3 python -B packaging/tests/run.py cargo nextest run --profile slow --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process"
+run = "cargo nextest run --profile slow --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process"
 
 [tasks."test:prepared"]
-description = "Run selected existing tests with run-scoped prepared database fixtures"
+description = "Run nextest directly (prepared fixtures are automatic)"
 raw_args = true
-run = "uv run --no-project --python 3 python -B packaging/tests/run.py cargo nextest run"
+run = "cargo nextest run"
 
 [tasks."check:all"]
 description = "Run the local checks and the additional Linux-only slow suite"

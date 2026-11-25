@@ -150,7 +150,7 @@ jobs:
               *) targets+=(--test "$name") ;;
             esac
           done
-          uv run --no-project --python 3 python -B packaging/tests/run.py cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
+          cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
 
       # Debug runs need raw inputs even when a corrupt profile prevents generating lcov.info.
       - name: Upload coverage artifacts
@@ -199,7 +199,7 @@ jobs:
         with:
           cache-generation: slow-v1
       - name: Run slow tests (with coverage)
-        run: uv run --no-project --python 3 python -B packaging/tests/run.py cargo llvm-cov nextest --profile ci-slow --lcov --output-path lcov.info --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
+        run: cargo llvm-cov nextest --profile ci-slow --lcov --output-path lcov.info --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -248,7 +248,7 @@ jobs:
       # linked, instrumented, only for the profile's filter to skip it. Cargo still builds the `memcastle` binary these
       # tests start.
       - name: Run tests (with coverage)
-        run: uv run --no-project --python 3 python -B packaging/tests/run.py cargo llvm-cov nextest --profile ci-wasm --lcov --output-path lcov.info --test 'wasm_*'
+        run: cargo llvm-cov nextest --profile ci-wasm --lcov --output-path lcov.info --test 'wasm_*'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
