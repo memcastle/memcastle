@@ -440,6 +440,9 @@ impl SurrealStore {
     ///
     /// Returns [`crate::Error::Store`] if the connection or sign-in fails.
     pub async fn connect(backend: &Backend) -> Result<Self> {
+        // Feature unification can enable both Rustls providers, making the
+        // SDK's default WSS connector panic. Preserve a host's chosen provider.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         if let Backend::Embedded { path, .. } = backend {
             std::fs::create_dir_all(path)
                 .map_err(|source| crate::Error::io(path.display().to_string(), source))?;
@@ -1016,6 +1019,36 @@ mod tests {
 
         let fetched = store.get_job(job.id).await.expect("get").expect("present");
         assert_eq!(fetched.status, crate::domain::JobStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn tied_job_timestamps_have_stable_pages_and_claim_order() {
+        use crate::domain::{Job, JobKind, Priority};
+
+        let store = memory_store().await;
+        let at = chrono::Utc::now();
+        let mut jobs = Vec::new();
+        for _ in 0..4 {
+            let mut job = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
+            job.created_at = at;
+            store.save_job(&job).await.unwrap();
+            jobs.push(job.id);
+        }
+        // Parallel scans can reorder equal timestamps; pin the page boundary.
+        jobs.sort_by_key(ToString::to_string);
+        let page = store.list_jobs_page(None, None, 2).await.unwrap();
+        assert_eq!(
+            page.iter().map(|job| job.id).collect::<Vec<_>>(),
+            jobs.iter().rev().take(2).copied().collect::<Vec<_>>()
+        );
+        for expected in jobs {
+            let claimed = store
+                .claim_next_job("worker", chrono::Duration::seconds(30))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(claimed.id, expected);
+        }
     }
 
     #[tokio::test]

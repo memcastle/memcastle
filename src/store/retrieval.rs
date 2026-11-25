@@ -193,9 +193,12 @@ impl SurrealStore {
         if let Some(table) = self.indexed_embedding_table(space, embedding.len()).await? {
             let knn = knn_operator(limit);
             let sql = format!(
-                "{SCOPE_PRELUDE} SELECT drawer AS id, vector::distance::knn() AS distance \
-                 FROM {table} WHERE vector {knn} $embedding AND drawer IN \
-                 (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+                // A subquery directly beside KNN triggers 4.0's IR verifier.
+                // Resolve the identical scope before ranking, never after LIMIT.
+                "{SCOPE_PRELUDE} \
+                 LET $scoped_drawers = (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}); \
+                 SELECT drawer AS id, vector::distance::knn() AS distance \
+                 FROM {table} WHERE vector {knn} $embedding AND drawer IN $scoped_drawers \
                  ORDER BY distance ASC, id ASC LIMIT $limit"
             );
             #[derive(Deserialize)]
@@ -207,7 +210,7 @@ impl SurrealStore {
                 .bind(("embedding", embedding.to_vec()))
                 .bind(("limit", limit))
                 .await?;
-            let rows: Vec<Ranked> = super::take_rows(&mut response, 1)?;
+            let rows: Vec<Ranked> = super::take_rows(&mut response, 2)?;
             let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
             let mut drawers = self.fetch_search_drawers(&ids).await?;
             return Ok(rows
@@ -279,20 +282,18 @@ impl SurrealStore {
             let knn = knn_operator(pool);
             format!(
                 "SELECT drawer AS id, vector::distance::knn() AS distance \
-                FROM {table} WHERE vector {knn} $embedding AND drawer IN \
-                (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+                FROM {table} WHERE vector {knn} $embedding AND drawer IN $scoped_drawers \
                 ORDER BY distance ASC, id ASC LIMIT $pool"
             )
         } else {
-            format!(
-                "SELECT drawer AS id, 1.0 - vector::similarity::cosine(vector, $embedding) AS distance \
-                FROM drawer_embedding WHERE space = $space AND drawer IN \
-                (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}) \
+            "SELECT drawer AS id, 1.0 - vector::similarity::cosine(vector, $embedding) AS distance \
+                FROM drawer_embedding WHERE space = $space AND drawer IN $scoped_drawers \
                 ORDER BY distance ASC, id ASC LIMIT $pool"
-            )
+                .to_string()
         };
         let sql = format!(
             "{SCOPE_PRELUDE} \
+             LET $scoped_drawers = (SELECT VALUE record::id(id) FROM drawer WHERE {SCOPE_WHERE}); \
              LET $semantic = ({semantic}); \
              LET $lexical = (SELECT record::id(id) AS id, search::score(1) AS ft_score \
                 FROM drawer WHERE content @1,OR@ $query AND {SCOPE_WHERE} \
@@ -306,7 +307,7 @@ impl SurrealStore {
             .bind(("pool", pool))
             .bind(("fuse_limit", pool.saturating_mul(2)))
             .await?;
-        let mut fused: Vec<FusedRow> = super::take_rows(&mut response, 3)?;
+        let mut fused: Vec<FusedRow> = super::take_rows(&mut response, 4)?;
         fused.sort_by(|a, b| {
             b.rrf_score
                 .total_cmp(&a.rrf_score)

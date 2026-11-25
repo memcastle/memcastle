@@ -5,6 +5,19 @@ There is no second index file to fall out of sync with it.
 By default the database is **embedded**: it runs inside the daemon and stores its files in a directory on disk,
 so a local setup needs no external database service.
 
+## SurrealDB version requirement
+
+MemCastle uses SurrealDB 4.0 and requires a palace created with the 4.0 engine.
+SurrealDB 3.x embedded palaces are not supported, and MemCastle does not opt into their experimental format conversion.
+Use a new palace directory with `--palace` when moving from a 3.x-based MemCastle release; keep the old directory
+with its matching older binary if you still need to read it.
+This release provides no engine-format migration or backward-compatibility path.
+For remote storage, select a fresh database on a SurrealDB 4.0 server through the `[store]` connection settings;
+changing `--palace` does not change which remote database is opened.
+Reinstall compatible plugins into the new palace, grant permissions, enable sources and re-mine;
+see [Migrations and upgrades](migrations.md#surrealdb-40-storage-baseline) for the fresh-palace setup requirements.
+The [application migrations](migrations.md) still initialize and maintain the schema and records within a supported palace.
+
 ## Where things live
 
 MemCastle uses the Unix XDG layout on Linux and macOS alike; macOS does not use `~/Library`.
@@ -156,7 +169,7 @@ Either is faster, most visibly on a disk with a slow flush, but the most recent 
 Keep the default for a palace you care about; the relaxed modes are meant for tests and throwaway palaces.
 A remote store sets its own durability, so the setting does not apply to it.
 
-**Remote** connects to a SurrealDB server over `ws://` or `wss://`:
+**Remote** connects to a SurrealDB 4.0 server over `ws://` or `wss://`:
 
 ```toml
 [store]

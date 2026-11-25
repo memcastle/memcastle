@@ -183,6 +183,8 @@ remapped, so rebuilding a tag on the same target should give the same bytes.
 ### From source
 
 You need a Rust toolchain, version 1.100 or newer.
+The embedded database uses SurrealDB 4.0; older 3.x palace directories are unsupported.
+See the [storage version requirement](storage.md#surrealdb-version-requirement) before changing an existing installation.
 
 ```sh
 git clone https://github.com/memcastle/memcastle

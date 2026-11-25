@@ -40,7 +40,7 @@ use memcastle::{Error, Result};
 /// than truly suspended, the bulk of its stack usage — on the OS's actual
 /// main thread. Windows defaults that to 1 MiB (Unix: 8 MiB), and a debug
 /// build of `memcastle serve` reliably overflows it during startup:
-/// SurrealDB 3.x split what was one crate into a dozen thin layers
+/// SurrealDB 4.x retains a dozen thin layers
 /// (`surrealdb` -> `surrealdb-engine-local` -> `surrealdb-core` ->
 /// `surrealdb-kvs-any` -> `surrealdb-kvs-surrealkv` -> ...), and an
 /// uninlined debug build pays for every one of those layers in stack

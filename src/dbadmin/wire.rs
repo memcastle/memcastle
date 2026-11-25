@@ -155,4 +155,48 @@ mod tests {
             Message::Binary(_)
         ));
     }
+
+    #[test]
+    fn binary_protocols_preserve_typed_query_parameters_and_results() {
+        use surrealdb::types::{Array, Datetime, Duration, Number, Uuid};
+
+        let values = Value::Array(Array::from(vec![
+            Value::Datetime(Datetime::try_from((1_700_000_000, 123_456_789)).unwrap()),
+            Value::Uuid(Uuid::from(uuid::Uuid::from_u128(7))),
+            Value::Duration(Duration::new(90, 7)),
+            Value::Number(Number::Int(i64::MAX)),
+            Value::Number(Number::Float(0.125)),
+            Value::None,
+            Value::Null,
+        ]));
+        for format in [Format::Cbor, Format::Flatbuffers] {
+            let request = Value::Object(object! {
+                id: 7, method: "query",
+                params: Array::from(vec![Value::String("RETURN $value".into()), values.clone()]),
+            });
+            let bytes = match format {
+                Format::Cbor => cbor::encode(request).unwrap(),
+                _ => surrealdb::types::encode(&request).unwrap(),
+            };
+            let decoded = format.decode_request(&bytes).unwrap();
+            assert_eq!(decoded.method, Method::Query);
+            assert_eq!(decoded.params[1], values, "{format:?}");
+            let response = DbResponse::success(None, None, DbResult::Other(values.clone()));
+            let Message::Binary(bytes) = format.encode_response(response).unwrap() else {
+                panic!("binary format returned text");
+            };
+            let decoded: Value = match format {
+                Format::Cbor => cbor::decode(&bytes, NESTING_LIMIT).unwrap(),
+                _ => surrealdb::types::decode(&bytes).unwrap(),
+            };
+            let Value::Object(mut response) = decoded else {
+                panic!("RPC response is not an object");
+            };
+            assert_eq!(
+                response.remove("result"),
+                Some(values.clone()),
+                "{format:?}"
+            );
+        }
+    }
 }

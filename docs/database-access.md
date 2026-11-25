@@ -160,7 +160,7 @@ The tunnel needs no `--allow-remote` and no change to the daemon, and is the bet
 
 ## What the endpoint supports
 
-It speaks SurrealDB's WebSocket protocol at `/rpc`, in the `flatbuffers`, `cbor` and `json` encodings,
+It speaks SurrealDB 4.0's WebSocket protocol at `/rpc`, in the `flatbuffers`, `cbor` and `json` encodings,
 and answers `GET /health` and `GET /version`.
 These methods work: `query`, `use`, `let`, `unset`, `info`, `version`, `ping`, `signin`, `authenticate`, `invalidate`,
 `reset`, `attach`, `detach` and `sessions`.

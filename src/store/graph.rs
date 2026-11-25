@@ -107,7 +107,7 @@ impl SurrealStore {
             .query(
                 "SELECT record::id(in) AS drawer, <string>created_at AS created_at, provenance, observation \
                  FROM mentions WHERE out = type::record('entity', $entity) \
-                 ORDER BY created_at DESC",
+                 ORDER BY created_at DESC, id DESC",
             )
             .bind(("entity", entity.to_string()))
             .await?;

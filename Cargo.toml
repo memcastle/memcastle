@@ -172,11 +172,9 @@ tokio-stream = "0.1"
 # `bind`/`take` now require the driver's own `SurrealValue` trait, not
 # `serde::Deserialize` — `serde_json::Value` does implement it, hence the
 # JSON round-trip in `store::mod`'s `bindable`/`take_rows` helpers rather
-# than a `SurrealValue` derive on every domain type. 3.2.4 shipped with a
-# `surrealdb-core` version range that resolves to a same-week internal
-# crate split it doesn't build against; 3.3.0 is the first release back in
-# sync with it.
-surrealdb = { version = "3.3.0", features = ["kv-surrealkv", "protocol-ws"] }
+# than a `SurrealValue` derive on every domain type. New palaces use the
+# 4.x disk format; opening a 3.x palace is deliberately not opted into.
+surrealdb = { version = "4.0.1", features = ["kv-surrealkv", "protocol-ws"] }
 
 # Schema management (DEFINE TABLE/FIELD/INDEX sync + staged rollouts) is
 # delegated entirely to SurrealKit's library API (`Sync`/`Rollout`/
@@ -188,7 +186,7 @@ surrealdb = { version = "3.3.0", features = ["kv-surrealkv", "protocol-ws"] }
 # (clap/inquire/rustls/tempfile) and the `embedded`/`kv-*` bundle (SurrealKit's
 # own engine features for its `connect()`), neither of which `Sync`/`Rollout`
 # need — they operate on a caller-supplied `Surreal<Any>` handle.
-surrealkit = { version = "1.0.0-beta.2", default-features = false }
+surrealkit = { version = "1.0.0-rc.1", default-features = false }
 
 # The database admin endpoint (`dbadmin`, see docs/adr/015) speaks SurrealDB's
 # own wire protocol so SurrealDB Studio / Surrealist can connect. There is no
@@ -198,8 +196,11 @@ surrealkit = { version = "1.0.0-beta.2", default-features = false }
 # move with it. `default-features = false` keeps `surrealdb-core` from pulling
 # in its GraphQL stack or any storage engine of its own: it is already in the
 # lockfile through `surrealdb`, and `tests/dependencies.rs` guards the engines.
-surrealdb-core = { version = "=3.3.4", default-features = false }
-surrealdb-rpc = "=3.3.4"
+surrealdb-core = { version = "=4.0.1", default-features = false }
+surrealdb-rpc = "=4.0.1"
+# Reqwest and SurrealDB can enable both Rustls providers. Select the existing
+# AWS-LC backend explicitly before the SDK builds its default WSS connector.
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
 
 # HTTP API + MCP-over-HTTP share one axum router. `ws` backs the admin
 # endpoint's `/rpc` WebSocket.
@@ -276,7 +277,7 @@ features = ["process"]
 # feature above (Cargo merges features across dependency kinds), so tests can
 # also exercise real on-disk persistence via the main dependency's engine.
 [dev-dependencies.surrealdb]
-version = "3.3.0"
+version = "4.0.1"
 features = ["kv-mem"]
 
 # Only `tests/in_process/mcp_memory_mode.rs` needs a real MCP *client* (to prove memory

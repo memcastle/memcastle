@@ -196,7 +196,7 @@ impl SurrealStore {
         let mut response = self
             .db
             .query(format!(
-                "SELECT {DELIVERY_COLUMNS} FROM trigger_delivery WHERE job = NONE ORDER BY received_at"
+                "SELECT {DELIVERY_COLUMNS} FROM trigger_delivery WHERE job = NONE ORDER BY received_at, id"
             ))
             .await?;
         let rows: Vec<DeliveryRow> = super::take_rows(&mut response, 0)?;

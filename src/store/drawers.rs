@@ -461,7 +461,7 @@ impl SurrealStore {
     pub async fn list_drawers(&self, room: Option<RoomId>) -> Result<Vec<Drawer>> {
         let sql = format!(
             "SELECT {DRAWER_COLUMNS} FROM drawer WHERE $room = NULL OR room = $room \
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC, id DESC"
         );
         let room = room.map(|room| room.to_string());
         let mut response = self
@@ -538,7 +538,7 @@ impl SurrealStore {
         let sql = format!(
             "SELECT {DRAWER_COLUMNS} FROM drawer \
              WHERE room = $room AND source.agent = $agent AND !valid_to \
-             ORDER BY created_at DESC LIMIT $limit"
+             ORDER BY created_at DESC, id DESC LIMIT $limit"
         );
         let mut response = self
             .db
@@ -575,7 +575,7 @@ impl SurrealStore {
                AND ($wing = NULL OR room IN ( \
                      SELECT VALUE record::id(id) FROM room WHERE wing IN ( \
                        SELECT VALUE record::id(id) FROM wing WHERE name = $wing))) \
-             ORDER BY created_at DESC LIMIT $limit"
+             ORDER BY created_at DESC, id DESC LIMIT $limit"
         );
         let mut response = self
             .db

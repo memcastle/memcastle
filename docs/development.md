@@ -37,6 +37,10 @@ for local assembly and the inline daemon status check.
 
 CI and releases build with Rust 1.100.0; the MSRV job reads the minimum from `Cargo.toml`.
 
+SurrealDB 4.0's debug query VM needs more than the default 2 MiB test-thread stack.
+Mise sets `RUST_MIN_STACK=16777216` for development and CI; set the same variable when running Cargo directly.
+The daemon already gives its main and Tokio worker threads explicit 16 MiB stacks.
+
 The embedded Wasmtime 50.0.3 host executes WASI 0.3 components with Component Model async support.
 `mise run components:check` builds every reference/example/test component, validates it with wasm-tools 1.263.0,
 and checks that its WASI imports are version 0.3.0.
@@ -351,6 +355,24 @@ Shared templates and private unit copies remain there after successful, failed o
 integration fixtures still attempt their normal per-test temporary-directory cleanup.
 No individual test process can know that every future consumer has finished, and unit-store teardown can outlive its handle.
 Remove a run's cache directory only after its nextest invocation and all descendants have stopped.
+
+### Remote database tests
+
+The opt-in `test:remote` task validates daemon behavior against an independent SurrealDB 4.0.1 service.
+It runs in its own Linux CI job using the digest-pinned official image as a native GitHub Actions service.
+For local use, start a disposable service and then select its endpoint:
+
+```sh
+docker run --rm -p 127.0.0.1:8000:8000 \
+  -e SURREAL_USER=root -e SURREAL_PASS=disposable-surrealdb-test-password \
+  surrealdb/surrealdb:v4.0.1 start memory
+```
+
+```sh
+MEMCASTLE_TEST_SURREAL_WS=ws://127.0.0.1:8000 mise run test:remote
+```
+
+Each invocation uses a fresh namespace, while its two daemon starts share the same remote palace.
 
 ### Core and provider test boundaries
 

@@ -24,7 +24,9 @@ impl SurrealStore {
     pub async fn get_palace(&self) -> Result<Option<Palace>> {
         let mut response = self
             .db
-            .query(format!("SELECT {PALACE_COLUMNS} FROM palace LIMIT 1"))
+            .query(format!(
+                "SELECT {PALACE_COLUMNS} FROM palace ORDER BY id LIMIT 1"
+            ))
             .await?;
         let mut palaces: Vec<Palace> = super::take_rows(&mut response, 0)?;
         Ok(palaces.pop())

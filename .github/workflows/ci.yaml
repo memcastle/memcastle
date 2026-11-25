@@ -212,6 +212,40 @@ jobs:
           directory: target/nextest/ci-slow
           report_type: test_results
 
+  # Migration-specific remote coverage stays separate from the shared test baseline.
+  remote:
+    name: 🌐 Remote database tests
+    runs-on: ubuntu-latest
+    services:
+      surrealdb:
+        image: surrealdb/surrealdb:v4.0.1@sha256:408eb8e5c9436670525e2bc2634b1e50ba74ce1b447eaf0094c35f73b67f9cb6
+        command: start memory
+        env:
+          SURREAL_BIND: 0.0.0.0:8000
+          SURREAL_USER: root
+          SURREAL_PASS: disposable-surrealdb-test-password
+        ports:
+          - 8000/tcp
+        # Preserve the image's exec-form health probe: it has no shell.
+        options: >-
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: rui314/setup-mold@v1
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: remote-v1
+      - name: Test the remote backend
+        env:
+          MEMCASTLE_TEST_SURREAL_WS: ws://127.0.0.1:${{ job.services.surrealdb.ports['8000'] }}
+        run: mise run test:remote
+
   # The WebAssembly suite: every `tests/wasm_*.rs` binary, which builds components with Cargo and runs them in the
   # sandbox. Linux only, by decision (issue #181): the basic suite still covers the host's unit tests on every OS.
   # It runs in parallel with the `test` matrix, so it only costs wall-clock time if it is the longest job.
@@ -613,7 +647,7 @@ jobs:
 
   development:
     name: 🧪 Publish tested development Core
-    needs: [lint, test, slow, wasm, sources, example_plugin, web, packaging, msrv]
+    needs: [lint, test, slow, remote, wasm, sources, example_plugin, web, packaging, msrv]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/development-release.yaml
     with:
