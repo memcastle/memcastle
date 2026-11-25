@@ -52,7 +52,8 @@ pub async fn evaluate(path: &Path, options: &Options) -> Evaluation {
     let (dataset, sha256) = Dataset::load(path);
     let embedder = Embedder::new(&dataset.concepts);
     // No provider: the vectors are the harness's own, so the daemon's embedding pipeline is not part of what is measured.
-    let daemon = TestDaemon::start_configured(|config| {
+    // Keep the committed quality baseline's original fresh-index lifecycle.
+    let daemon = TestDaemon::start_fresh_configured(|config| {
         config.embeddings.providers.insert(
             "fixture".into(),
             memcastle::config::EmbeddingConnection {

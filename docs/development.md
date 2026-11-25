@@ -341,7 +341,8 @@ Every daemon still runs its normal schema/migration checks, and configuration, r
 remain private to each test.
 The templates are closed before publication, never opened for test writes and copied without sharing writable files.
 
-Fresh schema/migration, memory-engine and storage-lifecycle checks retain explicit fresh fixtures.
+Fresh schema/migration, memory-engine, committed retrieval-baseline and storage-lifecycle checks retain explicit
+fresh fixtures.
 Direct `cargo test` and the generic `mise run test` keep the fresh-fixture path when no prepared-run owner is present.
 No fixture is reused across invocations; fixture errors fail the run rather than silently bypassing preparation.
 
