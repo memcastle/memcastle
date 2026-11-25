@@ -43,6 +43,8 @@ CI and the project-specific `test:fast`, `test:wasm` and `test:slow` tasks own a
 `mise run test:prepared -- <nextest selectors>` uses the same preparation for a selected existing test cohort.
 The wrapper builds nothing itself: it runs the supplied Cargo/nextest command once and removes fixtures after its
 test processes exit.
+Interrupted invocations terminate their process group/tree and retain the disposable fixture directory for cleanup
+after any detached descendants have stopped.
 
 Ordinary unit fixtures reuse a schema-only database, with no application migration watermark, through private
 SurrealKV copies.
