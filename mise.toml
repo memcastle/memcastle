@@ -291,10 +291,6 @@ description = "Run selected existing tests with run-scoped prepared database fix
 raw_args = true
 run = "uv run --no-project --python 3 python -B packaging/tests/run.py cargo nextest run"
 
-[tasks."test:remote"]
-description = "Test a remote SurrealDB 3.3.4 service (MEMCASTLE_TEST_SURREAL_WS required)"
-run = "cargo nextest run --test in_process --run-ignored ignored-only -E 'test(remote::)'"
-
 [tasks."check:all"]
 description = "Run the local checks and the additional Linux-only slow suite"
 # The template owns `check` above the project-specific marker; compose it rather than editing template content.

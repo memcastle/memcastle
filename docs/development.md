@@ -37,45 +37,6 @@ for local assembly and the inline daemon status check.
 
 CI and releases build with Rust 1.100.0; the MSRV job reads the minimum from `Cargo.toml`.
 
-### Prepared test databases
-
-CI and the project-specific `test:fast`, `test:wasm` and `test:slow` tasks own a temporary fixture directory for each run.
-`mise run test:prepared -- <nextest selectors>` uses the same preparation for a selected existing test cohort.
-The wrapper builds nothing itself: it runs the supplied Cargo/nextest command once and removes fixtures after its
-test processes exit.
-Interrupted invocations terminate their process group/tree and retain the disposable fixture directory for cleanup
-after any detached descendants have stopped.
-
-Ordinary unit fixtures reuse a schema-only database, with no application migration watermark, through private
-SurrealKV copies.
-The existing schema-idempotence test also serves as the isolated schema producer when the harness re-executes it;
-its normal execution still installs a fresh schema.
-Ordinary embedded daemon fixtures copy a database prepared once with the existing `memcastle migrate` command.
-Every daemon still runs its normal schema/migration checks, and configuration, runtime state, sources and plugins
-remain private to each test.
-The templates are closed before publication, never opened for test writes and copied without sharing writable files.
-
-Fresh schema/migration, memory-engine and storage-lifecycle checks retain explicit fresh fixtures.
-Direct `cargo test` and the generic `mise run test` keep the fresh-fixture path when no prepared-run owner is present.
-No fixture is reused across invocations; fixture errors fail the run rather than silently bypassing preparation.
-
-### Remote database tests
-
-The opt-in `test:remote` task validates daemon behavior against an independent SurrealDB 3.3.4 service.
-It runs in its own Linux CI job using the digest-pinned official image as a native GitHub Actions service.
-For local use, start a disposable service and then select its endpoint:
-
-```sh
-docker run --rm -p 127.0.0.1:8000:8000 \
-  -e SURREAL_USER=root -e SURREAL_PASS=disposable-surrealdb-test-password \
-  surrealdb/surrealdb:v3.3.4 start memory
-```
-
-```sh
-MEMCASTLE_TEST_SURREAL_WS=ws://127.0.0.1:8000 mise run test:remote
-```
-
-Each invocation uses a fresh namespace, while its two daemon starts share the same remote palace.
 The embedded Wasmtime 50.0.3 host executes WASI 0.3 components with Component Model async support.
 `mise run components:check` builds every reference/example/test component, validates it with wasm-tools 1.263.0,
 and checks that its WASI imports are version 0.3.0.
@@ -200,8 +161,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
 ## Testing
 
 - **Unit tests** live next to the code they test (`domain::job`'s state machine, `config`'s validation,
-  `store`'s migrations/persistence — the storage tests use SurrealDB's in-memory engine for speed, plus one test
-  against a real SurrealKV directory; survival across a restart is proven at the process boundary in
+  `store`'s migrations/persistence — storage tests use fresh memory where required or private prepared SurrealKV copies;
+  survival across a restart is proven at the process boundary in
   `tests/persistence.rs`, because SurrealKV's file lock is not released within one process).
 - **Three suites.** Core test binaries that build or run a WebAssembly component are named `tests/wasm_*.rs`,
   and that prefix is the whole definition of the WebAssembly suite: `.config/nextest.toml` selects it with
@@ -361,6 +322,28 @@ by path, so the Codecov page shows each area whatever flag covered it.
 Each component reflects the merged execution coverage from every reporting suite.
 Its required status permits the same 0.5% fluctuation as the project status,
 so platform and timing variation does not fail a build.
+
+### Prepared test databases
+
+CI and the project-specific `test:fast`, `test:wasm` and `test:slow` tasks own a temporary fixture directory for each run.
+`mise run test:prepared -- <nextest selectors>` uses the same preparation for a selected existing test cohort.
+The wrapper builds nothing itself: it runs the supplied Cargo/nextest command once and removes fixtures after its
+test processes exit.
+Interrupted invocations terminate their process group/tree and retain the disposable fixture directory for cleanup
+after any detached descendants have stopped.
+
+Ordinary unit fixtures reuse a schema-only database, with no application migration watermark, through private
+SurrealKV copies.
+The existing schema-idempotence test also serves as the isolated schema producer when the harness re-executes it;
+its normal execution still installs a fresh schema.
+Ordinary embedded daemon fixtures copy a database prepared once with the existing `memcastle migrate` command.
+Every daemon still runs its normal schema/migration checks, and configuration, runtime state, sources and plugins
+remain private to each test.
+The templates are closed before publication, never opened for test writes and copied without sharing writable files.
+
+Fresh schema/migration, memory-engine and storage-lifecycle checks retain explicit fresh fixtures.
+Direct `cargo test` and the generic `mise run test` keep the fresh-fixture path when no prepared-run owner is present.
+No fixture is reused across invocations; fixture errors fail the run rather than silently bypassing preparation.
 
 ### Core and provider test boundaries
 
