@@ -433,7 +433,7 @@ mod tests {
     use super::*;
 
     async fn store() -> SurrealStore {
-        SurrealStore::connect_memory_for_tests().await
+        SurrealStore::connect_for_tests().await
     }
 
     fn reference(locator: &str) -> SourceRef {

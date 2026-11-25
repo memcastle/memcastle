@@ -156,7 +156,7 @@ mod tests {
     use crate::store::SurrealStore;
 
     async fn seeded(contents: &[&str]) -> (SurrealStore, Vec<Drawer>) {
-        let store = SurrealStore::connect_memory_for_tests().await;
+        let store = SurrealStore::connect_for_tests().await;
         let wing = store.get_or_create_wing("w", None).await.expect("wing");
         let room: RoomId = store
             .get_or_create_room(wing.id, "r", None)

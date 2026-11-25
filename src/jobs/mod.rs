@@ -1254,7 +1254,7 @@ mod tests {
     }
 
     async fn scheduler() -> Scheduler {
-        Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)
+        Scheduler::new(SurrealStore::connect_for_tests().await, 1)
     }
 
     /// Persist a demo job driven into `status` purely through
@@ -1707,7 +1707,7 @@ mod tests {
     #[tokio::test]
     async fn the_drain_waits_no_longer_than_the_configured_timeout() {
         let scheduler = Arc::new(
-            Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)
+            Scheduler::new(SurrealStore::connect_for_tests().await, 1)
                 .with_drain_timeout(Duration::from_millis(100)),
         );
         // A worker that never lets go of its permit, like a stuck handler.
@@ -2017,7 +2017,7 @@ mod tests {
     #[tokio::test]
     async fn the_heartbeat_keeps_a_running_jobs_lease_from_expiring() {
         let scheduler = Arc::new(
-            Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)
+            Scheduler::new(SurrealStore::connect_for_tests().await, 1)
                 .with_lease_ttl(Duration::from_millis(600)),
         );
         let job = scheduler

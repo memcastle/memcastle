@@ -288,7 +288,7 @@ mod tests {
     const DECISION: &str = "We decided to use SurrealDB for storage because one engine covers documents, graph and vectors.";
 
     async fn store() -> SurrealStore {
-        SurrealStore::connect_memory_for_tests().await
+        SurrealStore::connect_for_tests().await
     }
 
     #[tokio::test]

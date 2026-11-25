@@ -610,7 +610,7 @@ async fn spawn_daemon_and_wait(bin: &Path, palace: &Path) -> (Child, RuntimeInfo
     spawn_daemon_and_wait_with_config(bin, palace, None).await
 }
 
-/// The provider-less caller-vector test keeps its space definition across both processes.
+/// Keep explicit plugin/provider configuration across daemon processes.
 async fn spawn_daemon_and_wait_with_config(
     bin: &Path,
     palace: &Path,
@@ -692,6 +692,113 @@ fn axis_vector(axis: usize) -> Vec<f32> {
 }
 
 #[tokio::test]
+async fn restart_rebuilds_the_local_module_pointer_from_the_durable_plugin_record() {
+    use memcastle::domain::{PluginInfo, PluginManifest};
+    use memcastle::plugin::package;
+    use reqwest::StatusCode;
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+
+    let root = tempfile::tempdir().unwrap();
+    let mut config = memcastle::config::Config::default();
+    config.palace.path = root.path().join("palace");
+    config.plugins.dir = Some(root.path().join("plugins"));
+    config.plugins.registries.clear();
+    config.mining.registries.clear();
+    config.mining.sources_dir = Some(root.path().join("sources"));
+    config.mining.bundled_dir = Some(root.path().join("no-bundle"));
+    let config_file = root.path().join("config.toml");
+    std::fs::write(&config_file, toml::to_string(&config).unwrap()).unwrap();
+    let client = reqwest::Client::new();
+    let archive = package::pack(&BTreeMap::from([(
+        "plugin.toml".to_string(),
+        toml::to_string(&PluginManifest {
+            format: 1,
+            plugin: PluginInfo {
+                id: "example".into(),
+                version: "0.1.0".into(),
+                provider: "example".into(),
+                description: "Restart fixture".into(),
+                repository: "https://github.com/example/example".into(),
+                license: "MIT".into(),
+            },
+            memcastle: ">=0.4".into(),
+            dependencies: Vec::new(),
+            shared_config_schema: None,
+            authentication: None,
+            modules: Vec::new(),
+            checksums: BTreeMap::new(),
+            artifacts: Vec::new(),
+        })
+        .unwrap()
+        .into_bytes(),
+    )]))
+    .unwrap();
+    // A dropped embedded SDK handle can retain its file lock for the lifetime
+    // of the process. Restart the actual daemon, as every persistence test does.
+    let bin = cargo_bin("memcastle");
+    let (mut child, info) =
+        spawn_daemon_and_wait_with_config(&bin, &config.palace.path, Some(&config_file)).await;
+    let url = format!("http://{}", info.bind_addr);
+    let installed = client
+        .post(format!("{url}/api/plugins"))
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(installed.status(), StatusCode::OK);
+    let pointer = config.plugins.dir().join("example/current");
+    assert!(pointer.is_file());
+    stop_daemon(&bin, &config.palace.path, &mut child).await;
+
+    std::fs::remove_file(&pointer).unwrap();
+    let (mut child, info) =
+        spawn_daemon_and_wait_with_config(&bin, &config.palace.path, Some(&config_file)).await;
+    let url = format!("http://{}", info.bind_addr);
+    assert!(
+        pointer.is_file(),
+        "restart must finish an interrupted module-pointer publication"
+    );
+    let record: Value = client
+        .get(format!("{url}/api/plugins/example"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(record["manifest"]["plugin"]["version"], "0.1.0");
+    // Simulate a crash after the ledger deletion but before its generation directory was removed.
+    let installed_dir = config.plugins.dir().join("example");
+    let preserved = root.path().join("preserved-generation");
+    std::fs::rename(&installed_dir, &preserved).unwrap();
+    let removed = client
+        .delete(format!("{url}/api/plugins/example"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::OK);
+    std::fs::rename(&preserved, &installed_dir).unwrap();
+    assert!(pointer.exists());
+    stop_daemon(&bin, &config.palace.path, &mut child).await;
+
+    let (mut child, info) =
+        spawn_daemon_and_wait_with_config(&bin, &config.palace.path, Some(&config_file)).await;
+    assert!(
+        !pointer.exists(),
+        "restart must retire a pointer without a plugin ledger row"
+    );
+    let url = format!("http://{}", info.bind_addr);
+    let missing = client
+        .get(format!("{url}/api/plugins/example"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    stop_daemon(&bin, &config.palace.path, &mut child).await;
+}
+
+#[tokio::test]
 async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
     let dir = tempfile::tempdir().expect("tempdir");
     let palace = dir.path().join("palace");
@@ -770,7 +877,7 @@ async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
         let base = format!("http://{}", info.bind_addr);
         let contents = |hits: &serde_json::Value| -> Vec<String> {
             hits.as_array()
-                .expect("hits")
+                .unwrap_or_else(|| panic!("expected search hits, got {hits}"))
                 .iter()
                 .map(|hit| hit["content"].as_str().expect("content").to_string())
                 .collect()

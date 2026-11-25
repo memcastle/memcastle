@@ -21,6 +21,7 @@ pub mod mcp;
 pub mod agents;
 
 // Building WebAssembly components for the `wasm_*` binaries: the shared target directory and lockfile.
+mod db_fixture;
 pub mod wasm;
 
 use memcastle::config::{Config, StoreConfig};
@@ -56,7 +57,27 @@ impl TestDaemon {
     /// Like [`Self::start`], but `configure` may change the otherwise-default
     /// configuration first — how a test turns authentication on.
     pub async fn start_configured(configure: impl FnOnce(&mut Config)) -> Self {
-        let tempdir = tempfile::tempdir().expect("tempdir");
+        Self::start_fixture(configure, true).await
+    }
+
+    /// Keep first-start/storage-lifecycle assertions on a genuinely empty palace.
+    pub async fn start_fresh() -> Self {
+        Self::start_fresh_configured(|_| {}).await
+    }
+
+    /// Fresh storage with explicit settings, for initialization-sensitive checks.
+    pub async fn start_fresh_configured(configure: impl FnOnce(&mut Config)) -> Self {
+        Self::start_fixture(configure, false).await
+    }
+
+    async fn start_fixture(configure: impl FnOnce(&mut Config), prepared: bool) -> Self {
+        // Keep any Windows-locked leftovers beside the retained run templates
+        // so they can be removed together once all test processes have exited.
+        let tempdir = match db_fixture::run_cache::default() {
+            Some(cache) => tempfile::tempdir_in(cache.root),
+            None => tempfile::tempdir(),
+        }
+        .expect("temporary test palace");
         let palace_path = tempdir.path().join("palace");
 
         let mut config = Config::default();
@@ -84,6 +105,16 @@ impl TestDaemon {
         let config_path = tempdir.path().join("config.toml");
         config.config_file = Some(config_path.clone());
         configure(&mut config);
+
+        // Evaluate after overrides: remote tests must never receive an embedded
+        // database, and every caller retains its own configuration and assets.
+        if prepared
+            && matches!(config.store, StoreConfig::Embedded { .. })
+            && let Some(source) = migrated_template::default()
+        {
+            db_fixture::copy_database(&source, &config.palace.path.join("db"))
+                .expect("copy the private migrated palace");
+        }
 
         let handle = tokio::spawn(memcastle::server::run(config));
 
@@ -118,6 +149,35 @@ impl TestDaemon {
             .expect("daemon task panicked")
             .expect("daemon returned an error");
     }
+}
+
+#[rstest::fixture]
+fn migrated_template(
+    #[from(db_fixture::run_cache)] cache: Option<db_fixture::RunCache>,
+) -> Option<std::path::PathBuf> {
+    let cache = cache?;
+    // Resolve the already-built binary before stripping nextest context from
+    // its environment; producers must not recursively request run fixtures.
+    let executable = std::env::var_os("NEXTEST_BIN_EXE_memcastle")
+        .or_else(|| std::env::var_os("CARGO_BIN_EXE_memcastle"))
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_memcastle").into());
+    let executable = std::path::PathBuf::from(executable);
+    let source = db_fixture::prepare(&cache, "migrated", &executable, |database| {
+        let directory = database.parent().unwrap();
+        let config = directory.join("config.toml");
+        std::fs::write(&config, "# isolated fixture producer\n")?;
+        let mut command = std::process::Command::new(&executable);
+        db_fixture::isolate(&mut command, directory);
+        command
+            .arg("--config")
+            .arg(config)
+            .arg("--palace")
+            .arg(directory)
+            .args(["--json", "migrate"]);
+        db_fixture::finish(&mut command, directory)
+    })
+    .expect("prepare the run's migrated fixture");
+    Some(source)
 }
 
 /// Poll the registry file for `palace_path` until a live daemon has written

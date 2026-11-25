@@ -508,12 +508,12 @@ impl AppServices {
         self
     }
 
-    /// An `AppServices` over a fresh in-memory store and an idle scheduler,
+    /// An `AppServices` over a private schema-only store and an idle scheduler,
     /// for the unit tests of the layers above (`mcp` cannot construct a store
     /// itself: the `store-isolation` hook forbids it).
     #[cfg(test)]
     pub(crate) async fn for_tests() -> Self {
-        let store = SurrealStore::connect_memory_for_tests().await;
+        let store = SurrealStore::connect_for_tests().await;
         let scheduler = Arc::new(Scheduler::new(store.clone(), 1));
         Self::new(store, scheduler)
     }
@@ -1836,7 +1836,7 @@ mod tests {
     /// through any `AppServices` method, since `AppServices` has no
     /// synchronous "run this checkpoint job right now" call.
     async fn test_app_with_store() -> (AppServices, SurrealStore) {
-        let store = SurrealStore::connect_memory_for_tests().await;
+        let store = SurrealStore::connect_for_tests().await;
         let scheduler = Arc::new(Scheduler::new(store.clone(), 1));
         (AppServices::new(store.clone(), scheduler), store)
     }

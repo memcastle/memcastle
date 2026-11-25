@@ -286,6 +286,11 @@ cargo nextest run "${targets[@]}"
 description = "Run the process-boundary and retrieval-baseline tests (Linux CI gate)"
 run = "cargo nextest run --profile slow --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process"
 
+[tasks."test:prepared"]
+description = "Run nextest directly (prepared fixtures are automatic)"
+raw_args = true
+run = "cargo nextest run"
+
 [tasks."check:all"]
 description = "Run the local checks and the additional Linux-only slow suite"
 # The template owns `check` above the project-specific marker; compose it rather than editing template content.
