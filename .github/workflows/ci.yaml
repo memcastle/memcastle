@@ -150,7 +150,7 @@ jobs:
               *) targets+=(--test "$name") ;;
             esac
           done
-          cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
+          uv run --no-project --python 3 python -B packaging/tests/run.py cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info "${targets[@]}"
 
       # Debug runs need raw inputs even when a corrupt profile prevents generating lcov.info.
       - name: Upload coverage artifacts
@@ -199,7 +199,7 @@ jobs:
         with:
           cache-generation: slow-v1
       - name: Run slow tests (with coverage)
-        run: cargo llvm-cov nextest --profile ci-slow --lcov --output-path lcov.info --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
+        run: uv run --no-project --python 3 python -B packaging/tests/run.py cargo llvm-cov nextest --profile ci-slow --lcov --output-path lcov.info --features slow-tests --test persistence --test mcp_smoke --test auth_lifecycle --test in_process
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -211,6 +211,40 @@ jobs:
         with:
           directory: target/nextest/ci-slow
           report_type: test_results
+
+  # External storage runs independently of the process/retrieval suite.
+  remote:
+    name: 🌐 Remote database tests
+    runs-on: ubuntu-latest
+    services:
+      surrealdb:
+        image: surrealdb/surrealdb:v3.3.4@sha256:649a60a3b9c0177d9923c938e1c2563e48cde2a9d06ac2c0519714be719b02af
+        command: start memory
+        env:
+          SURREAL_BIND: 0.0.0.0:8000
+          SURREAL_USER: root
+          SURREAL_PASS: disposable-surrealdb-test-password
+        ports:
+          - 8000/tcp
+        # Preserve the image's exec-form health probe: it has no shell.
+        options: >-
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: rui314/setup-mold@v1
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: remote-v1
+      - name: Test the remote backend
+        env:
+          MEMCASTLE_TEST_SURREAL_WS: ws://127.0.0.1:${{ job.services.surrealdb.ports['8000'] }}
+        run: mise run test:remote
 
   # The WebAssembly suite: every `tests/wasm_*.rs` binary, which builds components with Cargo and runs them in the
   # sandbox. Linux only, by decision (issue #181): the basic suite still covers the host's unit tests on every OS.
@@ -248,7 +282,7 @@ jobs:
       # linked, instrumented, only for the profile's filter to skip it. Cargo still builds the `memcastle` binary these
       # tests start.
       - name: Run tests (with coverage)
-        run: cargo llvm-cov nextest --profile ci-wasm --lcov --output-path lcov.info --test 'wasm_*'
+        run: uv run --no-project --python 3 python -B packaging/tests/run.py cargo llvm-cov nextest --profile ci-wasm --lcov --output-path lcov.info --test 'wasm_*'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -613,7 +647,7 @@ jobs:
 
   development:
     name: 🧪 Publish tested development Core
-    needs: [lint, test, slow, wasm, sources, example_plugin, web, packaging, msrv]
+    needs: [lint, test, slow, remote, wasm, sources, example_plugin, web, packaging, msrv]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/development-release.yaml
     with:

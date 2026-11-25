@@ -67,6 +67,8 @@ mod source_packages;
 mod sources;
 #[cfg(test)]
 mod temporal_tests;
+#[cfg(test)]
+mod test_fixture;
 mod timestamps;
 mod triggers;
 mod wings;
@@ -553,7 +555,7 @@ impl SurrealStore {
 
 #[cfg(test)]
 impl SurrealStore {
-    /// A migrated, in-memory (`kv-mem`) store for other modules' unit
+    /// A fresh schema-only, in-memory (`kv-mem`) store for other modules' unit
     /// tests — e.g. `checkpoint::tests` — that need a real `SurrealStore`
     /// without a tempdir-backed `SurrealKV` path. `pub(crate)` and
     /// `cfg(test)`-gated: only test code anywhere in this crate should ever
@@ -587,9 +589,26 @@ mod tests {
 
     #[tokio::test]
     async fn migrations_apply_cleanly_and_are_idempotent() {
-        let store = memory_store().await;
+        // The same case prepares a closed schema-only template when re-executed
+        // by the fixture owner; its normal invocation still installs fresh schema.
+        let output = std::env::var_os(test_fixture::PRODUCER_OUTPUT);
+        let store = if let Some(path) = &output {
+            let store = SurrealStore::open_schema_fixture(
+                PathBuf::from(path.as_os_str()),
+                StoreSync::Every,
+            )
+            .await;
+            store.sync_schema().await.expect("first schema sync");
+            store
+        } else {
+            SurrealStore::connect_memory_for_tests().await
+        };
         // Re-running must not error — every DEFINE is IF NOT EXISTS.
         store.sync_schema().await.expect("second sync_schema");
+        drop(store);
+        if output.is_some() {
+            test_fixture::finish_producer().await;
+        }
     }
 
     #[tokio::test]

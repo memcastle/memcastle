@@ -25,7 +25,7 @@ async fn health_endpoint_reports_ok() {
 
 #[tokio::test]
 async fn status_endpoint_reports_an_empty_freshly_created_palace() {
-    let daemon = TestDaemon::start().await;
+    let daemon = TestDaemon::start_fresh().await;
     let client = reqwest::Client::new();
 
     let status: memcastle::app::StatusReport = client
@@ -76,7 +76,7 @@ async fn status_endpoint_answers_where_the_daemon_listens_what_it_serves_and_whe
 
 #[tokio::test]
 async fn shutdown_request_stops_the_listener_and_removes_the_registry_file() {
-    let daemon = TestDaemon::start().await;
+    let daemon = TestDaemon::start_fresh().await;
     let palace_path = daemon.palace_path.clone();
     assert!(memcastle::server::lifecycle::read_if_live(&palace_path).is_some());
 

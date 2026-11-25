@@ -138,7 +138,7 @@ mod tests {
     };
 
     async fn store() -> SurrealStore {
-        SurrealStore::connect_memory_for_tests().await
+        SurrealStore::connect_for_tests().await
     }
 
     async fn room(store: &SurrealStore, wing: &str) -> RoomId {

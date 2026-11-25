@@ -28,3 +28,7 @@ paths:
       # (https://docs.github.com/en/actions/how-tos/manage-workflow-runs/control-deployments).
       # `ship.yaml` and `prepare-release.yaml` both use it.
       - 'unexpected key "deployment" for "environment" section'
+      # actionlint 1.7.12 predates native service command overrides, supported
+      # by GitHub's runner schema and actionlint main; retire on a fixed release.
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idservicesservice_idcommand
+      - 'unexpected key "command" for "services" section'

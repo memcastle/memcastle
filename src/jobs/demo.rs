@@ -71,7 +71,7 @@ mod tests {
     /// is deliberately not `next_index` like the other handlers' key.
     #[tokio::test]
     async fn a_checkpoint_persisted_in_the_current_format_resumes_past_the_finished_steps() {
-        let store = SurrealStore::connect_memory_for_tests().await;
+        let store = SurrealStore::connect_for_tests().await;
         let mut job = Job::new(JobKind::Demo { steps: 3 }, Priority::Normal, "test");
         job.checkpoint = json!({ "next_step": 2 });
         let ctx = JobContext::new(job.id, JobControl::default(), store);
