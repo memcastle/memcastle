@@ -108,8 +108,9 @@ impl TestDaemon {
 
         // Evaluate after overrides: remote tests must never receive an embedded
         // database, and every caller retains its own configuration and assets.
-        if prepared && matches!(config.store, StoreConfig::Embedded { .. }) {
-            if let Some(source) = db_fixture::prepare("migrated", |database| {
+        if prepared
+            && matches!(config.store, StoreConfig::Embedded { .. })
+            && let Some(source) = db_fixture::prepare("migrated", |database| {
                 let directory = database.parent().unwrap();
                 let config = directory.join("config.toml");
                 std::fs::write(&config, "# isolated fixture producer\n")?;
@@ -127,10 +128,9 @@ impl TestDaemon {
                 db_fixture::finish(&mut command, directory)
             })
             .expect("prepare the run's migrated fixture")
-            {
-                db_fixture::copy_database(&source, &config.palace.path.join("db"))
-                    .expect("copy the private migrated palace");
-            }
+        {
+            db_fixture::copy_database(&source, &config.palace.path.join("db"))
+                .expect("copy the private migrated palace");
         }
 
         let handle = tokio::spawn(memcastle::server::run(config));
