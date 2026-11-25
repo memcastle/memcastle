@@ -25,7 +25,7 @@ pub fn run_cache() -> Option<RunCache> {
     identity.update(run.as_encoded_bytes());
     let root = std::env::temp_dir()
         .join("memcastle-test-fixtures-v2")
-        .join(format!("{:x}", identity.finalize()));
+        .join(cache_key(identity));
     fs::create_dir_all(&root).expect("create the run's temporary database cache");
     Some(RunCache { root })
 }
@@ -45,7 +45,7 @@ pub fn prepare(
     identity.update(executable.as_os_str().as_encoded_bytes());
     identity.update(metadata.len().to_le_bytes());
     identity.update(format!("{:?}", metadata.modified()?));
-    let root = cache.root.join(format!("{:x}", identity.finalize()));
+    let root = cache.root.join(cache_key(identity));
     fs::create_dir_all(&root)?;
     let published = root.join(kind);
     let lock = OpenOptions::new()
@@ -78,6 +78,15 @@ pub fn prepare(
         return Err(io::Error::other("published database fixture is incomplete"));
     }
     Ok(database)
+}
+
+fn cache_key(identity: Sha256) -> String {
+    // SHA-256's fixed-size output does not implement LowerHex in sha2 0.11.
+    identity
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Copy bytes, never writable file inodes or an open datastore.
