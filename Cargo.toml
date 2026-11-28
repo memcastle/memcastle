@@ -226,7 +226,7 @@ dashmap = "6.2.1"
 wasmtime = { version = "50.0.3", default-features = false, features = ["runtime", "cranelift", "component-model", "component-model-async", "async", "std"] }
 # WASI 0.3 is what a `wasm32-wasip3` component imports. Nothing is granted by default: each source and embedding
 # host builds its context from the module's reviewed permissions alone.
-wasmtime-wasi = { version = "50.0.3", default-features = false, features = ["p3"] }
+wasmtime-wasi = { version = "51.0.0", default-features = false, features = ["p3"] }
 # Source manifests state which MemCastle versions they run on (`[compatibility] memcastle = ">=0.3, <0.4"`).
 semver = "1"
 # A source package is a gzip-compressed tarball: `memcastle source package` writes it, `source install` reads it.
