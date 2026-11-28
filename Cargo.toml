@@ -223,7 +223,7 @@ dashmap = "6.2.1"
 # (`tests/source_isolation.rs`). Both hosts use the same WASI 0.3 implementation.
 # `default-features = false` drops the profiler, GC, coredump, debug and cache stacks a source host never uses; what is
 # left is the Cranelift compiler, the component model, and native component async support.
-wasmtime = { version = "50.0.3", default-features = false, features = ["runtime", "cranelift", "component-model", "component-model-async", "async", "std"] }
+wasmtime = { version = "51.0.0", default-features = false, features = ["runtime", "cranelift", "component-model", "component-model-async", "async", "std"] }
 # WASI 0.3 is what a `wasm32-wasip3` component imports. Nothing is granted by default: each source and embedding
 # host builds its context from the module's reviewed permissions alone.
 wasmtime-wasi = { version = "50.0.3", default-features = false, features = ["p3"] }
