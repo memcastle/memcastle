@@ -255,7 +255,7 @@ keyring = "4.2"
 # Source triggers (docs/adr/043): `notify` backs the `watch` trigger (inotify, kqueue, FSEvents, ReadDirectoryChanges),
 # and `hmac` checks the signature a `webhook` trigger's sender puts on a delivery. `hmac` was already in the lockfile
 # through SurrealDB, and shares `sha2`'s digest line.
-notify = "8"
+notify = "9"
 hmac = "0.13"
 # Bounded, ordered source reads let acquisition overlap without reordering durable cursor commits.
 futures = "0.3.34"
